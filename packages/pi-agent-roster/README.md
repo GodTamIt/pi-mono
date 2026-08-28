@@ -1,7 +1,7 @@
 # pi-agent-roster
 
 A Pi extension for primary-agent profiles and subagent orchestration. Version 0.0.0 is
-the Phase 1 compatibility gate: it registers `--roster-name`, `/roster-status`, and the
+the initial compatibility baseline: it registers `--roster-name`, `/roster-status`, and the
 TypeBox-backed `roster_noop` tool without changing user state.
 
 ## Compatibility

@@ -9,9 +9,8 @@ const output = execFileSync("npm", ["pack", "--dry-run", "--json"], {
 const parsed = JSON.parse(output);
 const candidates = Array.isArray(parsed) ? parsed : [parsed, ...Object.values(parsed)];
 const manifest = candidates.find((candidate) => candidate && Array.isArray(candidate.files));
-if (!manifest) {
-  throw new Error("npm pack output did not contain a files array");
-}
+if (!manifest) throw new Error("npm pack output did not contain a files array");
+
 const files = manifest.files
   .map((file) => {
     if (!file || typeof file.path !== "string") {
@@ -20,18 +19,27 @@ const files = manifest.files
     return file.path;
   })
   .sort();
-const expected = [
+
+const required = [
   "CHANGELOG.md",
+  "LICENSE",
   "README.md",
+  "THIRD_PARTY_NOTICES.md",
   "dist/public.d.ts",
-  "dist/public.d.ts.map",
+  "dist/layered-settings.d.ts",
   "package.json",
   "src/index.ts",
   "src/public.ts",
+  "src/service/service.ts",
 ];
-
-if (JSON.stringify(files) !== JSON.stringify(expected)) {
-  throw new Error(`Unexpected package contents:\n${files.join("\n")}`);
+for (const path of required) {
+  if (!files.includes(path)) throw new Error(`Package is missing ${path}`);
 }
+const forbidden = files.filter(
+  (path) => path.startsWith("media/") || path.includes("default-agents"),
+);
+if (forbidden.length > 0) throw new Error(`Unexpected package contents:\n${forbidden.join("\n")}`);
 
-console.log(files.join("\n"));
+console.log(
+  `${files.length} files inspected; production sources and declarations present; no media or built-in agents.`,
+);

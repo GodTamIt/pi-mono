@@ -4,7 +4,9 @@
     "noEmit": true,
     "declaration": false,
     "declarationMap": false,
-    "emitDeclarationOnly": false
+    "emitDeclarationOnly": false,
+    "target": "ES2024",
+    "lib": ["ES2024"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }

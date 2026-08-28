@@ -2,7 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    "target": "ES2024",
+    "lib": ["ES2024"]
   },
-  "include": ["src/public.ts"]
+  "include": ["src/public.ts", "src/layered-settings.ts"]
 }

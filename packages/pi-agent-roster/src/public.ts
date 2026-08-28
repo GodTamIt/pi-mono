@@ -1,3 +1,5 @@
+export * from "./service/service.ts";
+
 export const ROSTER_STATUS_COMMAND = "roster-status";
 export const ROSTER_NAME_FLAG = "roster-name";
 export const ROSTER_NOOP_TOOL = "roster_noop";

@@ -1,9 +1,9 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
 
 const packageDir = fileURLToPath(new URL("../..", import.meta.url));
 const root = mkdtempSync(join(tmpdir(), "pi-agent-roster-smoke-"));
