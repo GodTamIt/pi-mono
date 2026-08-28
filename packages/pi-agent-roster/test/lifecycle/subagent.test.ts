@@ -9,7 +9,7 @@ import type { SubagentSession, TurnLoopResult } from "../../src/lifecycle/subage
 import { SubagentState, type SubagentStateInit } from "../../src/lifecycle/subagent-state.ts";
 import type { Workspace, WorkspaceProvider } from "../../src/lifecycle/workspace.ts";
 import type { AgentInvocation, CompactionInfo, SubagentType } from "../../src/types.ts";
-import { makeStubExecution } from "../helpers/make-subagent.ts";
+import { makeStubExecution, makeStubRuntime } from "../helpers/make-subagent.ts";
 import {
   createMockSession,
   createSubagentSessionStub,
@@ -41,12 +41,13 @@ interface MakeSubagentOptions extends SubagentStateInit {
   description?: string;
   invocation?: AgentInvocation;
   execution?: SubagentExecution;
+  runtime?: ReturnType<typeof makeStubRuntime>;
 }
 
 /** Construct a Subagent with default identity and a stub execution, overridable per test. */
 function makeSubagent(overrides: MakeSubagentOptions = {}): Subagent {
-  const { id, type, description, invocation, execution, ...stateOverrides } = overrides;
-  return new Subagent({
+  const { id, type, description, invocation, execution, runtime, ...stateOverrides } = overrides;
+  const record = new Subagent({
     id: id ?? "1",
     type: type ?? "general-purpose",
     description: description ?? "test",
@@ -54,6 +55,8 @@ function makeSubagent(overrides: MakeSubagentOptions = {}): Subagent {
     execution: execution ?? makeStubExecution(),
     state: Object.keys(stateOverrides).length > 0 ? new SubagentState(stateOverrides) : undefined,
   });
+  record.admit(runtime ?? makeStubRuntime());
+  return record;
 }
 
 /** A Subagent wired to a ready session whose messages hold a single user "hi". */
@@ -392,6 +395,15 @@ describe("Subagent — abort", () => {
     expect(record.status).toBe("stopped");
   });
 
+  it("drops buffered steering when an in-flight child is aborted", async () => {
+    const record = makeSubagent({ status: "running" });
+    await expect(record.steer("stop using the old branch")).resolves.toEqual({ kind: "buffered" });
+    expect(record.pendingSteerCount).toBe(1);
+
+    expect(record.abort()).toBe(true);
+    expect(record.pendingSteerCount).toBe(0);
+  });
+
   it("marks stopped and returns true even without an AbortController", () => {
     const record = makeSubagent({ status: "running" });
     expect(record.abort()).toBe(true);
@@ -414,7 +426,7 @@ function createCompletionAgent(overrides?: { observer?: SubagentLifecycleObserve
   return {
     record: makeSubagent({
       status: "running",
-      execution: makeStubExecution({ observer: overrides?.observer }),
+      runtime: makeStubRuntime({ observer: overrides?.observer }),
     }),
   };
 }
@@ -478,7 +490,7 @@ describe("Subagent — stopQueued", () => {
   function createQueuedAgent(observer?: SubagentLifecycleObserver) {
     return makeSubagent({
       status: "queued",
-      execution: makeStubExecution({ observer }),
+      runtime: makeStubRuntime({ observer }),
     });
   }
 
@@ -641,23 +653,28 @@ function createRunnableAgent(overrides?: {
 }) {
   const createSubagentSession = overrides?.createSubagentSession ?? defaultFactory();
   const observer = overrides?.observer ?? {};
-  const provider = overrides?.workspaceProvider;
-  return new Subagent({
+  const agent = new Subagent({
     id: "run-1",
     type: "general-purpose",
     description: "run test",
     execution: {
-      createSubagentSession,
-      observer,
-      snapshot: STUB_SNAPSHOT,
-      prompt: "do something",
-      getRunConfig: overrides?.getRunConfig,
+      baseline: STUB_SNAPSHOT,
+      task: "do something",
       parentSession: overrides?.parentSession,
-      signal: overrides?.signal,
       baseCwd: overrides?.baseCwd ?? "/base",
-      getWorkspaceProvider: provider ? () => provider : undefined,
+      isBackground: false,
     },
   });
+  agent.admit(
+    makeStubRuntime({
+      createSubagentSession,
+      observer,
+      runConfig: overrides?.getRunConfig?.(),
+      signal: overrides?.signal,
+      workspaceProvider: overrides?.workspaceProvider,
+    }),
+  );
+  return agent;
 }
 
 /** Build a Workspace with a recorded dispose. */
@@ -871,97 +888,20 @@ describe("Subagent.start() — promise encapsulation", () => {
   });
 });
 
-describe("Subagent.scheduleVia() — eager promise capture", () => {
-  it("exposes the scheduler promise before the run starts (queued-awaitable)", async () => {
-    const agent = makeSubagent({ status: "queued" });
-    const { promise: gate, resolve: openSlot } = Promise.withResolvers<void>(); // eslint-disable-line @typescript-eslint/no-invalid-void-type -- Promise.withResolvers<void> is valid; rule does not allow void in generic fn call type args
-    agent.scheduleVia(async (thunk) => {
-      await gate;
-      await thunk();
-    });
-    // Promise is captured at schedule time — before the slot opens.
-    expect(agent.promise).toBeInstanceOf(Promise);
-    expect(agent.status).toBe("queued");
-    openSlot();
-    await agent.promise;
-    expect(agent.status).toBe("completed");
-  });
-
-  it("runs guardedRun as the thunk — abort-while-queued is a no-op", async () => {
-    const agent = makeSubagent({ status: "queued" });
-    let thunkRan = false;
-    // Abort before the slot opens, then fire the thunk.
-    agent.markStopped();
-    agent.scheduleVia(async (thunk) => {
-      thunkRan = true;
-      await thunk();
-    });
-    await agent.promise;
-    expect(thunkRan).toBe(true);
-    expect(agent.status).toBe("stopped");
-  });
-});
-
 describe("Subagent.waitUntilSettled()", () => {
-  it("resolves immediately for an agent that has no run handle", async () => {
+  it("resolves immediately without a manager-owned run handle", async () => {
     const agent = makeSubagent({ status: "queued" });
     await expect(agent.waitUntilSettled(new AbortController().signal)).resolves.toBeUndefined();
   });
 
-  it("resolves immediately for an agent that already left the active set", async () => {
-    const agent = makeSubagent({
-      status: "completed",
-      result: "done",
-      startedAt: 1,
-      completedAt: 2,
-    });
-    agent.start();
-    await agent.promise;
-    await expect(agent.waitUntilSettled(new AbortController().signal)).resolves.toBeUndefined();
-  });
-
-  it("spans the queue slot and the run that follows it", async () => {
+  it("ends a wait on interrupt without cancelling work", async () => {
     const agent = makeSubagent({ status: "queued" });
-    const { promise: gate, resolve: openSlot } = Promise.withResolvers<void>(); // eslint-disable-line @typescript-eslint/no-invalid-void-type -- Promise.withResolvers<void> is valid; rule does not allow void in generic fn call type args
-    agent.scheduleVia(async (thunk) => {
-      await gate;
-      await thunk();
-    });
-
-    const wait = agent.waitUntilSettled(new AbortController().signal);
-    openSlot();
-    await wait;
-
-    expect(agent.status).toBe("completed");
-  });
-
-  it("ends the wait on interrupt without cancelling the agent", async () => {
-    const agent = makeSubagent({ status: "queued" });
-    const { promise: gate, resolve: openSlot } = Promise.withResolvers<void>(); // eslint-disable-line @typescript-eslint/no-invalid-void-type -- Promise.withResolvers<void> is valid; rule does not allow void in generic fn call type args
-    agent.scheduleVia(async (thunk) => {
-      await gate;
-      await thunk();
-    });
+    const pending = new Promise<void>(() => {});
+    agent.setQueuedPromise(pending);
     const controller = new AbortController();
-
     const wait = agent.waitUntilSettled(controller.signal);
     controller.abort();
     await wait;
-
-    // Interrupting the query must not cancel the work: the agent is still
-    // queued and still runs once its slot opens.
-    expect(agent.status).toBe("queued");
-    openSlot();
-    await agent.promise;
-    expect(agent.status).toBe("completed");
-  });
-
-  it("returns immediately when the signal is already aborted", async () => {
-    const agent = makeSubagent({ status: "queued" });
-    agent.scheduleVia(() => new Promise<never>(() => {}));
-
-    await agent.waitUntilSettled(AbortSignal.abort());
-
     expect(agent.status).toBe("queued");
   });
 });
@@ -980,9 +920,10 @@ function createResumableAgent(overrides?: {
     id: "resume-1",
     type: "general-purpose",
     description: "resume test",
-    execution: makeStubExecution({ observer: overrides?.observer ?? {} }),
+    execution: makeStubExecution(),
     state: new SubagentState({ status: "completed", result: "first" }),
   });
+  agent.admit(makeStubRuntime({ observer: overrides?.observer ?? {} }));
   agent.subagentSession = toSubagentSession(stub);
   return { agent, session, stub };
 }
@@ -1001,13 +942,137 @@ describe("Subagent.resume() — happy path", () => {
     await agent.resume("continue", signal);
     expect(stub.resumeTurnLoop).toHaveBeenCalledOnce();
     expect(stub.resumeTurnLoop.mock.calls[0]![0]).toBe("continue");
-    expect(stub.resumeTurnLoop.mock.calls[0]![1]).toBe(signal);
+    expect(stub.resumeTurnLoop.mock.calls[0]![1]).toMatchObject({ signal });
   });
 
   it("resets transition state before resuming", async () => {
     const { agent } = createResumableAgent();
     await agent.resume("continue");
     expect(agent.error).toBeUndefined();
+  });
+
+  it("reserves the record and forwards its abort while a resume is in flight", async () => {
+    const { agent, stub } = createResumableAgent();
+    const gate = Promise.withResolvers<string>(); // eslint-disable-line @typescript-eslint/no-invalid-void-type -- valid test gate
+    let resumeSignal: AbortSignal | undefined;
+    stub.resumeTurnLoop.mockImplementation(async (_task, opts) => {
+      resumeSignal = opts.signal;
+      return gate.promise;
+    });
+
+    const resuming = agent.resume("continue");
+    expect(agent.status).toBe("running");
+    await expect(agent.resume("second resume")).rejects.toThrow(/already running/);
+
+    expect(agent.abort()).toBe(true);
+    expect(resumeSignal?.aborted).toBe(true);
+    gate.resolve("stopped result");
+    await resuming;
+    expect(agent.status).toBe("stopped");
+  });
+
+  it.each(["live", "released"] as const)(
+    "reconstructs a %s provider-backed session in a fresh workspace",
+    async (sessionState) => {
+      const initial = createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl");
+      const restored = createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl");
+      const stubs = [initial, restored];
+      const factory: SessionFactory = vi.fn(async () => {
+        const stub = stubs.shift();
+        if (!stub) throw new Error("Unexpected child session reconstruction");
+        return toSubagentSession(stub);
+      });
+      const oldWorkspace = makeWorkspace("/worktrees/old");
+      const resumedWorkspace = makeWorkspace("/worktrees/resumed", {
+        resultAddendum: "\nworkspace saved",
+      });
+      const workspaces = [oldWorkspace, resumedWorkspace];
+      const provider: WorkspaceProvider = {
+        prepare: vi.fn(async () => workspaces.shift()),
+      };
+      const onSessionCreated = vi.fn();
+      const agent = createRunnableAgent({
+        createSubagentSession: factory,
+        workspaceProvider: provider,
+        observer: { onSessionCreated },
+      });
+
+      await agent.run();
+      if (sessionState === "released") await agent.releaseSession();
+      await agent.resume("continue");
+
+      expect(provider.prepare).toHaveBeenCalledTimes(2);
+      expect(provider.prepare).toHaveBeenLastCalledWith({
+        agentId: "run-1",
+        agentType: "general-purpose",
+        baseCwd: "/base",
+        invocation: undefined,
+      });
+      expect(factory).toHaveBeenCalledTimes(2);
+      expect(onSessionCreated).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(factory).mock.calls[1]![0]).toMatchObject({
+        cwd: "/worktrees/resumed",
+        resumeTranscriptPath: "/sessions/child.jsonl",
+      });
+      expect(initial.dispose).toHaveBeenCalledOnce();
+      expect(oldWorkspace.dispose).toHaveBeenCalledOnce();
+      expect(resumedWorkspace.dispose).toHaveBeenCalledExactlyOnceWith({
+        status: "completed",
+        description: "run test",
+      });
+      expect(agent.result).toBe("resumed\nworkspace saved");
+    },
+  );
+
+  it("prepares a new provider workspace for every resume", async () => {
+    const stubs = [
+      createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl"),
+      createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl"),
+      createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl"),
+    ];
+    const factory: SessionFactory = vi.fn(async () => toSubagentSession(stubs.shift()!));
+    const preparedWorkspaces = [
+      makeWorkspace("/ws/one"),
+      makeWorkspace("/ws/two"),
+      makeWorkspace("/ws/three"),
+    ];
+    const pendingWorkspaces = [...preparedWorkspaces];
+    const provider: WorkspaceProvider = { prepare: vi.fn(async () => pendingWorkspaces.shift()) };
+    const agent = createRunnableAgent({
+      createSubagentSession: factory,
+      workspaceProvider: provider,
+    });
+
+    await agent.run();
+    await agent.resume("second");
+    await agent.resume("third");
+
+    expect(provider.prepare).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(factory).mock.calls.map(([params]) => params.cwd)).toEqual([
+      "/ws/one",
+      "/ws/two",
+      "/ws/three",
+    ]);
+    for (const workspace of preparedWorkspaces) expect(workspace.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("reconstructs a released no-provider session from the baseline cwd", async () => {
+    const initial = createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl");
+    const restored = createSubagentSessionStub();
+    const factory: SessionFactory = vi
+      .fn()
+      .mockResolvedValueOnce(toSubagentSession(initial))
+      .mockResolvedValueOnce(toSubagentSession(restored));
+    const agent = createRunnableAgent({ createSubagentSession: factory });
+
+    await agent.run();
+    await agent.releaseSession();
+    await agent.resume("continue");
+
+    expect(vi.mocked(factory).mock.calls[1]![0]).toMatchObject({
+      cwd: STUB_SNAPSHOT.cwd,
+      resumeTranscriptPath: "/sessions/child.jsonl",
+    });
   });
 });
 
@@ -1076,6 +1141,26 @@ describe("Subagent.resume() — observer lifecycle", () => {
 });
 
 describe("Subagent.resume() — error handling", () => {
+  it("reuses a live no-provider session without constructing another one", async () => {
+    const stub = createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl");
+    const factory: SessionFactory = vi.fn();
+    const agent = new Subagent({
+      id: "resume-live",
+      type: "general-purpose",
+      description: "resume live",
+      execution: makeStubExecution(),
+      state: new SubagentState({ status: "completed", result: "first" }),
+    });
+    agent.admit(makeStubRuntime({ createSubagentSession: factory }));
+    agent.subagentSession = toSubagentSession(stub);
+
+    await agent.resume("more");
+
+    expect(factory).not.toHaveBeenCalled();
+    expect(stub.dispose).not.toHaveBeenCalled();
+    expect(stub.resumeTurnLoop).toHaveBeenCalledOnce();
+  });
+
   it("transitions to error without throwing when resumeTurnLoop rejects", async () => {
     const stub = createSubagentSessionStub();
     stub.resumeTurnLoop.mockRejectedValue(new Error("resume exploded"));
@@ -1093,6 +1178,201 @@ describe("Subagent.resume() — error handling", () => {
     await agent.resume("more");
     session.emit({ type: "tool_execution_end" });
     expect(agent.toolUses).toBe(0);
+  });
+
+  it("disposes an errored resume workspace once and appends its addendum", async () => {
+    const initial = createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl");
+    const resumed = createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl");
+    resumed.resumeTurnLoop.mockRejectedValue(new Error("resume exploded"));
+    const factory: SessionFactory = vi
+      .fn()
+      .mockResolvedValueOnce(toSubagentSession(initial))
+      .mockResolvedValueOnce(toSubagentSession(resumed));
+    const oldWorkspace = makeWorkspace("/ws/old");
+    const errorWorkspace = makeWorkspace("/ws/error", { resultAddendum: "\nworkspace retained" });
+    const pending = [oldWorkspace, errorWorkspace];
+    const provider: WorkspaceProvider = { prepare: vi.fn(async () => pending.shift()) };
+    const agent = createRunnableAgent({
+      createSubagentSession: factory,
+      workspaceProvider: provider,
+    });
+
+    await agent.run();
+    await agent.resume("more");
+
+    expect(agent.status).toBe("error");
+    expect(agent.error).toBe("resume exploded\nworkspace retained");
+    expect(errorWorkspace.dispose).toHaveBeenCalledExactlyOnceWith({
+      status: "error",
+      description: "run test",
+    });
+  });
+
+  it("keeps the transcript recoverable when fresh workspace preparation fails", async () => {
+    const initial = createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl");
+    const restored = createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl");
+    const factory: SessionFactory = vi
+      .fn()
+      .mockResolvedValueOnce(toSubagentSession(initial))
+      .mockResolvedValueOnce(toSubagentSession(restored));
+    const initialWorkspace = makeWorkspace("/ws/initial");
+    const retryWorkspace = makeWorkspace("/ws/retry");
+    const provider: WorkspaceProvider = {
+      prepare: vi
+        .fn()
+        .mockResolvedValueOnce(initialWorkspace)
+        .mockRejectedValueOnce(new Error("prepare failed"))
+        .mockResolvedValueOnce(retryWorkspace),
+    };
+    const agent = createRunnableAgent({
+      createSubagentSession: factory,
+      workspaceProvider: provider,
+    });
+
+    await agent.run();
+    await agent.resume("fails before create");
+    expect(agent.status).toBe("error");
+    expect(agent.outputFile).toBe("/sessions/child.jsonl");
+    expect(factory).toHaveBeenCalledOnce();
+    expect(initial.dispose).toHaveBeenCalledOnce();
+
+    await agent.resume("retry");
+    expect(agent.status).toBe("completed");
+    expect(vi.mocked(factory).mock.calls[1]![0]).toMatchObject({
+      cwd: "/ws/retry",
+      resumeTranscriptPath: "/sessions/child.jsonl",
+    });
+    expect(retryWorkspace.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("disposes after creation failure once and leaves the transcript recoverable", async () => {
+    const initial = createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl");
+    const factory: SessionFactory = vi
+      .fn()
+      .mockResolvedValueOnce(toSubagentSession(initial))
+      .mockRejectedValueOnce(new Error("creation failed"));
+    const initialWorkspace = makeWorkspace("/ws/initial");
+    const failedWorkspace = makeWorkspace("/ws/failed", { resultAddendum: "\nworkspace retained" });
+    const pending = [initialWorkspace, failedWorkspace];
+    const provider: WorkspaceProvider = { prepare: vi.fn(async () => pending.shift()) };
+    const agent = createRunnableAgent({
+      createSubagentSession: factory,
+      workspaceProvider: provider,
+    });
+
+    await agent.run();
+    await agent.resume("fails during create");
+
+    expect(agent.status).toBe("error");
+    expect(agent.error).toBe("creation failed\nworkspace retained");
+    expect(agent.outputFile).toBe("/sessions/child.jsonl");
+    expect(agent.sessionReleased).toBe(true);
+    expect(failedWorkspace.dispose).toHaveBeenCalledExactlyOnceWith({
+      status: "error",
+      description: "run test",
+    });
+  });
+
+  it("disposes an aborted resume workspace once and includes its addendum", async () => {
+    const initial = createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl");
+    const resumed = createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl");
+    const gate = Promise.withResolvers<string>(); // eslint-disable-line @typescript-eslint/no-invalid-void-type -- valid test gate
+    resumed.resumeTurnLoop.mockReturnValue(gate.promise);
+    const factory: SessionFactory = vi
+      .fn()
+      .mockResolvedValueOnce(toSubagentSession(initial))
+      .mockResolvedValueOnce(toSubagentSession(resumed));
+    const initialWorkspace = makeWorkspace("/ws/initial");
+    const abortedWorkspace = makeWorkspace("/ws/aborted", {
+      resultAddendum: "\nworkspace retained",
+    });
+    const pending = [initialWorkspace, abortedWorkspace];
+    const provider: WorkspaceProvider = { prepare: vi.fn(async () => pending.shift()) };
+    const agent = createRunnableAgent({
+      createSubagentSession: factory,
+      workspaceProvider: provider,
+    });
+
+    await agent.run();
+    const resuming = agent.resume("abort me");
+    await vi.waitFor(() => expect(resumed.resumeTurnLoop).toHaveBeenCalledOnce());
+    expect(agent.abort()).toBe(true);
+    gate.resolve("partial result");
+    await resuming;
+
+    expect(agent.status).toBe("stopped");
+    expect(agent.result).toBe("partial result\nworkspace retained");
+    expect(abortedWorkspace.dispose).toHaveBeenCalledExactlyOnceWith({
+      status: "stopped",
+      description: "run test",
+    });
+  });
+
+  it("disposes a prepared resume workspace without creating a session when aborted", async () => {
+    const initial = createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl");
+    const factory: SessionFactory = vi.fn().mockResolvedValue(toSubagentSession(initial));
+    const initialWorkspace = makeWorkspace("/ws/initial");
+    const preparation = Promise.withResolvers<Workspace | undefined>(); // eslint-disable-line @typescript-eslint/no-invalid-void-type -- valid test gate
+    const abortedWorkspace = makeWorkspace("/ws/aborted", {
+      resultAddendum: "\nworkspace retained",
+    });
+    const provider: WorkspaceProvider = {
+      prepare: vi
+        .fn()
+        .mockResolvedValueOnce(initialWorkspace)
+        .mockReturnValueOnce(preparation.promise),
+    };
+    const agent = createRunnableAgent({
+      createSubagentSession: factory,
+      workspaceProvider: provider,
+    });
+
+    await agent.run();
+    const resuming = agent.resume("abort during prepare");
+    await vi.waitFor(() => expect(provider.prepare).toHaveBeenCalledTimes(2));
+    expect(agent.abort()).toBe(true);
+    preparation.resolve(abortedWorkspace);
+    await resuming;
+
+    expect(factory).toHaveBeenCalledOnce();
+    expect(agent.status).toBe("stopped");
+    expect(agent.result).toBe("\nworkspace retained");
+    expect(abortedWorkspace.dispose).toHaveBeenCalledExactlyOnceWith({
+      status: "stopped",
+      description: "run test",
+    });
+  });
+
+  it("releases a reconstructed session when aborted during creation", async () => {
+    const initial = createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl");
+    const resumed = createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl");
+    const creation = Promise.withResolvers<SubagentSession>(); // eslint-disable-line @typescript-eslint/no-invalid-void-type -- valid test gate
+    const factory: SessionFactory = vi
+      .fn()
+      .mockResolvedValueOnce(toSubagentSession(initial))
+      .mockReturnValueOnce(creation.promise);
+    const initialWorkspace = makeWorkspace("/ws/initial");
+    const abortedWorkspace = makeWorkspace("/ws/aborted");
+    const pending = [initialWorkspace, abortedWorkspace];
+    const provider: WorkspaceProvider = { prepare: vi.fn(async () => pending.shift()) };
+    const agent = createRunnableAgent({
+      createSubagentSession: factory,
+      workspaceProvider: provider,
+    });
+
+    await agent.run();
+    const resuming = agent.resume("abort during create");
+    await vi.waitFor(() => expect(factory).toHaveBeenCalledTimes(2));
+    expect(agent.abort()).toBe(true);
+    creation.resolve(toSubagentSession(resumed));
+    await resuming;
+
+    expect(agent.status).toBe("stopped");
+    expect(resumed.dispose).toHaveBeenCalledOnce();
+    expect(abortedWorkspace.dispose).toHaveBeenCalledExactlyOnceWith({
+      status: "stopped",
+      description: "run test",
+    });
   });
 
   it("throws when no session exists", async () => {

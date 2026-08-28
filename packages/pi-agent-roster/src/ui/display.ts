@@ -146,10 +146,11 @@ export function buildInvocationTags(invocation: AgentInvocation | undefined): {
 } {
   const tags: string[] = [];
   if (!invocation) return { tags };
+  if (invocation.stack) tags.push(`stack: ${invocation.stack}`);
   if (invocation.thinking) tags.push(`thinking: ${invocation.thinking}`);
-  if (invocation.inheritContext) tags.push("inherit context");
   if (invocation.runInBackground) tags.push("background");
-  if (invocation.maxTurns != null) tags.push(`max turns: ${invocation.maxTurns}`);
+  tags.push(`max turns: ${invocation.maxTurns ?? "unlimited"}`);
+  tags.push(`grace turns: ${invocation.graceTurns ?? "unlimited"}`);
   return { modelName: invocation.modelName, tags };
 }
 

@@ -26,7 +26,7 @@ function makeEvents(): SteerToolEvents {
 async function execute(
   manager: SteerToolManager,
   events: SteerToolEvents,
-  params: { agent_id: string; message: string },
+  params: { agent_id: string; steering: string },
 ) {
   const tool = new SteerTool(manager, events);
   return tool.execute("tc-1", params, new AbortController().signal, undefined, STUB_CTX);
@@ -48,7 +48,7 @@ describe("SteerTool", () => {
   it("returns not-found message for unknown agent ID without claiming cleanup", async () => {
     const result = await execute(makeManager(), makeEvents(), {
       agent_id: "unknown",
-      message: "hi",
+      steering: "hi",
     });
     expect(result.content[0]!.text).toContain("Agent not found");
     expect(result.content[0]!.text).not.toContain("cleaned up");
@@ -58,7 +58,7 @@ describe("SteerTool", () => {
     const records = new Map([["agent-1", createTestSubagent({ status: "completed" })]]);
     const result = await execute(makeManager(records), makeEvents(), {
       agent_id: "agent-1",
-      message: "hi",
+      steering: "hi",
     });
     expect(result.content[0]!.text).toContain("not running");
     expect(result.content[0]!.text).toContain("completed");
@@ -70,12 +70,12 @@ describe("SteerTool", () => {
     const records = new Map([["agent-1", record]]);
     const manager = makeManager(records);
     const events = makeEvents();
-    const result = await execute(manager, events, { agent_id: "agent-1", message: "redirect" });
+    const result = await execute(manager, events, { agent_id: "agent-1", steering: "redirect" });
     expect(result.content[0]!.text).toContain("queued");
     expect(record.pendingSteerCount).toBe(1);
     expect(events.emit).toHaveBeenCalledWith("subagents:steered", {
       id: "agent-1",
-      message: "redirect",
+      steering: "redirect",
     });
   });
 
@@ -88,12 +88,12 @@ describe("SteerTool", () => {
     const events = makeEvents();
     const result = await execute(manager, events, {
       agent_id: "agent-1",
-      message: "change design",
+      steering: "change design",
     });
     expect(mockSession.steer).toHaveBeenCalledWith("change design");
     expect(events.emit).toHaveBeenCalledWith("subagents:steered", {
       id: "agent-1",
-      message: "change design",
+      steering: "change design",
     });
     expect(result.content[0]!.text).toContain("Steering message sent");
     expect(result.content[0]!.text).toContain("3 tool uses");
@@ -107,7 +107,7 @@ describe("SteerTool", () => {
     const records = new Map([["agent-1", record]]);
     const result = await execute(makeManager(records), makeEvents(), {
       agent_id: "agent-1",
-      message: "hi",
+      steering: "hi",
     });
     expect(result.content[0]!.text).toContain("Failed to steer agent");
     expect(result.content[0]!.text).toContain("session closed");

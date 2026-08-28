@@ -69,7 +69,9 @@ describe("createToolDeps", () => {
     });
 
     it("replaces settings when overridden", () => {
-      const deps = createToolDeps({ settings: { defaultMaxTurns: 10, maxConcurrent: 2 } });
+      const deps = createToolDeps({
+        settings: { defaultMaxTurns: 10, graceTurns: undefined, maxConcurrent: 2 },
+      });
       expect(deps.settings.defaultMaxTurns).toBe(10);
       expect(deps.settings.maxConcurrent).toBe(2);
     });

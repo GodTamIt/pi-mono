@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import type { Model } from "@earendil-works/pi-ai";
 import { debugLog } from "../debug.ts";
 import type { RunConfig } from "../runtime.ts";
+import type { ModelRegistry } from "../session/model-resolver.ts";
 import type {
   AgentInvocation,
   CompactionInfo,
@@ -17,10 +18,14 @@ import type {
   SubagentType,
   ThinkingLevel,
 } from "../types.ts";
+import { type ChildRuntimeBaseline, modelIdentity } from "./child-runtime-baseline.ts";
 import type { ConcurrencyLimiter } from "./concurrency-limiter.ts";
 import type { CreateSubagentSessionParams } from "./create-subagent-session.ts";
-import type { ParentSnapshot } from "./parent-snapshot.ts";
-import { Subagent, type SubagentLifecycleObserver } from "./subagent.ts";
+import {
+  type AdmittedSubagentRuntime,
+  Subagent,
+  type SubagentLifecycleObserver,
+} from "./subagent.ts";
 import type { SubagentSession } from "./subagent-session.ts";
 import { SubagentState } from "./subagent-state.ts";
 import type { WorkspaceProvider } from "./workspace.ts";
@@ -38,6 +43,11 @@ export interface RetentionPolicy {
 const DEFAULT_RETENTION_POLICY: RetentionPolicy = {
   consumedSessionRetentionMinutes: 10,
   unconsumedSessionRetentionMinutes: 720,
+};
+
+const EMPTY_MODEL_REGISTRY: ModelRegistry = {
+  find: () => undefined,
+  getAll: () => [],
 };
 
 /** Observer interface for agent lifecycle notifications. */
@@ -58,6 +68,9 @@ export interface SubagentManagerOptions {
   limiter: ConcurrencyLimiter;
   /** Base working directory handed to a workspace provider (the parent cwd). */
   baseCwd: string;
+  /** Live SDK model values, read only after admission. */
+  getModelRegistry?: (() => ModelRegistry) | undefined;
+  getDefaultModel?: (() => Model<any> | undefined) | undefined;
   getRunConfig?: (() => RunConfig) | undefined;
   /** Live accessor for the session-retention windows; defaults applied when absent. */
   getRetentionPolicy?: (() => RetentionPolicy) | undefined;
@@ -68,7 +81,7 @@ export interface AgentSpawnConfig {
   description: string;
   model?: Model<any> | undefined;
   maxTurns?: number | undefined;
-  inheritContext?: boolean | undefined;
+  graceTurns?: number | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
   isBackground?: boolean | undefined;
   /**
@@ -96,6 +109,8 @@ export class SubagentManager {
   ) => Promise<SubagentSession>;
   private readonly limiter: ConcurrencyLimiter;
   private readonly baseCwd: string;
+  private readonly getModelRegistry?: (() => ModelRegistry) | undefined;
+  private readonly getDefaultModel?: (() => Model<any> | undefined) | undefined;
   private getRunConfig: (() => RunConfig) | undefined;
   private getRetentionPolicy: (() => RetentionPolicy) | undefined;
   private _workspaceProvider?: WorkspaceProvider | undefined;
@@ -109,6 +124,8 @@ export class SubagentManager {
     this.createSubagentSession = options.createSubagentSession;
     this.limiter = options.limiter;
     this.baseCwd = options.baseCwd;
+    this.getModelRegistry = options.getModelRegistry;
+    this.getDefaultModel = options.getDefaultModel;
     this.observer = options.observer;
     this.getRunConfig = options.getRunConfig;
     this.getRetentionPolicy = options.getRetentionPolicy;
@@ -135,16 +152,19 @@ export class SubagentManager {
   }
 
   /** Compose a per-agent lifecycle observer from manager and spawn-config concerns. */
-  private buildObserver(options: AgentSpawnConfig): SubagentLifecycleObserver {
+  private buildObserver(
+    isBackground: boolean,
+    foregroundObserver?: SubagentLifecycleObserver,
+  ): SubagentLifecycleObserver {
     return {
       onStarted: (agent) => {
         this.observer?.onSubagentStarted(agent);
       },
-      ...(options.observer?.onSessionCreated
-        ? { onSessionCreated: (agent: Subagent) => options.observer!.onSessionCreated!(agent) }
+      ...(foregroundObserver?.onSessionCreated
+        ? { onSessionCreated: (agent: Subagent) => foregroundObserver.onSessionCreated?.(agent) }
         : {}),
       onRunFinished: (agent) => {
-        if (options.isBackground) {
+        if (isBackground) {
           try {
             this.observer?.onSubagentCompleted(agent);
           } catch (err) {
@@ -153,7 +173,7 @@ export class SubagentManager {
         }
       },
       onResumeFinished: (agent) => {
-        if (options.isBackground) {
+        if (isBackground) {
           try {
             this.observer?.onSubagentResumed(agent);
           } catch (err) {
@@ -172,9 +192,9 @@ export class SubagentManager {
    * If the concurrency limit is reached, the agent is queued.
    */
   spawn(
-    snapshot: ParentSnapshot,
+    baseline: ChildRuntimeBaseline,
     type: SubagentType,
-    prompt: string,
+    task: string,
     options: AgentSpawnConfig,
   ): string {
     const id = randomUUID().slice(0, 17);
@@ -182,24 +202,30 @@ export class SubagentManager {
       id,
       type,
       description: options.description,
-      invocation: options.invocation,
+      invocation: options.invocation ? { ...options.invocation } : undefined,
       state: new SubagentState({
         status: options.isBackground ? "queued" : "running",
         startedAt: Date.now(),
       }),
       execution: {
-        createSubagentSession: this.createSubagentSession,
-        snapshot,
-        prompt,
+        baseline: {
+          cwd: baseline.cwd,
+          model: baseline.model && { ...baseline.model },
+        },
+        task,
         baseCwd: this.baseCwd,
-        observer: this.buildObserver(options),
-        getRunConfig: this.getRunConfig,
-        getWorkspaceProvider: () => this._workspaceProvider,
-        model: options.model,
+        model: modelIdentity(options.model),
         maxTurns: options.maxTurns,
+        graceTurns: options.graceTurns,
         thinkingLevel: options.thinkingLevel,
-        parentSession: options.parentSession,
-        signal: options.signal,
+        parentSession: options.parentSession
+          ? {
+              parentSessionFile: options.parentSession.parentSessionFile,
+              parentSessionId: options.parentSession.parentSessionId,
+              toolCallId: options.parentSession.toolCallId,
+            }
+          : undefined,
+        isBackground: options.isBackground === true,
       },
     });
     this.agents.set(id, record);
@@ -209,15 +235,62 @@ export class SubagentManager {
     }
 
     if (options.isBackground && !options.bypassQueue) {
-      // Schedule on the limiter — scheduleVia captures the limiter promise
-      // eagerly, so a queued agent is awaitable from spawn; guardedRun guards
-      // against abort-while-queued when the slot frees.
-      record.scheduleVia((thunk) => this.limiter.schedule(thunk));
+      record.setQueuedPromise(this.limiter.schedule(id));
+      this.runAdmissions();
       return id;
     }
 
-    record.start();
+    record.start(this.buildAdmittedRuntime(record, options.signal, options.observer));
     return id;
+  }
+
+  private buildAdmittedRuntime(
+    record: Subagent,
+    signal?: AbortSignal,
+    foregroundObserver?: SubagentLifecycleObserver,
+  ): AdmittedSubagentRuntime {
+    const modelRegistry = this.getModelRegistry?.() ?? EMPTY_MODEL_REGISTRY;
+    const defaultIdentity = record.execution.baseline.model;
+    const selectedIdentity = record.execution.model;
+    return {
+      createSubagentSession: this.createSubagentSession,
+      modelRegistry,
+      defaultModel: defaultIdentity
+        ? modelRegistry.find(defaultIdentity.provider, defaultIdentity.id)
+        : this.getDefaultModel?.(),
+      model: selectedIdentity
+        ? modelRegistry.find(selectedIdentity.provider, selectedIdentity.id)
+        : undefined,
+      observer: this.buildObserver(record.execution.isBackground, foregroundObserver),
+      runConfig: this.getRunConfig?.(),
+      workspaceProvider: this._workspaceProvider,
+      signal,
+    };
+  }
+
+  /** Single manager-level runner for every limiter admission. */
+  private runAdmissions(): void {
+    for (const id of this.limiter.admit()) void this.runAdmitted(id);
+  }
+
+  private async runAdmitted(id: string): Promise<void> {
+    const record = this.agents.get(id);
+    try {
+      if (record?.status === "queued") {
+        record.admit(this.buildAdmittedRuntime(record));
+        await record.run();
+      }
+      this.limiter.settle(id);
+    } catch (err) {
+      this.limiter.settle(id, err);
+    } finally {
+      this.runAdmissions();
+    }
+  }
+
+  /** Re-read the dynamic limit and admit any newly available IDs. */
+  recheckAdmissions(): void {
+    this.runAdmissions();
   }
 
   /**
@@ -225,12 +298,12 @@ export class SubagentManager {
    * Foreground agents bypass the concurrency queue.
    */
   async spawnAndWait(
-    snapshot: ParentSnapshot,
+    baseline: ChildRuntimeBaseline,
     type: SubagentType,
-    prompt: string,
+    task: string,
     options: Omit<AgentSpawnConfig, "isBackground">,
   ): Promise<Subagent> {
-    const id = this.spawn(snapshot, type, prompt, { ...options, isBackground: false });
+    const id = this.spawn(baseline, type, task, { ...options, isBackground: false });
     const record = this.agents.get(id)!;
     await record.promise;
     return record;
@@ -242,12 +315,15 @@ export class SubagentManager {
    */
   async resume(
     id: string,
-    prompt: string,
+    task: string,
     signal?: AbortSignal | undefined,
+    budgets?: { maxTurns?: number | undefined; graceTurns?: number | undefined },
   ): Promise<Subagent | undefined> {
     const agent = this.agents.get(id);
-    if (!agent?.isSessionReady()) return undefined;
-    await agent.resume(prompt, signal);
+    if (!agent || agent.isActive() || (!agent.isSessionReady() && !agent.sessionReleased)) {
+      return undefined;
+    }
+    await agent.resume(task, signal, budgets);
     return agent;
   }
 
@@ -268,6 +344,9 @@ export class SubagentManager {
     // guard) when its slot finally opens.
     if (record.status === "queued") {
       record.stopQueued();
+      this.limiter.cancel(id);
+      this.notifyQueuedStopped(record);
+      this.runAdmissions();
       return true;
     }
 
@@ -328,12 +407,22 @@ export class SubagentManager {
     return [...this.agents.values()].some((r) => r.isActive());
   }
 
+  private notifyQueuedStopped(record: Subagent): void {
+    try {
+      this.observer?.onSubagentCompleted(record);
+    } catch (err) {
+      debugLog("onSubagentCompleted observer", err);
+    }
+  }
+
   /** Abort all running and queued agents immediately. */
   abortAll(): number {
     let count = 0;
     for (const record of this.agents.values()) {
       if (record.status === "queued") {
         record.stopQueued();
+        this.limiter.cancel(record.id);
+        this.notifyQueuedStopped(record);
         count++;
       } else if (record.abort()) {
         count++;

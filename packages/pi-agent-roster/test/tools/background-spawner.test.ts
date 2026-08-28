@@ -23,7 +23,7 @@ function makeConfig(overrides: Parameters<typeof createResolvedSpawnConfig>[0] =
 function makeParams(overrides: Partial<BackgroundParams> = {}): BackgroundParams {
   return {
     config: makeConfig(),
-    snapshot: STUB_SNAPSHOT,
+    baseline: STUB_SNAPSHOT,
     parentSession: {
       parentSessionFile: "/sessions/parent.jsonl",
       parentSessionId: "session-1",

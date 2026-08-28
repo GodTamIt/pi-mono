@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -12,11 +13,23 @@ const cliDir = join(root, "cli");
 const packageInstallDir = join(root, "pi-home", "npm", "roster");
 const agentDir = join(root, "pi-home", "agent");
 const workDir = join(root, "work");
-const npmArgs = ["--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock"];
+const childWorkDir = join(root, "child-work");
+const parentSessionDir = join(root, "parent-sessions");
+const observerDir = join(root, "observer");
+const npmArgs = ["--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock"];
 let child;
 
 try {
-  for (const directory of [packDir, cliDir, packageInstallDir, agentDir, workDir]) {
+  for (const directory of [
+    packDir,
+    cliDir,
+    packageInstallDir,
+    agentDir,
+    workDir,
+    childWorkDir,
+    parentSessionDir,
+    observerDir,
+  ]) {
     mkdirSync(directory, { recursive: true });
   }
 
@@ -37,10 +50,19 @@ try {
   const tarball = join(packDir, packed.filename);
 
   writeFileSync(join(cliDir, "package.json"), '{"private":true,"type":"module"}\n');
-  execFileSync("npm", ["install", ...npmArgs, "@earendil-works/pi-coding-agent@0.84.3"], {
-    cwd: cliDir,
-    stdio: "inherit",
-  });
+  execFileSync(
+    "npm",
+    [
+      "install",
+      ...npmArgs,
+      "@earendil-works/pi-coding-agent@0.84.3",
+      "@earendil-works/pi-ai@0.84.3",
+    ],
+    {
+      cwd: cliDir,
+      stdio: "inherit",
+    },
+  );
 
   writeFileSync(join(packageInstallDir, "package.json"), '{"private":true,"type":"module"}\n');
   execFileSync(
@@ -66,8 +88,44 @@ try {
   }
 
   writeFileSync(
+    join(observerDir, "package.json"),
+    `${JSON.stringify({
+      private: true,
+      type: "module",
+      pi: { extensions: ["./index.mjs"] },
+    })}\n`,
+  );
+  writeFileSync(
+    join(observerDir, "index.mjs"),
+    `const key = Symbol.for("pi-agent-roster:installed-observer");\n` +
+      `const records = globalThis[key] ??= [];\n` +
+      `export default function (pi) {\n` +
+      `  pi.on("session_start", (_event, ctx) => records.push({ type: "start", cwd: ctx.cwd, tools: pi.getActiveTools() }));\n` +
+      `  pi.on("session_shutdown", (_event, ctx) => records.push({ type: "shutdown", cwd: ctx.cwd }));\n` +
+      `}\n`,
+  );
+  mkdirSync(join(agentDir, "agents"), { recursive: true });
+  writeFileSync(
+    join(agentDir, "agents", "actual-pi.md"),
+    `---\ndescription: Deterministic installed Pi lifecycle agent\nmode: subagent\ntools: read\n---\nUse the configured workspace and follow only the explicit task.\n`,
+  );
+  mkdirSync(join(workDir, ".pi"), { recursive: true });
+  writeFileSync(
+    join(workDir, ".pi", "agent-roster.json"),
+    `${JSON.stringify(
+      {
+        maxConcurrent: 1,
+        consumedSessionRetentionMinutes: 1,
+        excludedExtensionPackages: [installedPackage],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  writeFileSync(join(childWorkDir, "marker.txt"), "CHILD_WORKSPACE_f24a3d\n");
+  writeFileSync(
     join(agentDir, "settings.json"),
-    `${JSON.stringify({ packages: [installedPackage], defaultProjectTrust: "never" }, null, 2)}\n`,
+    `${JSON.stringify({ packages: [installedPackage, observerDir], defaultProjectTrust: "never" }, null, 2)}\n`,
   );
 
   const cli = join(cliDir, "node_modules", ".bin", process.platform === "win32" ? "pi.cmd" : "pi");
@@ -145,7 +203,30 @@ try {
   console.log(
     "Pi 0.84.3 loaded the packed extension and registered its flag, command, and TypeBox tool.",
   );
+
+  const actualPiHarness = join(cliDir, "actual-pi.mjs");
+  writeFileSync(
+    actualPiHarness,
+    readFileSync(join(packageDir, "test", "installed", "actual-pi.mjs"), "utf8"),
+  );
+  execFileSync(
+    process.execPath,
+    [actualPiHarness, agentDir, workDir, childWorkDir, parentSessionDir],
+    {
+      cwd: cliDir,
+      env: {
+        ...process.env,
+        PI_CODING_AGENT_DIR: agentDir,
+        PI_NO_UPDATE_CHECK: "1",
+      },
+      stdio: "inherit",
+    },
+  );
 } finally {
-  if (child && child.exitCode === null) child.kill("SIGTERM");
+  if (child && child.exitCode === null) {
+    const closed = once(child, "close");
+    child.kill();
+    await closed;
+  }
   rmSync(root, { recursive: true, force: true });
 }

@@ -510,7 +510,7 @@ describe("SubagentState — classification predicates", () => {
         expect(state.isActive()).toBe(active.has(status));
         expect(state.isTerminalError()).toBe(terminalError.has(status));
         expect(state.isRunning()).toBe(running.has(status));
-        expect(state.canBeSteered()).toBe(running.has(status));
+        expect(state.canBeSteered()).toBe(status === "queued" || running.has(status));
       });
     }
   });

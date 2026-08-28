@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AgentTypeRegistry } from "../../src/config/agent-types.ts";
 import { GetResultTool, type GetResultToolManager } from "../../src/tools/get-result-tool.ts";
 import type { Subagent } from "../../src/types.ts";
-import { createTestSubagent, makeStubExecution } from "../helpers/make-subagent.ts";
+import { createTestSubagent, makeStubRuntime } from "../helpers/make-subagent.ts";
 import {
   createMockSession,
   createSubagentSessionStub,
@@ -99,7 +99,7 @@ describe("GetResultTool", () => {
     const record = createTestSubagent({
       status: "running",
       completedAt: undefined,
-      execution: makeStubExecution({
+      runtime: makeStubRuntime({
         createSubagentSession: async () => toSubagentSession(sessionStub),
       }),
     });
@@ -121,16 +121,17 @@ describe("GetResultTool", () => {
     const record = createTestSubagent({
       status: "queued",
       completedAt: undefined,
-      execution: makeStubExecution({
+      runtime: makeStubRuntime({
         createSubagentSession: async () => toSubagentSession(sessionStub),
       }),
     });
     // The limiter admits the agent only after the parent has begun waiting.
     const { promise: slot, resolve: openSlot } = Promise.withResolvers<void>(); // eslint-disable-line @typescript-eslint/no-invalid-void-type -- Promise.withResolvers<void> is valid; rule does not allow void in generic fn call type args
-    record.scheduleVia(async (thunk) => {
+    const queuedRun = (async () => {
       await slot;
-      await thunk();
-    });
+      await record.run();
+    })();
+    record.setQueuedPromise(queuedRun);
     const records = new Map([["agent-1", record]]);
 
     const resultPromise = execute(makeManager(records), { agent_id: "agent-1", wait: true });
@@ -148,7 +149,7 @@ describe("GetResultTool", () => {
     const record = createTestSubagent({
       status: "running",
       completedAt: undefined,
-      execution: makeStubExecution({
+      runtime: makeStubRuntime({
         createSubagentSession: async () => toSubagentSession(sessionStub),
       }),
     });

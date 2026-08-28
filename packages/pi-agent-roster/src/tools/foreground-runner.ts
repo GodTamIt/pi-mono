@@ -1,5 +1,5 @@
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
-import type { ParentSnapshot } from "../lifecycle/parent-snapshot.ts";
+import type { ChildRuntimeBaseline } from "../lifecycle/child-runtime-baseline.ts";
 import type { AgentSpawnConfig } from "../lifecycle/subagent-manager.ts";
 import type { ParentSessionInfo, Subagent } from "../types.ts";
 import { type AgentDetails, describeActivity, formatMs } from "../ui/display.ts";
@@ -10,9 +10,9 @@ import type { ResolvedSpawnConfig } from "./spawn-config.ts";
 /** Narrow manager interface for the foreground runner. */
 export interface ForegroundManagerDeps {
   spawnAndWait(
-    snapshot: ParentSnapshot,
+    baseline: ChildRuntimeBaseline,
     type: string,
-    prompt: string,
+    task: string,
     opts: Omit<AgentSpawnConfig, "isBackground">,
   ): Promise<Subagent>;
 }
@@ -20,7 +20,7 @@ export interface ForegroundManagerDeps {
 /** All values the foreground runner needs beyond the resolved config. */
 export interface ForegroundParams {
   config: ResolvedSpawnConfig;
-  snapshot: ParentSnapshot;
+  baseline: ChildRuntimeBaseline;
   parentSession: ParentSessionInfo;
 }
 
@@ -73,11 +73,11 @@ export async function runForeground(
 
   let record: Subagent;
   try {
-    record = await manager.spawnAndWait(params.snapshot, identity.subagentType, execution.prompt, {
+    record = await manager.spawnAndWait(params.baseline, identity.subagentType, execution.task, {
       description: execution.description,
       model: execution.model,
       maxTurns: execution.effectiveMaxTurns,
-      inheritContext: execution.inheritContext,
+      graceTurns: execution.effectiveGraceTurns,
       thinkingLevel: execution.thinking,
       invocation: execution.agentInvocation,
       signal,

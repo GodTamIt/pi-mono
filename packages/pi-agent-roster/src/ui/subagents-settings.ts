@@ -10,13 +10,13 @@ export interface SettingsToast {
 export interface SubagentsSettingsManager {
   readonly maxConcurrent: number;
   readonly defaultMaxTurns: number | undefined;
-  readonly graceTurns: number;
+  readonly graceTurns: number | undefined;
   readonly consumedSessionRetentionMinutes: number;
   readonly unconsumedSessionRetentionMinutes: number;
   readonly abortAllOnInterrupt: boolean;
   applyMaxConcurrent(n: number): SettingsToast;
-  applyDefaultMaxTurns(n: number): SettingsToast;
-  applyGraceTurns(n: number): SettingsToast;
+  applyDefaultMaxTurns(n: number | undefined): SettingsToast;
+  applyGraceTurns(n: number | undefined): SettingsToast;
   applyConsumedSessionRetentionMinutes(n: number): SettingsToast;
   applyUnconsumedSessionRetentionMinutes(n: number): SettingsToast;
   toggleAbortAllOnInterrupt(): SettingsToast;
@@ -40,19 +40,30 @@ interface SettingDescriptorBase {
 }
 
 /** Describes one numeric setting's prompt, validation, and apply behavior. */
-interface NumericSettingDescriptor extends SettingDescriptorBase {
+interface NumericSettingDescriptorBase extends SettingDescriptorBase {
   kind: "numeric";
   /** Title shown on the input prompt. */
   inputTitle: string;
   /** Value pre-filled into the input box. */
   inputDefault: (settings: SubagentsSettingsManager) => string;
-  /** Minimum accepted integer, inclusive. */
+  /** Accepted integer range, inclusive. */
   minimum: number;
-  /** Warning shown when the parsed value is below the minimum. */
+  maximum: number;
   validationMessage: string;
-  /** Applies the validated value and returns the toast to display. */
   apply: (settings: SubagentsSettingsManager, n: number) => SettingsToast;
 }
+
+interface RequiredNumericSettingDescriptor extends NumericSettingDescriptorBase {
+  allowUnlimited?: false | undefined;
+}
+
+interface OptionalNumericSettingDescriptor extends NumericSettingDescriptorBase {
+  /** Blank or "unlimited" clears the project override. */
+  allowUnlimited: true;
+  clear: (settings: SubagentsSettingsManager) => SettingsToast;
+}
+
+type NumericSettingDescriptor = RequiredNumericSettingDescriptor | OptionalNumericSettingDescriptor;
 
 /** Describes one boolean setting, flipped directly from the select list. */
 interface ToggleSettingDescriptor extends SettingDescriptorBase {
@@ -71,28 +82,35 @@ const SETTINGS: readonly SettingDescriptor[] = [
     inputTitle: "Max concurrent background agents",
     inputDefault: (settings) => String(settings.maxConcurrent),
     minimum: 1,
-    validationMessage: "Must be a positive integer.",
+    maximum: 1024,
+    validationMessage: "Must be an integer from 1 through 1024.",
     apply: (settings, n) => settings.applyMaxConcurrent(n),
   },
   {
     kind: "numeric",
     label: "Default max turns",
     currentDisplay: (settings) => settings.defaultMaxTurns ?? "unlimited",
-    inputTitle: "Default max turns before wrap-up (0 = unlimited)",
-    inputDefault: (settings) => String(settings.defaultMaxTurns ?? 0),
-    minimum: 0,
-    validationMessage: "Must be 0 (unlimited) or a positive integer.",
+    inputTitle: 'Default max turns before wrap-up (1–10000; blank or "unlimited" clears)',
+    inputDefault: (settings) => String(settings.defaultMaxTurns ?? "unlimited"),
+    minimum: 1,
+    maximum: 10000,
+    allowUnlimited: true,
+    validationMessage: 'Must be an integer from 1 through 10000 or "unlimited".',
     apply: (settings, n) => settings.applyDefaultMaxTurns(n),
+    clear: (settings) => settings.applyDefaultMaxTurns(undefined),
   },
   {
     kind: "numeric",
     label: "Grace turns",
-    currentDisplay: (settings) => settings.graceTurns,
-    inputTitle: "Grace turns after wrap-up steer",
-    inputDefault: (settings) => String(settings.graceTurns),
-    minimum: 1,
-    validationMessage: "Must be a positive integer.",
+    currentDisplay: (settings) => settings.graceTurns ?? "unlimited",
+    inputTitle: 'Grace turns after wrap-up request (0–1000; blank or "unlimited" clears)',
+    inputDefault: (settings) => String(settings.graceTurns ?? "unlimited"),
+    minimum: 0,
+    maximum: 1000,
+    allowUnlimited: true,
+    validationMessage: 'Must be an integer from 0 through 1000 or "unlimited".',
     apply: (settings, n) => settings.applyGraceTurns(n),
+    clear: (settings) => settings.applyGraceTurns(undefined),
   },
   {
     kind: "numeric",
@@ -101,7 +119,8 @@ const SETTINGS: readonly SettingDescriptor[] = [
     inputTitle: "Minutes to retain a consumed agent's session",
     inputDefault: (settings) => String(settings.consumedSessionRetentionMinutes),
     minimum: 1,
-    validationMessage: "Must be a positive integer.",
+    maximum: 20160,
+    validationMessage: "Must be an integer from 1 through 20160.",
     apply: (settings, n) => settings.applyConsumedSessionRetentionMinutes(n),
   },
   {
@@ -111,7 +130,8 @@ const SETTINGS: readonly SettingDescriptor[] = [
     inputTitle: "Minutes to retain an unconsumed agent's session (safety cap)",
     inputDefault: (settings) => String(settings.unconsumedSessionRetentionMinutes),
     minimum: 1,
-    validationMessage: "Must be a positive integer.",
+    maximum: 20160,
+    validationMessage: "Must be an integer from 1 through 20160.",
     apply: (settings, n) => settings.applyUnconsumedSessionRetentionMinutes(n),
   },
   {
@@ -135,7 +155,7 @@ export class SubagentsSettingsHandler {
 
   async handle({ ui }: { ui: SubagentsSettingsUI }): Promise<void> {
     const options = SETTINGS.map((d) => `${d.label} (current: ${d.currentDisplay(this.settings)})`);
-    const choice = await ui.select("Settings", options);
+    const choice = await ui.select("Project settings (global defaults are read-only)", options);
     if (!choice) return;
 
     const descriptor = SETTINGS.find((d) => choice.startsWith(d.label));
@@ -156,10 +176,21 @@ export class SubagentsSettingsHandler {
     descriptor: NumericSettingDescriptor,
   ): Promise<void> {
     const val = await ui.input(descriptor.inputTitle, descriptor.inputDefault(this.settings));
-    if (!val) return;
+    if (val === undefined) return;
 
-    const n = parseInt(val, 10);
-    if (n >= descriptor.minimum) {
+    const input = val.trim();
+    if (descriptor.allowUnlimited && (input === "" || input.toLowerCase() === "unlimited")) {
+      const toast = descriptor.clear(this.settings);
+      ui.notify(toast.message, toast.level);
+      return;
+    }
+    const n = Number(input);
+    if (
+      /^\d+$/.test(input) &&
+      Number.isInteger(n) &&
+      n >= descriptor.minimum &&
+      n <= descriptor.maximum
+    ) {
       const toast = descriptor.apply(this.settings, n);
       ui.notify(toast.message, toast.level);
     } else {

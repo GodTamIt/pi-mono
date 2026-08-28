@@ -78,7 +78,7 @@ describe("AgentTool", () => {
     const deps = createToolDeps();
     const reloadSpy = vi.spyOn(deps.registry, "reload");
     await execute(deps, {
-      prompt: "test",
+      task: "test",
       description: "test",
       subagent_type: "general-purpose",
     });
@@ -92,7 +92,7 @@ describe("AgentTool — resume path", () => {
     const deps = createToolDeps();
     deps.manager.getRecord = vi.fn().mockReturnValue(undefined);
     const result = await execute(deps, {
-      prompt: "continue",
+      task: "continue",
       description: "resume",
       subagent_type: "general-purpose",
       resume: "nonexistent",
@@ -105,19 +105,19 @@ describe("AgentTool — resume path", () => {
     // No execution state set — session not yet created
     deps.manager.getRecord = vi.fn().mockReturnValue(createTestSubagent());
     const result = await execute(deps, {
-      prompt: "continue",
+      task: "continue",
       description: "resume",
       subagent_type: "general-purpose",
       resume: "agent-1",
     });
-    expect(result.content[0]!.text).toContain("no active session");
+    expect(result.content[0]!.text).toContain("no child transcript");
   });
 
   it("returns not-found copy without claiming cleanup for an unknown resume ID", async () => {
     const deps = createToolDeps();
     deps.manager.getRecord = vi.fn().mockReturnValue(undefined);
     const result = await execute(deps, {
-      prompt: "continue",
+      task: "continue",
       description: "resume",
       subagent_type: "general-purpose",
       resume: "nonexistent",
@@ -126,7 +126,7 @@ describe("AgentTool — resume path", () => {
     expect(result.content[0]!.text).not.toContain("cleaned up");
   });
 
-  it("points a released-agent resume at get_subagent_result instead of resuming", async () => {
+  it("resumes a released agent from its child transcript", async () => {
     const deps = createToolDeps();
     const released = createTestSubagent();
     released.subagentSession = toSubagentSession(
@@ -135,13 +135,18 @@ describe("AgentTool — resume path", () => {
     await released.releaseSession();
     deps.manager.getRecord = vi.fn().mockReturnValue(released);
     const result = await execute(deps, {
-      prompt: "continue",
+      task: "continue",
       description: "resume",
       subagent_type: "general-purpose",
       resume: "agent-1",
     });
-    expect(result.content[0]!.text).toContain("get_subagent_result");
-    expect(deps.manager.resume).not.toHaveBeenCalled();
+    expect(result.content[0]!.text).toContain("All done.");
+    expect(deps.manager.resume).toHaveBeenCalledWith(
+      "agent-1",
+      "continue",
+      expect.any(AbortSignal),
+      { maxTurns: undefined, graceTurns: undefined },
+    );
   });
 
   it("returns result text on successful resume", async () => {
@@ -155,7 +160,7 @@ describe("AgentTool — resume path", () => {
       .fn()
       .mockResolvedValue(createTestSubagent({ result: "Resumed output." }));
     const result = await execute(deps, {
-      prompt: "continue",
+      task: "continue",
       description: "resume",
       subagent_type: "general-purpose",
       resume: "agent-1",
@@ -173,7 +178,7 @@ describe("AgentTool — resume path", () => {
     const resumed = createTestSubagent({ result: "Resumed output." });
     deps.manager.resume = vi.fn().mockResolvedValue(resumed);
     await execute(deps, {
-      prompt: "continue",
+      task: "continue",
       description: "resume",
       subagent_type: "general-purpose",
       resume: "agent-1",
@@ -186,7 +191,7 @@ describe("AgentTool — model resolution error", () => {
   it("returns error when model resolution fails", async () => {
     const deps = createToolDeps();
     const result = await execute(deps, {
-      prompt: "test",
+      task: "test",
       description: "test",
       subagent_type: "general-purpose",
       model: "nonexistent-model-xyz",
@@ -202,7 +207,7 @@ describe("AgentTool — background execution", () => {
     const record = createTestSubagent({ status: "running" });
     deps.manager.getRecord = vi.fn().mockReturnValue(record);
     const result = await execute(deps, {
-      prompt: "do something",
+      task: "do something",
       description: "bg task",
       subagent_type: "general-purpose",
       run_in_background: true,
@@ -220,7 +225,7 @@ describe("AgentTool — background execution", () => {
     const deps = createToolDeps();
     deps.manager.getRecord = vi.fn().mockReturnValue(createTestSubagent({ status: "running" }));
     const result = await execute(deps, {
-      prompt: "do something",
+      task: "do something",
       description: "bg task",
       subagent_type: "general-purpose",
       run_in_background: true,
@@ -233,7 +238,7 @@ describe("AgentTool — background execution", () => {
     const deps = createToolDeps();
     deps.manager.getRecord = vi.fn().mockReturnValue(createTestSubagent({ status: "running" }));
     await execute(deps, {
-      prompt: "do something",
+      task: "do something",
       description: "bg task",
       subagent_type: "general-purpose",
       run_in_background: true,
@@ -250,7 +255,7 @@ describe("AgentTool — foreground execution", () => {
       .fn()
       .mockResolvedValue(createTestSubagent({ result: "Task complete.", toolUses: 5 }));
     const result = await execute(deps, {
-      prompt: "do task",
+      task: "do task",
       description: "fg task",
       subagent_type: "general-purpose",
     });
@@ -265,7 +270,7 @@ describe("AgentTool — foreground execution", () => {
       .fn()
       .mockResolvedValue(createTestSubagent({ status: "error", error: "Out of context" }));
     const result = await execute(deps, {
-      prompt: "do task",
+      task: "do task",
       description: "fg task",
       subagent_type: "general-purpose",
     });
@@ -277,7 +282,7 @@ describe("AgentTool — foreground execution", () => {
     const deps = createToolDeps();
     deps.manager.spawnAndWait = vi.fn().mockRejectedValue(new Error("spawn failure"));
     const result = await execute(deps, {
-      prompt: "do task",
+      task: "do task",
       description: "fg task",
       subagent_type: "general-purpose",
     });

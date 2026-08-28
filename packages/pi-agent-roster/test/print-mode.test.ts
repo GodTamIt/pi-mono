@@ -82,7 +82,6 @@ function makeHeadlessCtx() {
     sessionManager: {
       getSessionId: vi.fn(() => "session-1"),
       getSessionFile: vi.fn(() => "/sessions/parent.jsonl"),
-      getBranch: vi.fn(() => []),
     },
     getSystemPrompt: vi.fn(() => "parent prompt"),
   } as any;
@@ -111,7 +110,7 @@ describe("print mode background notifications", () => {
     await agentTool.execute(
       "tool-call-1",
       {
-        prompt: "reply done",
+        task: "reply done",
         description: "tiny child",
         subagent_type: "general-purpose",
         run_in_background: true,

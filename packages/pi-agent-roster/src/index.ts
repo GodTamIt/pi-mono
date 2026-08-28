@@ -40,7 +40,6 @@ import { createSubagentRuntime } from "./runtime.ts";
 import { publishSubagentsService, unpublishSubagentsService } from "./service/service.ts";
 import { SubagentsServiceAdapter } from "./service/service-adapter.ts";
 import { detectEnv } from "./session/env.ts";
-import { resolveModel } from "./session/model-resolver.ts";
 import { createExcludedPackagesStorage } from "./session/package-exclusions.ts";
 import { buildAgentPrompt } from "./session/prompts.ts";
 import { deriveSubagentSessionDir } from "./session/session-dir.ts";
@@ -87,13 +86,14 @@ export default function (pi: ExtensionAPI) {
   pi.on("agent_start", () => notifications.onParentAgentStart());
   pi.on("agent_settled", () => notifications.onParentAgentSettled());
 
+  let manager: SubagentManager;
+
   // Settings: owns all three in-memory values and handles load/save/emit.
-  // onMaxConcurrentChanged is wired to the limiter directly (closure captures by reference).
   const settings: SettingsManager = new SettingsManager({
     emit: (event, payload) => pi.events.emit(event, payload),
     cwd: process.cwd(),
     agentDir: getAgentDir(),
-    onMaxConcurrentChanged: (): void => limiter.recheck(),
+    onMaxConcurrentChanged: (): void => manager?.recheckAdmissions(),
   });
   settings.load();
 
@@ -120,6 +120,7 @@ export default function (pi: ExtensionAPI) {
         new DefaultResourceLoader(opts as ConstructorParameters<typeof DefaultResourceLoader>[0]),
       deriveSessionDir: deriveSubagentSessionDir,
       createSessionManager: (cwd, dir) => SessionManager.create(cwd, dir),
+      openSessionManager: (path, cwd) => SessionManager.open(path, undefined, cwd),
       createSettingsManager: (cwd, dir) => SdkSettingsManager.create(cwd, dir),
       // The exclusion policy is resolved here, at the composition root, so the
       // assembly factory stays free of it and gets a ready-made settings view.
@@ -169,28 +170,32 @@ export default function (pi: ExtensionAPI) {
     lifecycle: createChildLifecyclePublisher((channel, data) => pi.events.emit(channel, data)),
   };
 
-  // ConcurrencyLimiter: schedules background run thunks FIFO against the limit.
-  // It knows nothing about agents or the manager — dependency direction is strictly manager → limiter.
   const limiter: ConcurrencyLimiter = new ConcurrencyLimiter((): number => settings.maxConcurrent);
 
-  const manager = new SubagentManager({
+  manager = new SubagentManager({
     createSubagentSession: (params) => createSubagentSession(params, subagentSessionDeps),
     baseCwd: process.cwd(),
     observer,
     limiter,
+    getModelRegistry: () => runtime.getModelRegistry(),
+    getDefaultModel: () => runtime.getDefaultModel(),
     getRunConfig: () => settings,
     getRetentionPolicy: () => settings,
   });
 
   // Typed service published via Symbol.for() for cross-extension access.
   // Consumers: const { getSubagentsService } = await import("pi-agent-roster");
-  const service = new SubagentsServiceAdapter(manager, resolveModel, runtime);
+  const service = new SubagentsServiceAdapter(manager, runtime);
   publishSubagentsService(service);
 
+  let widget: AgentWidget | undefined;
   const lifecycle = new SessionLifecycleHandler(
     runtime,
     manager,
-    () => notifications.dispose(),
+    () => {
+      notifications.dispose();
+      widget?.dispose();
+    },
     unpublishSubagentsService,
   );
 
@@ -200,7 +205,7 @@ export default function (pi: ExtensionAPI) {
 
   // Live widget: constructed after the manager (it polls listAgents()) and
   // registered as a lifecycle observer so it self-drives its update timer.
-  const widget = new AgentWidget(manager, registry);
+  widget = new AgentWidget(manager, registry);
   observer.add(widget);
 
   // Grab UI context from first tool execution + clear lingering widget on new turn
@@ -231,8 +236,7 @@ export default function (pi: ExtensionAPI) {
   const subagentsSettings = new SubagentsSettingsHandler(settings);
 
   pi.registerCommand("subagents:settings", {
-    description:
-      "Configure subagent settings (concurrency, turn limits, retention, interrupt policy)",
+    description: "Configure project subagent settings (global defaults are read-only)",
     handler: async (_args, ctx) => {
       await subagentsSettings.handle({ ui: ctx.ui });
     },

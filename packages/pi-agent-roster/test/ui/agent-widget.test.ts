@@ -227,6 +227,8 @@ describe("AgentWidget — projection reads activity off Subagent records", () =>
       startedAt: Date.now() - 100,
       turnCount: 3,
       activeTools: ["read"],
+      maxTurns: 6,
+      graceTurns: 0,
       invocation: { runInBackground: true },
     });
     const manager = { listAgents: () => [record] } as unknown as SubagentManager;
@@ -248,8 +250,10 @@ describe("AgentWidget — projection reads activity off Subagent records", () =>
     const stubTheme = { fg: (_: string, t: string) => t, bold: (t: string) => t };
     const lines = renderFn!(stubTui, stubTheme).render();
     const allText = lines.join("\n");
-    // Turn 3 from the record should appear
+    // Turn state and both finite budgets come from the record.
     expect(allText).toContain("↻3");
+    expect(allText).toContain("max 6");
+    expect(allText).toContain("grace 0");
     // Active tool "read" → "reading…"
     expect(allText).toContain("reading");
   });
@@ -291,6 +295,19 @@ describe("AgentWidget.update self-seeds finished agents", () => {
     expect(typeof lastContent()).toBe("function");
     widget.onTurnStart();
     expect(lastContent()).toBeUndefined();
+  });
+
+  it("gives a resumed agent's new completion its own linger window", () => {
+    const agent = { id: "a1", status: "completed", completedAt: 5000 };
+    const { widget, lastContent } = makeWidget([agent]);
+    widget.update();
+    widget.onTurnStart();
+    expect(lastContent()).toBeUndefined();
+
+    agent.completedAt = 6000;
+    widget.update();
+
+    expect(typeof lastContent()).toBe("function");
   });
 });
 
@@ -341,6 +358,17 @@ describe("AgentWidget — self-drives from lifecycle notifications", () => {
     widget.onSubagentCompacted(createTestSubagent({ id: "a1", status: "running" }), COMPACTION);
 
     expect(typeof lastContent()).toBe("function");
+  });
+
+  it("disposes the update timer and registered widget", () => {
+    const { widget, lastContent } = makeWidget([{ id: "a1", status: "running" }]);
+    widget.onSubagentStarted(createTestSubagent({ id: "a1", status: "running" }));
+    expect(vi.getTimerCount()).toBe(1);
+
+    widget.dispose();
+
+    expect(vi.getTimerCount()).toBe(0);
+    expect(lastContent()).toBeUndefined();
   });
 });
 

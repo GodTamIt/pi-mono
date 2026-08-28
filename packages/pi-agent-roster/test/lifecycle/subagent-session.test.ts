@@ -76,7 +76,7 @@ function makeSubagentSession(
     sessionDir: string;
     agentName: string;
     agentMaxTurns: number | undefined;
-    parentContext: string | undefined;
+    agentGraceTurns: number | undefined;
     lifecycle: ReturnType<typeof createChildLifecycleMock>;
   }>,
 ) {
@@ -88,7 +88,7 @@ function makeSubagentSession(
     sessionDir: metaOverrides?.sessionDir ?? "/sessions/dir",
     agentName: metaOverrides?.agentName ?? "Explore",
     agentMaxTurns: metaOverrides?.agentMaxTurns,
-    parentContext: metaOverrides?.parentContext,
+    agentGraceTurns: metaOverrides?.agentGraceTurns,
     lifecycle,
   });
   return { sub, lifecycle };
@@ -141,13 +141,6 @@ describe("SubagentSession — runTurnLoop response capture", () => {
     const { sub } = makeSubagentSession(session);
     const result = await sub.runTurnLoop("go", {});
     expect(result.responseText).toBe("hello world");
-  });
-
-  it("prepends parentContext to the prompt", async () => {
-    const { session } = createSession("DONE");
-    const { sub } = makeSubagentSession(session, { parentContext: "CTX\n" });
-    await sub.runTurnLoop("the task", {});
-    expect(session.prompt).toHaveBeenCalledWith("CTX\nthe task");
   });
 });
 
@@ -267,16 +260,16 @@ describe("SubagentSession — resumeTurnLoop", () => {
   it("re-prompts the session and returns the final assistant text", async () => {
     const { session } = createSession("RESUMED");
     const { sub } = makeSubagentSession(session);
-    const text = await sub.resumeTurnLoop("Continue");
+    const text = await sub.resumeTurnLoop("Continue", {});
     expect(session.prompt).toHaveBeenCalledWith("Continue");
     expect(text).toBe("RESUMED");
   });
 
-  it("does not emit completed or disposed", async () => {
+  it("emits completion but not disposal", async () => {
     const { session } = createSession("RESUMED");
     const { sub } = makeSubagentSession(session, { lifecycle });
-    await sub.resumeTurnLoop("Continue");
-    expect(lifecycle.completed).not.toHaveBeenCalled();
+    await sub.resumeTurnLoop("Continue", {});
+    expect(lifecycle.completed).toHaveBeenCalledOnce();
     expect(lifecycle.disposed).not.toHaveBeenCalled();
   });
 });

@@ -6,7 +6,12 @@
  * Follows the same pattern as pi-permission-system's ExtensionRuntime.
  */
 
-import { buildParentSnapshot, type ParentSnapshot } from "./lifecycle/parent-snapshot.ts";
+import type { Model } from "@earendil-works/pi-ai";
+import {
+  buildChildRuntimeBaseline,
+  type ChildRuntimeBaseline,
+} from "./lifecycle/child-runtime-baseline.ts";
+import type { ModelRegistry } from "./session/model-resolver.ts";
 import type { ModelInfo } from "./tools/spawn-config.ts";
 import type { SessionContext } from "./types.ts";
 
@@ -16,7 +21,7 @@ import type { SessionContext } from "./types.ts";
  */
 export interface RunConfig {
   readonly defaultMaxTurns: number | undefined;
-  readonly graceTurns: number;
+  readonly graceTurns: number | undefined;
 }
 
 /**
@@ -42,12 +47,19 @@ export class SubagentRuntime {
     this.currentCtx = undefined;
   }
 
-  /**
-   * Build a parent snapshot from the current session context.
-   * Only valid during an active session (currentCtx is defined).
-   */
-  buildSnapshot(inheritContext: boolean): ParentSnapshot {
-    return buildParentSnapshot(this.currentCtx!, inheritContext);
+  /** Build the content-free runtime baseline for a new child. */
+  buildChildBaseline(): ChildRuntimeBaseline {
+    if (!this.currentCtx) throw new Error("No active session");
+    return buildChildRuntimeBaseline(this.currentCtx);
+  }
+
+  getModelRegistry(): ModelRegistry {
+    if (!this.currentCtx) throw new Error("No active session");
+    return this.currentCtx.modelRegistry;
+  }
+
+  getDefaultModel(): Model<any> | undefined {
+    return this.currentCtx?.model;
   }
 
   /** Extract model info from the current session context. */

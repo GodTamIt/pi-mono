@@ -1,14 +1,4 @@
-/**
- * service.ts — Public API surface for cross-extension access to subagents.
- *
- * Consumers declare this package as an optional peer dependency and use
- * dynamic import to access the accessor functions:
- *
- *   const { getSubagentsService } = await import("pi-agent-roster");
- *   const svc = getSubagentsService();
- *   svc?.spawn("Explore", "Check for stale TODOs");
- */
-
+import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import type { SubagentStatus } from "../lifecycle/subagent.ts";
 import type { LifetimeUsage } from "../lifecycle/usage.ts";
 import type {
@@ -19,13 +9,7 @@ import type {
   WorkspaceProvider,
 } from "../lifecycle/workspace.ts";
 
-// SubagentStatus is defined in the lifecycle layer (single home) and re-exported
-// here for the public API surface — mirrors the LifetimeUsage / workspace pattern.
 export type { SubagentStatus } from "../lifecycle/subagent.ts";
-// Generative extension seam (ADR 0002). The provider type
-// and all four collaborator types it references are re-exported by name so
-// consumers can import them directly rather than recovering them via
-// indexed-access inference (e.g. `Parameters<WorkspaceProvider["prepare"]>[0]`).
 export type {
   LifetimeUsage,
   Workspace,
@@ -35,64 +19,64 @@ export type {
   WorkspaceProvider,
 };
 
-/** Serializable snapshot of an agent's state — no live session objects. */
 export interface SubagentRecord {
   id: string;
+  parentSessionId?: string | undefined;
   type: string;
   description: string;
+  task: string;
   status: SubagentStatus;
+  activity: string;
+  turnCount: number;
+  maxTurns: number | "unlimited";
+  graceTurns: number | "unlimited";
+  stack?: string | undefined;
+  model?: string | undefined;
+  thinking?: ThinkingLevel | undefined;
   result?: string | undefined;
   error?: string | undefined;
   toolUses: number;
   startedAt: number;
   completedAt?: number | undefined;
   lifetimeUsage: LifetimeUsage;
+  contextPercent: number | null;
   compactionCount: number;
+  conversation?: string | undefined;
+  transcriptPath?: string | undefined;
 }
 
-/** Options for spawning an agent via the service. */
-export interface SpawnOptions {
+export interface SpawnRequest {
+  type: string;
+  task: string;
   description?: string | undefined;
-  model?: string | undefined;
+  stack?: string | undefined;
   maxTurns?: number | undefined;
-  thinkingLevel?: string | undefined;
-  inheritContext?: boolean | undefined;
+  graceTurns?: number | undefined;
   foreground?: boolean | undefined;
   bypassQueue?: boolean | undefined;
 }
 
-/** The public service contract for cross-extension subagent access. */
+export interface ResumeRequest {
+  id: string;
+  task: string;
+  stack?: string | undefined;
+  maxTurns?: number | undefined;
+  graceTurns?: number | undefined;
+  signal?: AbortSignal | undefined;
+}
+
 export interface SubagentsService {
-  /** Spawn an agent. Returns the agent ID immediately. */
-  spawn(type: string, prompt: string, options?: SpawnOptions): string | undefined;
-
-  /** Get a snapshot of an agent's current state. */
-  getRecord(id: string): SubagentRecord | undefined;
-
-  /** List all tracked agents, most recent first. */
+  spawn(request: SpawnRequest): string;
+  resume(request: ResumeRequest): Promise<SubagentRecord | undefined>;
+  inspect(id: string): SubagentRecord | undefined;
   listAgents(): SubagentRecord[];
-
-  /** Abort a running or queued agent. Returns false if not found. */
   abort(id: string): boolean;
-
-  /** Send a steering message to a running agent. */
-  steer(id: string, message: string): Promise<boolean>;
-
-  /** Wait for all running and queued agents to complete. */
+  steer(id: string, steering: string): Promise<boolean>;
   waitForAll(): Promise<void>;
-
-  /** Whether any agents are running or queued. */
   hasRunning(): boolean;
-
-  /**
-   * Register the single workspace provider that supplies a child's working
-   * directory plus bracketed setup/teardown. Throws if one is already
-   * registered. Returns a disposer that unregisters the provider.
-   */
   registerWorkspaceProvider(provider: WorkspaceProvider): () => void;
 }
 
-/** Event channel constants for pi.events subscriptions. */
 export const SUBAGENT_EVENTS = {
   STARTED: "subagents:started",
   COMPLETED: "subagents:completed",
@@ -103,22 +87,16 @@ export const SUBAGENT_EVENTS = {
   STEERED: "subagents:steered",
 } as const;
 
-// ---- Accessor functions ----
-
 const SERVICE_KEY = Symbol.for("pi-agent-roster:service");
 
-/** Publish the SubagentsService on globalThis for cross-extension access. */
 export function publishSubagentsService(service: SubagentsService): void {
   (globalThis as Record<symbol, unknown>)[SERVICE_KEY] = service;
 }
 
-/** Retrieve the published SubagentsService, or undefined if not yet published. */
 export function getSubagentsService(): SubagentsService | undefined {
   return (globalThis as Record<symbol, unknown>)[SERVICE_KEY] as SubagentsService | undefined;
 }
 
-/** Remove the SubagentsService from globalThis (call on shutdown/reload). */
 export function unpublishSubagentsService(): void {
-  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Symbol-keyed global property; Map.delete() is not applicable
   delete (globalThis as Record<symbol, unknown>)[SERVICE_KEY];
 }

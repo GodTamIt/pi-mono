@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { AgentTypeRegistry } from "../src/config/agent-types.ts";
 import type { AgentConfig } from "../src/types.ts";
-import { formatSessionTokens, getDisplayName, getPromptModeLabel } from "../src/ui/display.ts";
+import {
+  buildInvocationTags,
+  formatSessionTokens,
+  getDisplayName,
+  getPromptModeLabel,
+} from "../src/ui/display.ts";
 import { TEST_AGENTS } from "./helpers/test-agents.ts";
 
 const testRegistry = new AgentTypeRegistry(() => TEST_AGENTS);
@@ -68,6 +73,22 @@ describe("getPromptModeLabel", () => {
 
   it("returns undefined for replace promptMode", () => {
     expect(getPromptModeLabel("Explore", testRegistry)).toBeUndefined();
+  });
+});
+
+describe("buildInvocationTags", () => {
+  it("labels finite turn and grace budgets", () => {
+    expect(buildInvocationTags({ maxTurns: 20, graceTurns: 0 }).tags).toEqual([
+      "max turns: 20",
+      "grace turns: 0",
+    ]);
+  });
+
+  it("labels omitted budgets as unlimited", () => {
+    expect(buildInvocationTags({}).tags).toEqual([
+      "max turns: unlimited",
+      "grace turns: unlimited",
+    ]);
   });
 });
 

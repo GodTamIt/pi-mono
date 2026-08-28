@@ -15,7 +15,6 @@ import type { AgentConfigLookup } from "../config/agent-types.ts";
 import type { AgentPromptConfig, SubagentType, ThinkingLevel } from "../types.ts";
 import type { EnvInfo } from "./env.ts";
 import type { ModelRegistry } from "./model-resolver.ts";
-import type { InheritedPrompt } from "./prompts.ts";
 
 // ── Public interfaces ────────────────────────────────────────────────────────
 
@@ -28,12 +27,7 @@ import type { InheritedPrompt } from "./prompts.ts";
  * at the edge (`create-subagent-session.ts`) or stubs in tests.
  */
 export interface AssemblerIO {
-  buildAgentPrompt: (
-    config: AgentPromptConfig,
-    cwd: string,
-    env: EnvInfo,
-    inherited?: InheritedPrompt | undefined,
-  ) => string;
+  buildAgentPrompt: (config: AgentPromptConfig, cwd: string, env: EnvInfo) => string;
 }
 
 /**
@@ -47,9 +41,7 @@ export interface AssemblerIO {
 export interface AssemblerContext {
   /** Parent working directory (overridable via options.cwd). */
   cwd: string;
-  /** Parent's effective system prompt (for append-mode agents). */
-  parentSystemPrompt: string;
-  /** Parent's current model instance (fallback when agent config has no model). */
+  /** Content-free runtime model used when the agent has no override. */
   parentModel?: Model<any> | undefined;
   /** Model registry for resolving config.model strings. */
   modelRegistry: ModelRegistry;
@@ -89,6 +81,8 @@ export interface SessionConfig {
   thinkingLevel: ThinkingLevel | undefined;
   /** Per-agent configured max turns (from agentConfig.maxTurns). */
   agentMaxTurns: number | undefined;
+  /** Per-agent configured grace turns (from agentConfig.graceTurns). */
+  agentGraceTurns: number | undefined;
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -156,10 +150,7 @@ export function assembleSessionConfig(
   const toolNames = registry.getToolNamesForType(type);
 
   // Build system prompt from the resolved agent config
-  const systemPrompt = io.buildAgentPrompt(agentConfig, effectiveCwd, env, {
-    systemPrompt: ctx.parentSystemPrompt,
-    cwd: ctx.cwd,
-  });
+  const systemPrompt = io.buildAgentPrompt(agentConfig, effectiveCwd, env);
 
   // Model resolution: explicit option > config model string > parent model
   const model =
@@ -170,6 +161,7 @@ export function assembleSessionConfig(
 
   // Per-agent max turns (combined with per-call maxTurns and defaultMaxTurns by SubagentSession.runTurnLoop)
   const agentMaxTurns = agentConfig.maxTurns;
+  const agentGraceTurns = agentConfig.graceTurns;
 
   return {
     effectiveCwd,
@@ -178,5 +170,6 @@ export function assembleSessionConfig(
     model,
     thinkingLevel,
     agentMaxTurns,
+    agentGraceTurns,
   };
 }

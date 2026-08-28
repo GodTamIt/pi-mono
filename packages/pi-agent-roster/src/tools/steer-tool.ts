@@ -23,11 +23,13 @@ export class SteerTool {
 
   async execute(
     _toolCallId: string,
-    params: { agent_id: string; message: string },
+    params: { agent_id: string; steering: string },
     _signal: AbortSignal,
     _onUpdate: unknown,
     _ctx: unknown,
   ) {
+    const steering = params.steering?.trim();
+    if (!steering) return textResult("steering must be a non-empty string");
     const record = this.manager.getRecord(params.agent_id);
     if (!record) {
       return textResult(
@@ -37,7 +39,7 @@ export class SteerTool {
 
     let outcome: SteerOutcome;
     try {
-      outcome = await record.steer(params.message);
+      outcome = await record.steer(steering);
     } catch (err) {
       return textResult(
         `Failed to steer agent: ${err instanceof Error ? err.message : String(err)}`,
@@ -50,12 +52,12 @@ export class SteerTool {
           `Agent "${params.agent_id}" is not running (status: ${outcome.status}). Cannot steer a non-running agent.`,
         );
       case "buffered":
-        this.events.emit("subagents:steered", { id: record.id, message: params.message });
+        this.events.emit("subagents:steered", { id: record.id, steering });
         return textResult(
           `Steering message queued for agent ${record.id}. It will be delivered once the session initializes.`,
         );
       case "delivered":
-        this.events.emit("subagents:steered", { id: record.id, message: params.message });
+        this.events.emit("subagents:steered", { id: record.id, steering });
         return this.renderDelivered(record);
     }
   }
@@ -90,14 +92,15 @@ export class SteerTool {
         agent_id: Type.String({
           description: "The agent ID to steer (must be currently running).",
         }),
-        message: Type.String({
-          description:
-            "The steering message to send. This will appear as a user message in the agent's conversation.",
+        steering: Type.String({
+          description: "Required explicit steering text added to the child's own conversation.",
+          minLength: 1,
+          pattern: "\\S",
         }),
       }),
       execute: (
         toolCallId: string,
-        params: { agent_id: string; message: string },
+        params: { agent_id: string; steering: string },
         signal: AbortSignal,
         onUpdate: unknown,
         ctx: unknown,

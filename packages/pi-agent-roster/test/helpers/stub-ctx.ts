@@ -6,13 +6,11 @@
  * 'as any' while documenting the intent.
  */
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ParentSnapshot } from "../../src/lifecycle/parent-snapshot.ts";
+import type { ChildRuntimeBaseline } from "../../src/lifecycle/child-runtime-baseline.ts";
 
 export const STUB_CTX = {} as unknown as ExtensionContext;
 
-export const STUB_SNAPSHOT: ParentSnapshot = {
+export const STUB_SNAPSHOT: ChildRuntimeBaseline = {
   cwd: "/test",
-  systemPrompt: "test prompt",
   model: undefined,
-  modelRegistry: { find: () => undefined, getAll: () => [] },
 };

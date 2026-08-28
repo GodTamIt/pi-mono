@@ -36,7 +36,10 @@ for (const path of required) {
   if (!files.includes(path)) throw new Error(`Package is missing ${path}`);
 }
 const forbidden = files.filter(
-  (path) => path.startsWith("media/") || path.includes("default-agents"),
+  (path) =>
+    path.startsWith("media/") ||
+    path.includes("default-agents") ||
+    path.includes("parent-snapshot"),
 );
 if (forbidden.length > 0) throw new Error(`Unexpected package contents:\n${forbidden.join("\n")}`);
 

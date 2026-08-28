@@ -55,8 +55,7 @@ export interface AgentConfig extends AgentIdentity, AgentPromptConfig {
   model?: string | undefined;
   thinking?: ThinkingLevel | undefined;
   maxTurns?: number | undefined;
-  /** Default for spawn: fork parent conversation. undefined = caller decides. */
-  inheritContext?: boolean | undefined;
+  graceTurns?: number | undefined;
   /** Default for spawn: run in background. undefined = caller decides. */
   runInBackground?: boolean | undefined;
   /** One-line usage guideline for the subagent tool's Guidelines: block. Omitted — no guideline line. */
@@ -74,7 +73,8 @@ export interface AgentInvocation {
   modelName?: string | undefined;
   thinking?: ThinkingLevel | undefined;
   maxTurns?: number | undefined;
-  inheritContext?: boolean | undefined;
+  graceTurns?: number | undefined;
+  stack?: string | undefined;
   runInBackground?: boolean | undefined;
 }
 
@@ -90,11 +90,9 @@ export interface SessionContext {
   readonly cwd: string;
   readonly model: Model<any> | undefined;
   readonly modelRegistry: ModelRegistry;
-  getSystemPrompt(): string;
   readonly sessionManager: {
     getSessionFile(): string | undefined;
     getSessionId(): string;
-    getBranch(): unknown[];
   };
 }
 

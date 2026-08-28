@@ -8,7 +8,7 @@ import { STUB_SNAPSHOT } from "../helpers/stub-ctx.ts";
 function makeParams(overrides: Partial<ForegroundParams> = {}): ForegroundParams {
   return {
     config: createResolvedSpawnConfig({ description: "fg task" }),
-    snapshot: STUB_SNAPSHOT,
+    baseline: STUB_SNAPSHOT,
     parentSession: { parentSessionFile: "/sessions/parent.jsonl", parentSessionId: "session-1" },
     ...overrides,
   };

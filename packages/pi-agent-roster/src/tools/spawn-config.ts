@@ -1,15 +1,6 @@
-/**
- * spawn-config.ts — Pure config resolution for the Agent tool.
- *
- * Extracts all config resolution logic from execute: type resolution,
- * invocation config merge, model resolution, max-turns normalization,
- * tag building, and detail-base construction.
- */
-
 import type { Model } from "@earendil-works/pi-ai";
 import type { AgentTypeRegistry } from "../config/agent-types.ts";
 import { resolveAgentInvocationConfig } from "../config/invocation-config.ts";
-import { normalizeMaxTurns } from "../lifecycle/turn-limits.ts";
 import type { ModelRegistry } from "../session/model-resolver.ts";
 import { resolveInvocationModel } from "../session/model-resolver.ts";
 import type { AgentInvocation, SubagentType, ThinkingLevel } from "../types.ts";
@@ -20,13 +11,11 @@ import {
   getPromptModeLabel,
 } from "../ui/display.ts";
 
-/** Model info extracted from the parent session context. */
 export interface ModelInfo {
   parentModel: Model<any> | undefined;
   modelRegistry: ModelRegistry | undefined;
 }
 
-/** Identity: who is being spawned. */
 export interface SpawnIdentity {
   subagentType: string;
   rawType: SubagentType;
@@ -34,19 +23,18 @@ export interface SpawnIdentity {
   displayName: string;
 }
 
-/** Execution: how the agent will run. */
 export interface SpawnExecution {
-  prompt: string;
+  task: string;
   description: string;
   model: Model<any> | undefined;
   effectiveMaxTurns: number | undefined;
+  effectiveGraceTurns: number | undefined;
   thinking: ThinkingLevel | undefined;
-  inheritContext: boolean;
+  stack: string | undefined;
   runInBackground: boolean;
   agentInvocation: AgentInvocation;
 }
 
-/** Presentation: display/UI values derived from identity and execution. */
 export interface SpawnPresentation {
   modelName: string | undefined;
   agentTags: string[];
@@ -56,48 +44,80 @@ export interface SpawnPresentation {
   >;
 }
 
-/** Fully resolved config for spawning an agent — composed of domain-aligned sub-interfaces. */
 export interface ResolvedSpawnConfig {
   identity: SpawnIdentity;
   execution: SpawnExecution;
   presentation: SpawnPresentation;
 }
 
-/** Error result when model resolution fails. */
 export interface SpawnConfigError {
   error: string;
 }
 
-/**
- * Resolve all config for an Agent tool invocation.
- *
- * Pure function — no SDK types, no side effects.
- * Returns either a fully resolved config or an error.
- */
+export interface ResumeConfig {
+  task: string;
+  maxTurns: number | undefined;
+  graceTurns: number | undefined;
+}
+
+export function resolveResumeConfig(
+  params: Record<string, unknown>,
+): ResumeConfig | SpawnConfigError {
+  if (Object.hasOwn(params, "inherit_context")) {
+    return {
+      error:
+        "inherit_context is unsupported. Children receive no parent conversation; include all required context in task.",
+    };
+  }
+  const task = trimmedString(params.task);
+  if (!task) return { error: "task must be a non-empty self-contained string" };
+  const maxError = validateBudget(params.max_turns, "max_turns", 1, 10_000);
+  if (maxError) return { error: maxError };
+  const graceError = validateBudget(params.grace_turns, "grace_turns", 0, 1_000);
+  if (graceError) return { error: graceError };
+  return {
+    task,
+    maxTurns: params.max_turns as number | undefined,
+    graceTurns: params.grace_turns as number | undefined,
+  };
+}
+
 export function resolveSpawnConfig(
   params: Record<string, unknown>,
   registry: AgentTypeRegistry,
   modelInfo: ModelInfo,
-  settings: { readonly defaultMaxTurns: number | undefined },
+  settings: {
+    readonly defaultMaxTurns: number | undefined;
+    readonly graceTurns?: number | undefined;
+  },
 ): ResolvedSpawnConfig | SpawnConfigError {
-  const rawType = params.subagent_type as SubagentType;
-  const resolved = registry.resolveType(rawType);
+  if (Object.hasOwn(params, "inherit_context")) {
+    return {
+      error:
+        "inherit_context is unsupported. Children receive no parent conversation; include all required context in task.",
+    };
+  }
+  const task = trimmedString(params.task);
+  if (!task) return { error: "task must be a non-empty self-contained string" };
+  const description = trimmedString(params.description) ?? task.slice(0, 80);
+  const rawType = trimmedString(params.subagent_type);
+  if (!rawType) return { error: "subagent_type must be a non-empty string" };
+  const stack = params.stack === undefined ? undefined : trimmedString(params.stack);
+  if (params.stack !== undefined && !stack) return { error: "stack must be a non-empty string" };
+  const maxError = validateBudget(params.max_turns, "max_turns", 1, 10_000);
+  if (maxError) return { error: maxError };
+  const graceError = validateBudget(params.grace_turns, "grace_turns", 0, 1_000);
+  if (graceError) return { error: graceError };
 
-  // A known-but-disabled type is an explicit error, not a silent unknown-type fallback.
+  const resolved = registry.resolveType(rawType);
   if (resolved !== undefined && !registry.isValidType(resolved)) {
     return { error: `Agent type "${resolved}" is disabled` };
   }
-
   const subagentType = resolved ?? "general-purpose";
   const fellBack = resolved === undefined;
-
   const displayName = getDisplayName(subagentType, registry);
-
-  // Merge agent config defaults with tool-call params
   const customConfig = registry.resolveAgentConfig(subagentType);
   const resolvedConfig = resolveAgentInvocationConfig(customConfig, params);
-
-  // Resolve model
   const resolution = resolveInvocationModel(
     modelInfo.parentModel,
     resolvedConfig.modelInput,
@@ -106,12 +126,10 @@ export function resolveSpawnConfig(
   );
   if (resolution.error) return { error: resolution.error };
   const model = resolution.model;
-
   const thinking = resolvedConfig.thinking;
-  const inheritContext = resolvedConfig.inheritContext;
   const runInBackground = resolvedConfig.runInBackground;
-
-  // Compute display model name (only shown when different from parent)
+  const effectiveMaxTurns = resolvedConfig.maxTurns ?? settings.defaultMaxTurns;
+  const effectiveGraceTurns = resolvedConfig.graceTurns ?? settings.graceTurns;
   const parentModelId = modelInfo.parentModel?.id;
   const effectiveModelId = model?.id;
   const modelName =
@@ -119,23 +137,20 @@ export function resolveSpawnConfig(
       ? model.name.replace(/^Claude\s+/i, "").toLowerCase()
       : undefined;
 
-  const effectiveMaxTurns = normalizeMaxTurns(resolvedConfig.maxTurns ?? settings.defaultMaxTurns);
-
   const agentInvocation: AgentInvocation = {
     modelName,
     thinking,
-    maxTurns: normalizeMaxTurns(resolvedConfig.maxTurns),
-    inheritContext,
+    maxTurns: effectiveMaxTurns,
+    graceTurns: effectiveGraceTurns,
+    stack,
     runInBackground,
   };
-
   const modeLabel = getPromptModeLabel(subagentType, registry);
   const { tags: invocationTags } = buildInvocationTags(agentInvocation);
   const agentTags = modeLabel ? [modeLabel, ...invocationTags] : invocationTags;
-
   const detailBase = {
     displayName,
-    description: params.description as string,
+    description,
     subagentType,
     modelName,
     tags: agentTags.length > 0 ? agentTags : undefined,
@@ -144,15 +159,35 @@ export function resolveSpawnConfig(
   return {
     identity: { subagentType, rawType, fellBack, displayName },
     execution: {
-      prompt: params.prompt as string,
-      description: params.description as string,
+      task,
+      description,
       model,
       effectiveMaxTurns,
+      effectiveGraceTurns,
       thinking,
-      inheritContext,
+      stack,
       runInBackground,
       agentInvocation,
     },
     presentation: { modelName, agentTags, detailBase },
   };
+}
+
+function trimmedString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function validateBudget(
+  value: unknown,
+  name: string,
+  minimum: number,
+  maximum: number,
+): string | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || (value as number) < minimum || (value as number) > maximum) {
+    return `${name} must be an integer from ${minimum} through ${maximum}`;
+  }
+  return undefined;
 }

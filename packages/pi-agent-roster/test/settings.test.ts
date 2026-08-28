@@ -136,9 +136,9 @@ describe("settings persistence", () => {
       expect(loadSettings(globalDir, projectDir)).toEqual({});
     });
 
-    it("drops graceTurns < 1", () => {
+    it("accepts graceTurns: 0 as no post-limit grace", () => {
       writeProject({ graceTurns: 0 });
-      expect(loadSettings(globalDir, projectDir)).toEqual({});
+      expect(loadSettings(globalDir, projectDir)).toEqual({ graceTurns: 0 });
     });
 
     it("accepts retention windows within [1, 20160]", () => {
@@ -277,7 +277,7 @@ describe("settings persistence", () => {
         expect(loadSettings(globalDir, projectDir)).toEqual({});
       });
       expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toMatch(/Ignoring malformed settings/);
+      expect(warnings[0]).toMatch(/Could not parse settings/);
     });
 
     it("does NOT warn when a file is simply missing", () => {
@@ -312,9 +312,9 @@ describe("SettingsManager", () => {
       expect(sm.defaultMaxTurns).toBeUndefined();
     });
 
-    it("defaults to graceTurns: 5", () => {
+    it("defaults graceTurns to unlimited", () => {
       const sm = new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" });
-      expect(sm.graceTurns).toBe(5);
+      expect(sm.graceTurns).toBeUndefined();
     });
 
     it("defaults to maxConcurrent: 4", () => {
@@ -398,16 +398,10 @@ describe("SettingsManager", () => {
       expect(sm.graceTurns).toBe(10);
     });
 
-    it("clamps 0 to 1", () => {
+    it("preserves zero grace", () => {
       const sm = new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" });
       sm.graceTurns = 0;
-      expect(sm.graceTurns).toBe(1);
-    });
-
-    it("clamps negative values to 1", () => {
-      const sm = new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" });
-      sm.graceTurns = -3;
-      expect(sm.graceTurns).toBe(1);
+      expect(sm.graceTurns).toBe(0);
     });
   });
 
@@ -573,8 +567,6 @@ describe("SettingsManager", () => {
       const sm = new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" });
       expect(sm.snapshot()).toEqual({
         maxConcurrent: 4,
-        defaultMaxTurns: 0,
-        graceTurns: 5,
         consumedSessionRetentionMinutes: 10,
         unconsumedSessionRetentionMinutes: 720,
         abortAllOnInterrupt: true,
@@ -588,7 +580,6 @@ describe("SettingsManager", () => {
       sm.maxConcurrent = 8;
       expect(sm.snapshot()).toEqual({
         maxConcurrent: 8,
-        defaultMaxTurns: 0,
         graceTurns: 3,
         consumedSessionRetentionMinutes: 10,
         unconsumedSessionRetentionMinutes: 720,
@@ -602,7 +593,6 @@ describe("SettingsManager", () => {
       expect(sm.snapshot()).toEqual({
         maxConcurrent: 4,
         defaultMaxTurns: 20,
-        graceTurns: 5,
         consumedSessionRetentionMinutes: 10,
         unconsumedSessionRetentionMinutes: 720,
         abortAllOnInterrupt: true,
@@ -615,8 +605,6 @@ describe("SettingsManager", () => {
       sm.unconsumedSessionRetentionMinutes = 1440;
       expect(sm.snapshot()).toEqual({
         maxConcurrent: 4,
-        defaultMaxTurns: 0,
-        graceTurns: 5,
         consumedSessionRetentionMinutes: 30,
         unconsumedSessionRetentionMinutes: 1440,
         abortAllOnInterrupt: true,
@@ -628,8 +616,6 @@ describe("SettingsManager", () => {
       sm.toggleAbortAllOnInterrupt();
       expect(sm.snapshot()).toEqual({
         maxConcurrent: 4,
-        defaultMaxTurns: 0,
-        graceTurns: 5,
         consumedSessionRetentionMinutes: 10,
         unconsumedSessionRetentionMinutes: 720,
         abortAllOnInterrupt: false,
@@ -640,8 +626,6 @@ describe("SettingsManager", () => {
       const sm = new SettingsManager({ emit: vi.fn(), cwd: "/tmp", agentDir: "/nonexistent" });
       expect(sm.snapshot()).toEqual({
         maxConcurrent: 4,
-        defaultMaxTurns: 0,
-        graceTurns: 5,
         consumedSessionRetentionMinutes: 10,
         unconsumedSessionRetentionMinutes: 720,
         abortAllOnInterrupt: true,
@@ -677,7 +661,6 @@ describe("SettingsManager", () => {
       const written = JSON.parse(readFileSync(settingsPath, "utf-8"));
       expect(written).toEqual({
         maxConcurrent: 4,
-        defaultMaxTurns: 0,
         graceTurns: 7,
         consumedSessionRetentionMinutes: 10,
         unconsumedSessionRetentionMinutes: 720,
@@ -697,8 +680,6 @@ describe("SettingsManager", () => {
       );
       expect(written).toEqual({
         maxConcurrent: 5,
-        defaultMaxTurns: 0,
-        graceTurns: 5,
         consumedSessionRetentionMinutes: 10,
         unconsumedSessionRetentionMinutes: 720,
         abortAllOnInterrupt: true,
@@ -713,7 +694,6 @@ describe("SettingsManager", () => {
       expect(emit).toHaveBeenCalledWith("subagents:settings_changed", {
         settings: {
           maxConcurrent: 4,
-          defaultMaxTurns: 0,
           graceTurns: 3,
           consumedSessionRetentionMinutes: 10,
           unconsumedSessionRetentionMinutes: 720,
@@ -752,8 +732,6 @@ describe("SettingsManager", () => {
         expect(emit).toHaveBeenCalledWith("subagents:settings_changed", {
           settings: {
             maxConcurrent: 4,
-            defaultMaxTurns: 0,
-            graceTurns: 5,
             consumedSessionRetentionMinutes: 10,
             unconsumedSessionRetentionMinutes: 720,
             abortAllOnInterrupt: true,
@@ -922,11 +900,11 @@ describe("SettingsManager", () => {
       expect(toast).toEqual({ message: "Grace turns set to 3", level: "info" });
     });
 
-    it("normalizes 0 to 1 and reports the post-normalization value in toast", () => {
+    it("preserves zero and reports it in the toast", () => {
       const sm = new SettingsManager({ emit: vi.fn(), cwd: projectDir, agentDir: "/nonexistent" });
       const toast = sm.applyGraceTurns(0);
-      expect(sm.graceTurns).toBe(1);
-      expect(toast.message).toBe("Grace turns set to 1");
+      expect(sm.graceTurns).toBe(0);
+      expect(toast.message).toBe("Grace turns set to 0");
     });
 
     it("does not call onMaxConcurrentChanged", () => {
@@ -979,8 +957,6 @@ describe("SettingsManager", () => {
       expect(emit).toHaveBeenCalledWith("subagents:settings_changed", {
         settings: {
           maxConcurrent: 4,
-          defaultMaxTurns: 0,
-          graceTurns: 5,
           consumedSessionRetentionMinutes: 10,
           unconsumedSessionRetentionMinutes: 720,
           abortAllOnInterrupt: false,

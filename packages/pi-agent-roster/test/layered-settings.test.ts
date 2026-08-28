@@ -135,7 +135,8 @@ describe("loadLayeredSettings", () => {
       });
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toMatch(/\[test-pkg\]/);
-      expect(warnings[0]).toMatch(/Ignoring malformed settings/);
+      expect(warnings[0]).toContain("Could not parse settings");
+      expect(warnings[0]).toContain("Fix the JSON or remove the file");
     });
 
     it("warns once per bad file (two malformed files → two warnings)", () => {

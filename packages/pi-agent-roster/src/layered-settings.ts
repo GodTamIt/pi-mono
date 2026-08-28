@@ -57,11 +57,10 @@ export interface LayeredSettingsSource<T> {
   /** Base filename for both layers, e.g. `"agent-roster.json"`. */
   filename: string;
   /**
-   * Validate and coerce parsed JSON into a partial settings object.
-   * Unknown or invalid fields should be silently dropped — return `{}` for
-   * unrecognised shapes. Never throw.
+   * Validate parsed JSON into a partial settings object. Report unknown or
+   * invalid fields through `diagnose`, then omit them. Never throw.
    */
-  sanitize: (raw: unknown) => Partial<T>;
+  sanitize: (raw: unknown, diagnose?: (message: string) => void) => Partial<T>;
   /**
    * Short label used in the malformed-file warning prefix,
    * e.g. `"pi-agent-roster"` → `"[pi-agent-roster] Ignoring malformed settings at …"`.
@@ -75,9 +74,10 @@ export interface LayeredSettingsSource<T> {
  * - A missing file is silent — returns `{}` for that layer.
  * - A file that exists but cannot be parsed warns to stderr and returns `{}` for
  *   that layer, so startup proceeds normally.
+ * - Invalid fields warn individually; valid fields in the same file survive.
  * - The two layers are merged with a shallow spread; project keys win.
  *
- * Throws nothing. All error conditions produce a warning and fall back to `{}`.
+ * Throws nothing. Diagnostics identify the file, problem, and corrective action.
  *
  * @public
  */
@@ -95,15 +95,19 @@ export function loadLayeredSettings<T>(source: LayeredSettingsSource<T>): Partia
  */
 function readLayer<T>(
   path: string,
-  sanitize: (raw: unknown) => Partial<T>,
+  sanitize: (raw: unknown, diagnose?: (message: string) => void) => Partial<T>,
   warnLabel: string,
 ): Partial<T> {
   if (!existsSync(path)) return {};
   try {
-    return sanitize(JSON.parse(readFileSync(path, "utf-8")));
+    return sanitize(JSON.parse(readFileSync(path, "utf-8")), (message) =>
+      console.warn(`[${warnLabel}] Invalid settings at ${path}: ${message}`),
+    );
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    console.warn(`[${warnLabel}] Ignoring malformed settings at ${path}: ${reason}`);
+    console.warn(
+      `[${warnLabel}] Could not parse settings at ${path}: ${reason}. Fix the JSON or remove the file; ignoring this layer.`,
+    );
     return {};
   }
 }

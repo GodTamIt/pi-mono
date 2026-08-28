@@ -42,7 +42,6 @@ model: anthropic/claude-opus-4-6
 thinking: high
 max_turns: 30
 prompt_mode: replace
-inherit_context: true
 run_in_background: true
 ---
 
@@ -60,7 +59,7 @@ You are a security auditor.`,
     expect(agent.thinking).toBe("high");
     expect(agent.maxTurns).toBe(30);
     expect(agent.promptMode).toBe("replace");
-    expect(agent.inheritContext).toBe(true);
+    expect(agent).not.toHaveProperty("inheritContext");
     expect(agent.runInBackground).toBe(true);
     expect(agent.systemPrompt).toBe("You are a security auditor.");
   });
@@ -84,7 +83,7 @@ Just a prompt.`,
     expect(agent.thinking).toBeUndefined();
     expect(agent.maxTurns).toBeUndefined();
     expect(agent.promptMode).toBe("append");
-    expect(agent.inheritContext).toBeUndefined();
+    expect(agent).not.toHaveProperty("inheritContext");
     expect(agent.runInBackground).toBeUndefined();
     expect(agent.systemPrompt).toBe("Just a prompt.");
   });
@@ -222,7 +221,7 @@ Any thinking.`,
     expect(result.get("anythink")!.thinking).toBe("turbo");
   });
 
-  it("accepts max_turns: 0 as unlimited", () => {
+  it("normalizes legacy max_turns: 0 to unlimited", () => {
     writeAgent(
       "unlimited",
       `---
@@ -233,7 +232,7 @@ Unlimited turns.`,
     );
 
     const result = loadCustomAgents(tmpDir);
-    expect(result.get("unlimited")!.maxTurns).toBe(0);
+    expect(result.get("unlimited")!.maxTurns).toBeUndefined();
   });
 
   it("rejects negative max_turns", () => {

@@ -39,6 +39,7 @@ export interface WidgetAgent {
   // Live activity (folded from the former WidgetActivity — precomputed by AgentWidget)
   readonly turnCount: number;
   readonly maxTurns?: number | undefined;
+  readonly graceTurns?: number | undefined;
   readonly activeTools: ReadonlyMap<string, string>;
   readonly responseText: string;
   /** Context-window utilisation (0–100), or null when unavailable. */
@@ -79,7 +80,7 @@ export function renderFinishedLine(
   }
 
   const parts: string[] = [];
-  parts.push(formatTurns(agent.turnCount, agent.maxTurns));
+  parts.push(...formatTurnBudget(agent));
   if (agent.toolUses > 0)
     parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
   parts.push(duration);
@@ -107,7 +108,7 @@ export function renderRunningLines(
       : "";
 
   const parts: string[] = [];
-  parts.push(formatTurns(agent.turnCount, agent.maxTurns));
+  parts.push(...formatTurnBudget(agent));
   if (agent.toolUses > 0)
     parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
   if (tokenText) parts.push(tokenText);
@@ -121,6 +122,14 @@ export function renderRunningLines(
   const activityLine = theme.fg("dim", `  ${GLYPHS.subLine}  ${activityText}`);
 
   return [header, activityLine];
+}
+
+function formatTurnBudget(agent: WidgetAgent): string[] {
+  return [
+    formatTurns(agent.turnCount),
+    `max ${agent.maxTurns ?? "unlimited"}`,
+    `grace ${agent.graceTurns ?? "unlimited"}`,
+  ];
 }
 
 // ── Full widget rendering ────────────────────────────────────────────────────

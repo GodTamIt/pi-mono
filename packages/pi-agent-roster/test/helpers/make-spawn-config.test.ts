@@ -11,18 +11,16 @@ describe("createResolvedSpawnConfig", () => {
         displayName: "Agent",
       },
       execution: {
-        prompt: "do the task",
+        task: "do the task",
         description: "task",
         model: undefined,
         effectiveMaxTurns: undefined,
         thinking: undefined,
-        inheritContext: false,
         runInBackground: false,
         agentInvocation: {
           modelName: undefined,
           thinking: undefined,
           maxTurns: undefined,
-          inheritContext: false,
           runInBackground: false,
         },
       },
@@ -48,7 +46,7 @@ describe("createResolvedSpawnConfig", () => {
       runInBackground: true,
     });
     expect(config.identity.displayName).toBe("General-purpose");
-    expect(config.execution.prompt).toBe("do something");
+    expect(config.execution.task).toBe("do something");
     expect(config.execution.description).toBe("bg task");
   });
 

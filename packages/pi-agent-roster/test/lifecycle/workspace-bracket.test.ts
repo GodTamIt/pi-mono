@@ -27,40 +27,40 @@ async function preparedBracket(
   resultAddendum?: string,
 ): Promise<{ bracket: WorkspaceBracket; workspace: Workspace }> {
   const workspace = makeWorkspace("/ws/dir", resultAddendum);
-  const bracket = new WorkspaceBracket(() => makeProvider(workspace));
+  const bracket = new WorkspaceBracket(makeProvider(workspace));
   await bracket.prepare(ctx);
   return { bracket, workspace };
 }
 
 describe("WorkspaceBracket — hasProvider", () => {
   it("returns false when no provider is registered", () => {
-    const bracket = new WorkspaceBracket(() => undefined);
+    const bracket = new WorkspaceBracket(undefined);
     expect(bracket.hasProvider()).toBe(false);
   });
 
   it("returns true when a provider is registered", () => {
     const workspace = makeWorkspace("/ws/dir");
-    const bracket = new WorkspaceBracket(() => makeProvider(workspace));
+    const bracket = new WorkspaceBracket(makeProvider(workspace));
     expect(bracket.hasProvider()).toBe(true);
   });
 });
 
 describe("WorkspaceBracket — prepare", () => {
   it("returns undefined when there is no provider", async () => {
-    const bracket = new WorkspaceBracket(() => undefined);
+    const bracket = new WorkspaceBracket(undefined);
     const cwd = await bracket.prepare(ctx);
     expect(cwd).toBeUndefined();
   });
 
   it("returns the workspace cwd when the provider prepares one", async () => {
     const workspace = makeWorkspace("/ws/dir");
-    const bracket = new WorkspaceBracket(() => makeProvider(workspace));
+    const bracket = new WorkspaceBracket(makeProvider(workspace));
     const cwd = await bracket.prepare(ctx);
     expect(cwd).toBe("/ws/dir");
   });
 
   it("returns undefined when the provider resolves to undefined", async () => {
-    const bracket = new WorkspaceBracket(() => makeProvider(undefined));
+    const bracket = new WorkspaceBracket(makeProvider(undefined));
     const cwd = await bracket.prepare(ctx);
     expect(cwd).toBeUndefined();
   });
@@ -68,7 +68,7 @@ describe("WorkspaceBracket — prepare", () => {
   it("passes the full context to provider.prepare", async () => {
     const workspace = makeWorkspace("/ws/dir");
     const provider = makeProvider(workspace);
-    const bracket = new WorkspaceBracket(() => provider);
+    const bracket = new WorkspaceBracket(provider);
     await bracket.prepare(ctx);
     expect(provider.prepare).toHaveBeenCalledWith(ctx);
   });
@@ -78,12 +78,12 @@ describe("WorkspaceBracket — dispose", () => {
   const outcome = { status: "completed" as const, description: "test agent" };
 
   it("returns empty string when prepare was not called (no workspace)", () => {
-    const bracket = new WorkspaceBracket(() => undefined);
+    const bracket = new WorkspaceBracket(undefined);
     expect(bracket.dispose(outcome)).toBe("");
   });
 
   it("returns empty string when the provider resolved to undefined", async () => {
-    const bracket = new WorkspaceBracket(() => makeProvider(undefined));
+    const bracket = new WorkspaceBracket(makeProvider(undefined));
     await bracket.prepare(ctx);
     expect(bracket.dispose(outcome)).toBe("");
   });
@@ -110,6 +110,13 @@ describe("WorkspaceBracket — dispose", () => {
     expect(workspace.dispose).toHaveBeenCalledWith(outcome);
   });
 
+  it("disposes a prepared workspace only once", async () => {
+    const { bracket, workspace } = await preparedBracket("\nmetadata");
+    expect(bracket.dispose(outcome)).toBe("\nmetadata");
+    expect(bracket.dispose({ status: "stopped", description: "shutdown" })).toBe("\nmetadata");
+    expect(workspace.dispose).toHaveBeenCalledOnce();
+  });
+
   it("propagates a throwing dispose (does not swallow)", async () => {
     const workspace: Workspace = {
       cwd: "/ws/dir",
@@ -117,7 +124,7 @@ describe("WorkspaceBracket — dispose", () => {
         throw new Error("dispose failed");
       }),
     };
-    const bracket = new WorkspaceBracket(() => makeProvider(workspace));
+    const bracket = new WorkspaceBracket(makeProvider(workspace));
     await bracket.prepare(ctx);
     expect(() => bracket.dispose(outcome)).toThrow("dispose failed");
   });

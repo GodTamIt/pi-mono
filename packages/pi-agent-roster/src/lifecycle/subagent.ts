@@ -11,6 +11,7 @@ import type { AgentSessionEvent, ToolDefinition } from "@earendil-works/pi-codin
 import { debugLog } from "../debug.ts";
 import { subscribeSubagentObserver } from "../observation/record-observer.ts";
 import type { RunConfig } from "../runtime.ts";
+import type { ModelRegistry } from "../session/model-resolver.ts";
 import type {
   AgentInvocation,
   CompactionInfo,
@@ -19,8 +20,8 @@ import type {
   SubagentType,
   ThinkingLevel,
 } from "../types.ts";
+import type { ChildModelIdentity, ChildRuntimeBaseline } from "./child-runtime-baseline.ts";
 import type { CreateSubagentSessionParams } from "./create-subagent-session.ts";
-import type { ParentSnapshot } from "./parent-snapshot.ts";
 import { RunListeners } from "./run-listeners.ts";
 import type { SubagentSession, TurnLoopResult } from "./subagent-session.ts";
 import { SubagentState, type SubagentStatus } from "./subagent-state.ts";
@@ -61,22 +62,26 @@ export type SteerOutcome =
  * optional; the four inputs run() cannot proceed without are required.
  */
 export interface SubagentExecution {
-  /** Assembly factory that produces a born-complete SubagentSession. */
-  createSubagentSession: (params: CreateSubagentSessionParams) => Promise<SubagentSession>;
-  /** Immutable spawn-time parent snapshot handed to the session factory. */
-  snapshot: ParentSnapshot;
-  /** Initial prompt for the turn loop. */
-  prompt: string;
-  /** Parent working directory handed to a workspace provider's prepare(). */
-  baseCwd: string;
-  observer?: SubagentLifecycleObserver | undefined;
-  getRunConfig?: (() => RunConfig) | undefined;
-  /** Resolves the registered workspace provider (if any) at run-start. */
-  getWorkspaceProvider?: (() => WorkspaceProvider | undefined) | undefined;
-  model?: Model<any> | undefined;
+  readonly baseline: ChildRuntimeBaseline;
+  readonly task: string;
+  readonly baseCwd: string;
+  readonly model?: ChildModelIdentity | undefined;
   maxTurns?: number | undefined;
-  thinkingLevel?: ThinkingLevel | undefined;
-  parentSession?: ParentSessionInfo | undefined;
+  graceTurns?: number | undefined;
+  readonly thinkingLevel?: ThinkingLevel | undefined;
+  readonly parentSession?: ParentSessionInfo | undefined;
+  readonly isBackground: boolean;
+}
+
+/** Live collaborators attached only once the manager admits the child. */
+export interface AdmittedSubagentRuntime {
+  createSubagentSession: (params: CreateSubagentSessionParams) => Promise<SubagentSession>;
+  modelRegistry: ModelRegistry;
+  defaultModel?: Model<any> | undefined;
+  model?: Model<any> | undefined;
+  observer?: SubagentLifecycleObserver | undefined;
+  runConfig?: RunConfig | undefined;
+  workspaceProvider?: WorkspaceProvider | undefined;
   signal?: AbortSignal | undefined;
 }
 
@@ -161,17 +166,21 @@ export class Subagent {
   get maxTurns(): number | undefined {
     return this.execution.maxTurns;
   }
+  get graceTurns(): number | undefined {
+    return this.execution.graceTurns;
+  }
 
-  readonly abortController: AbortController;
+  abortController: AbortController;
   private _promise?: Promise<void> | undefined;
   /** Handle on the agent's current run — the initial run, or the live resume that replaced it. */
   get promise(): Promise<void> | undefined {
     return this._promise;
   }
 
-  private readonly execution: SubagentExecution;
+  readonly execution: SubagentExecution;
+  private runtime?: AdmittedSubagentRuntime | undefined;
   private readonly listeners = new RunListeners();
-  private readonly workspaceBracket: WorkspaceBracket;
+  private workspaceBracket?: WorkspaceBracket | undefined;
 
   subagentSession?: SubagentSession | undefined;
 
@@ -200,9 +209,16 @@ export class Subagent {
     return this.subagentSession?.outputFile ?? this._releasedOutputFile;
   }
 
-  /** The tool call ID that spawned this background agent, if any. */
+  /** Lineage metadata retained for storage and UI only. */
+  get parentSessionId(): string | undefined {
+    return this.execution.parentSession?.parentSessionId;
+  }
   get toolCallId(): string | undefined {
     return this.execution.parentSession?.toolCallId;
+  }
+  private _task: string;
+  get task(): string {
+    return this._task;
   }
 
   /** Returns true when a SubagentSession is available (session is ready). */
@@ -276,11 +292,19 @@ export class Subagent {
 
     // Execution machinery — a single mandatory collaborator
     this.execution = init.execution;
+    this._task = init.execution.task;
+  }
 
-    // Per-run lifecycle collaborators
-    this.workspaceBracket = new WorkspaceBracket(
-      this.execution.getWorkspaceProvider ?? (() => undefined),
-    );
+  /** Attach live collaborators after admission. */
+  admit(runtime: AdmittedSubagentRuntime): void {
+    if (this.runtime) throw new Error(`Subagent ${this.id} was admitted more than once`);
+    this.runtime = runtime;
+    this.workspaceBracket = new WorkspaceBracket(runtime.workspaceProvider);
+  }
+
+  private admitted(): AdmittedSubagentRuntime {
+    if (!this.runtime) throw new Error(`Subagent ${this.id} has not been admitted`);
+    return this.runtime;
   }
 
   /**
@@ -293,17 +317,19 @@ export class Subagent {
    * captured internally).
    */
   async run(): Promise<void> {
+    const runtime = this.admitted();
+    const workspaceBracket = this.workspaceBracket!;
     this.markRunning(Date.now());
-    this.execution.observer?.onStarted?.(this);
-    this.listeners.wireSignal(this.execution.signal, () => this.abort());
+    runtime.observer?.onStarted?.(this);
+    this.listeners.wireSignal(runtime.signal, () => this.abort());
 
     // Guard the await so the no-provider path stays synchronous, preserving
     // the original run() timing: the factory is called in the same turn as
     // spawn() when no workspace provider is registered.
     let cwd: string | undefined;
-    if (this.workspaceBracket.hasProvider()) {
+    if (workspaceBracket.hasProvider()) {
       try {
-        cwd = await this.workspaceBracket.prepare({
+        cwd = await workspaceBracket.prepare({
           agentId: this.id,
           agentType: this.type,
           baseCwd: this.execution.baseCwd,
@@ -312,18 +338,24 @@ export class Subagent {
       } catch (err) {
         this.markError(err);
         this.listeners.release();
-        this.execution.observer?.onRunFinished?.(this);
+        this.runtime?.observer?.onRunFinished?.(this);
         return;
       }
     }
+    if (!this.isRunning()) {
+      this.finishStoppedRun();
+      return;
+    }
 
     try {
-      this.subagentSession = await this.execution.createSubagentSession({
-        snapshot: this.execution.snapshot,
+      this.subagentSession = await runtime.createSubagentSession({
+        baseline: this.execution.baseline,
+        modelRegistry: runtime.modelRegistry,
+        defaultModel: runtime.defaultModel,
         type: this.type,
         cwd,
         parentSession: this.execution.parentSession,
-        model: this.execution.model,
+        model: runtime.model,
         thinkingLevel: this.execution.thinkingLevel,
       });
     } catch (err) {
@@ -331,21 +363,26 @@ export class Subagent {
       this.failRun(err);
       return;
     }
+    if (!this.isRunning()) {
+      await this.releaseSession();
+      this.finishStoppedRun();
+      return;
+    }
 
     this.flushPendingSteers();
     this.listeners.attachObserver(
       subscribeSubagentObserver(this.subagentSession, this.state, {
-        onCompact: (info) => this.execution.observer?.onCompacted?.(this, info),
+        onCompact: (info) => this.admitted().observer?.onCompacted?.(this, info),
       }),
     );
-    this.execution.observer?.onSessionCreated?.(this);
+    runtime.observer?.onSessionCreated?.(this);
 
-    const runConfig = this.execution.getRunConfig?.();
+    const runConfig = this.admitted().runConfig;
     try {
-      const result = await this.subagentSession.runTurnLoop(this.execution.prompt, {
+      const result = await this.subagentSession.runTurnLoop(this._task, {
         maxTurns: this.execution.maxTurns,
         defaultMaxTurns: runConfig?.defaultMaxTurns,
-        graceTurns: runConfig?.graceTurns,
+        graceTurns: this.execution.graceTurns ?? runConfig?.graceTurns,
         signal: this.abortController.signal,
       });
       this.completeRun(result);
@@ -358,19 +395,15 @@ export class Subagent {
    * Start execution immediately (foreground / bypassQueue paths).
    * Stores the run promise so it is awaitable via the `promise` getter.
    */
-  start(): void {
+  start(runtime?: AdmittedSubagentRuntime): void {
+    if (runtime) this.admit(runtime);
+    else this.admitted();
     this._promise = this.guardedRun();
   }
 
-  /**
-   * Schedule execution through an external concurrency scheduler (the limiter).
-   * Captures the scheduler's promise eagerly, so a still-queued agent is
-   * awaitable via the `promise` getter from spawn — not only once its slot opens.
-   * The guard in guardedRun() makes an abort-while-queued run a no-op when the
-   * slot finally frees.
-   */
-  scheduleVia(schedule: (thunk: () => Promise<void>) => Promise<void>): void {
-    this._promise = schedule(() => this.guardedRun());
+  /** Attach the manager-owned queue settlement promise before admission. */
+  setQueuedPromise(promise: Promise<void>): void {
+    this._promise = promise;
   }
 
   /**
@@ -401,60 +434,154 @@ export class Subagent {
   }
 
   /**
-   * Resume an existing session with a new prompt, managing the observer
-   * subscription lifecycle internally (same wiring as run()).
-   *
-   * Requires an existing SubagentSession (set when the original run created it).
-   * The returned promise always resolves (errors are captured internally) and is
-   * published as the `promise` getter, so waiters track the resume rather than
-   * the settled handle of the original run.
-   * The parent signal flows straight through to resumeTurnLoop — resume does not
-   * route through this.abortController.
+   * Resume an existing child-owned transcript with a new prompt. Provider-backed
+   * runs always receive a fresh workspace and session; without a provider, a
+   * retained live session remains reusable.
    */
-  resume(prompt: string, signal?: AbortSignal): Promise<void> {
-    const subagentSession = this.subagentSession;
-    if (!subagentSession) {
-      // Rejection, not a throw: this method is not async, and a synchronous
-      // throw would escape a caller's `.rejects` assertion.
+  resume(
+    task: string,
+    signal?: AbortSignal,
+    budgets?: { maxTurns?: number | undefined; graceTurns?: number | undefined },
+  ): Promise<void> {
+    const session = this.subagentSession;
+    const transcriptPath = session?.outputFile ?? this._releasedOutputFile;
+    if (!session && !transcriptPath) {
       return Promise.reject(new Error("Subagent not configured for resume — missing session"));
     }
+    if (this.isActive()) return Promise.reject(new Error(`Subagent ${this.id} is already running`));
 
-    this._promise = this.runResume(subagentSession, prompt, signal);
+    const runtime = this.admitted();
+    if (runtime.workspaceProvider && !transcriptPath) {
+      return Promise.reject(
+        new Error("Subagent not configured for workspace resume — missing child transcript"),
+      );
+    }
+
+    this._task = task;
+    if (budgets?.maxTurns !== undefined) this.execution.maxTurns = budgets.maxTurns;
+    if (budgets?.graceTurns !== undefined) this.execution.graceTurns = budgets.graceTurns;
+    this.abortController = new AbortController();
+
+    if (session && !runtime.workspaceProvider) {
+      this._promise = this.runResume(session, task, signal, budgets);
+      return this._promise;
+    }
+
+    this.resetForResume(Date.now());
+    this._promise = this.reconstructAndResume(transcriptPath!, session, task, signal, budgets);
     return this._promise;
   }
 
-  /** The resume body. Always resolves — errors terminate through failResume(). */
-  private async runResume(
-    subagentSession: SubagentSession,
-    prompt: string,
+  private async reconstructAndResume(
+    transcriptPath: string,
+    previousSession: SubagentSession | undefined,
+    task: string,
     signal?: AbortSignal,
+    budgets?: { maxTurns?: number | undefined; graceTurns?: number | undefined },
   ): Promise<void> {
-    this.resetForResume(Date.now());
-    this.listeners.attachObserver(
-      subscribeSubagentObserver(subagentSession, this.state, {
-        onCompact: (info) => this.execution.observer?.onCompacted?.(this, info),
-      }),
-    );
+    const runtime = this.admitted();
+    this._releasedOutputFile = transcriptPath;
+    this.subagentSession = undefined;
+    this._sessionReleased = true;
+    await disposeQuietly(previousSession, "child session workspace resume");
+
+    const workspaceBracket = new WorkspaceBracket(runtime.workspaceProvider);
+    this.workspaceBracket = workspaceBracket;
 
     try {
-      this.completeResume(await subagentSession.resumeTurnLoop(prompt, signal));
+      const cwd = workspaceBracket.hasProvider()
+        ? await workspaceBracket.prepare(this.workspacePrepareContext())
+        : this.execution.baseline.cwd;
+      if (!this.isRunning()) {
+        this.completeResume("");
+        return;
+      }
+      this.subagentSession = await runtime.createSubagentSession({
+        baseline: this.execution.baseline,
+        modelRegistry: runtime.modelRegistry,
+        defaultModel: runtime.defaultModel,
+        type: this.type,
+        cwd,
+        parentSession: this.execution.parentSession,
+        model: runtime.model,
+        thinkingLevel: this.execution.thinkingLevel,
+        resumeTranscriptPath: transcriptPath,
+      });
+      if (!this.isRunning()) {
+        await this.releaseSession();
+        this.completeResume("");
+        return;
+      }
+      this._sessionReleased = false;
+      this.flushPendingSteers();
+      runtime.observer?.onSessionCreated?.(this);
+      await this.runResume(this.subagentSession, task, signal, budgets, true);
     } catch (err) {
       this.failResume(err);
     }
   }
 
+  /** The resume body. Always resolves — errors terminate through failResume(). */
+  private async runResume(
+    subagentSession: SubagentSession,
+    task: string,
+    signal?: AbortSignal,
+    budgets?: { maxTurns?: number | undefined; graceTurns?: number | undefined },
+    alreadyRunning = false,
+  ): Promise<void> {
+    if (!alreadyRunning) this.resetForResume(Date.now());
+    this.listeners.attachObserver(
+      subscribeSubagentObserver(subagentSession, this.state, {
+        onCompact: (info) => this.admitted().observer?.onCompacted?.(this, info),
+      }),
+    );
+
+    const combinedSignal = combineAbortSignals(this.abortController.signal, signal);
+    try {
+      const runConfig = this.admitted().runConfig;
+      this.completeResume(
+        await subagentSession.resumeTurnLoop(task, {
+          maxTurns: budgets?.maxTurns ?? this.execution.maxTurns,
+          defaultMaxTurns: runConfig?.defaultMaxTurns,
+          graceTurns: budgets?.graceTurns ?? this.execution.graceTurns ?? runConfig?.graceTurns,
+          signal: combinedSignal.signal,
+        }),
+      );
+    } catch (err) {
+      this.failResume(err);
+    } finally {
+      combinedSignal.cleanup();
+    }
+  }
+
   /** Terminate a resume as completed: mark, release listeners, notify observer. */
   completeResume(result: string): void {
-    this.markCompleted(result);
     this.listeners.release();
-    this.execution.observer?.onResumeFinished?.(this);
+    const status = this.status === "stopped" ? "stopped" : "completed";
+    const addendum = this.workspaceBracket?.dispose({
+      status,
+      description: this.description,
+    });
+    this.markCompleted(result + (addendum ?? ""));
+    this.admitted().observer?.onResumeFinished?.(this);
   }
 
   /** Terminate a resume as errored: mark, release listeners, notify observer. */
   failResume(err: unknown): void {
-    this.markError(err);
     this.listeners.release();
-    this.execution.observer?.onResumeFinished?.(this);
+    let addendum = "";
+    try {
+      addendum =
+        this.workspaceBracket?.dispose({
+          status: this.status === "stopped" ? "stopped" : "error",
+          description: this.description,
+        }) ?? "";
+    } catch (cleanupErr) {
+      debugLog("workspace dispose on agent resume error", cleanupErr);
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    this.markError(message + addendum);
+    this.admitted().observer?.onResumeFinished?.(this);
   }
 
   /** Transition to running state. Sets status and startedAt. */
@@ -512,7 +639,7 @@ export class Subagent {
    */
   stopQueued(): void {
     this.state.stopQueued();
-    this.execution.observer?.onRunFinished?.(this);
+    this.runtime?.observer?.onRunFinished?.(this);
   }
 
   /**
@@ -523,6 +650,7 @@ export class Subagent {
    */
   abort(): boolean {
     if (!this.isRunning()) return false;
+    this._pendingSteers = [];
     this.abortController.abort();
     this.markStopped();
     return true;
@@ -553,6 +681,31 @@ export class Subagent {
     this.listeners.release();
   }
 
+  private workspacePrepareContext() {
+    return {
+      agentId: this.id,
+      agentType: this.type,
+      baseCwd: this.execution.baseCwd,
+      invocation: this.invocation,
+    };
+  }
+
+  private finishStoppedRun(): void {
+    this.listeners.release();
+    let addendum = "";
+    try {
+      addendum =
+        this.workspaceBracket?.dispose({
+          status: "stopped",
+          description: this.description,
+        }) ?? "";
+    } catch (err) {
+      debugLog("workspace dispose on stopped agent", err);
+    }
+    this.markCompleted(addendum);
+    this.runtime?.observer?.onRunFinished?.(this);
+  }
+
   /** Complete a run: release listeners, dispose the workspace, status transition, notify observer. */
   completeRun(result: TurnLoopResult): void {
     this.listeners.release();
@@ -564,13 +717,13 @@ export class Subagent {
         : "completed";
     const finalResult =
       result.responseText +
-      this.workspaceBracket.dispose({ status: finalStatus, description: this.description });
+      this.workspaceBracket!.dispose({ status: finalStatus, description: this.description });
 
     if (result.aborted) this.markAborted(finalResult);
     else if (result.steered) this.markSteered(finalResult);
     else this.markCompleted(finalResult);
 
-    this.execution.observer?.onRunFinished?.(this);
+    this.runtime?.observer?.onRunFinished?.(this);
   }
 
   /**
@@ -579,6 +732,12 @@ export class Subagent {
    * swallowed so the caller's remaining cleanup still runs.
    */
   async disposeSession(): Promise<void> {
+    this.listeners.release();
+    try {
+      this.workspaceBracket?.dispose({ status: this.status, description: this.description });
+    } catch (err) {
+      debugLog("workspace dispose on child session teardown", err);
+    }
     await disposeQuietly(this.subagentSession, "child session dispose");
   }
 
@@ -594,7 +753,7 @@ export class Subagent {
   async releaseSession(): Promise<void> {
     const session = this.subagentSession;
     if (!session) return;
-    this._releasedOutputFile = session.outputFile;
+    this._releasedOutputFile = session.outputFile ?? this._releasedOutputFile;
     this.subagentSession = undefined;
     this._sessionReleased = true;
     await disposeQuietly(session, "child session release");
@@ -606,12 +765,12 @@ export class Subagent {
     this.listeners.release();
 
     try {
-      this.workspaceBracket.dispose({ status: "error", description: this.description });
+      this.workspaceBracket?.dispose({ status: "error", description: this.description });
     } catch (cleanupErr) {
       debugLog("workspace dispose on agent error", cleanupErr);
     }
 
-    this.execution.observer?.onRunFinished?.(this);
+    this.runtime?.observer?.onRunFinished?.(this);
   }
 }
 
@@ -652,4 +811,28 @@ function settleOrAbort(run: Promise<void>, signal: AbortSignal): Promise<void> {
   return Promise.race([run, interrupted]).finally(() => {
     detach.abort();
   });
+}
+
+function combineAbortSignals(
+  primary: AbortSignal,
+  secondary?: AbortSignal,
+): {
+  signal: AbortSignal;
+  cleanup: () => void;
+} {
+  if (!secondary || secondary === primary) return { signal: primary, cleanup: () => {} };
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (primary.aborted || secondary.aborted) controller.abort();
+  else {
+    primary.addEventListener("abort", abort, { once: true });
+    secondary.addEventListener("abort", abort, { once: true });
+  }
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      primary.removeEventListener("abort", abort);
+      secondary.removeEventListener("abort", abort);
+    },
+  };
 }

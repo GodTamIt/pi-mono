@@ -11,7 +11,6 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
   toolNames: ["read"],
   systemPrompt: "You are Explore.",
   promptMode: "replace",
-  inheritContext: false,
   runInBackground: false,
 };
 
@@ -36,6 +35,11 @@ export function createSubagentSessionIO() {
     createResourceLoader: vi.fn().mockReturnValue({ reload: vi.fn().mockResolvedValue(undefined) }),
     deriveSessionDir: vi.fn().mockReturnValue("/mock/session-dir/tasks"),
     createSessionManager: vi.fn().mockReturnValue({
+      newSession: vi.fn(),
+      getSessionFile: vi.fn().mockReturnValue("/sessions/child.jsonl"),
+      getSessionId: vi.fn().mockReturnValue("child-session-id"),
+    }),
+    openSessionManager: vi.fn().mockReturnValue({
       newSession: vi.fn(),
       getSessionFile: vi.fn().mockReturnValue("/sessions/child.jsonl"),
       getSessionId: vi.fn().mockReturnValue("child-session-id"),

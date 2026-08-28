@@ -1,22 +1,32 @@
 import type { CreateSubagentSessionParams } from "../../src/lifecycle/create-subagent-session.ts";
-import { Subagent, type SubagentExecution } from "../../src/lifecycle/subagent.ts";
+import {
+  type AdmittedSubagentRuntime,
+  Subagent,
+  type SubagentExecution,
+} from "../../src/lifecycle/subagent.ts";
 import type { SubagentSession } from "../../src/lifecycle/subagent-session.ts";
 import { SubagentState, type SubagentStatus } from "../../src/lifecycle/subagent-state.ts";
 import type { AgentInvocation, SubagentType } from "../../src/types.ts";
 import { createSubagentSessionStub, toSubagentSession } from "./mock-session.ts";
 import { STUB_SNAPSHOT } from "./stub-ctx.ts";
 
-/**
- * A minimal, mandatory SubagentExecution for tests that build a passive record
- * and never call run(). The factory resolves to a default session stub.
- */
 export function makeStubExecution(overrides: Partial<SubagentExecution> = {}): SubagentExecution {
+  return {
+    baseline: STUB_SNAPSHOT,
+    task: "do something",
+    baseCwd: "",
+    isBackground: false,
+    ...overrides,
+  };
+}
+
+export function makeStubRuntime(
+  overrides: Partial<AdmittedSubagentRuntime> = {},
+): AdmittedSubagentRuntime {
   return {
     createSubagentSession: async (_params: CreateSubagentSessionParams): Promise<SubagentSession> =>
       toSubagentSession(createSubagentSessionStub()),
-    snapshot: STUB_SNAPSHOT,
-    prompt: "do something",
-    baseCwd: "",
+    modelRegistry: { find: () => undefined, getAll: () => [] },
     ...overrides,
   };
 }
@@ -27,35 +37,23 @@ export interface TestSubagentOptions {
   description?: string;
   invocation?: AgentInvocation;
   execution?: SubagentExecution;
-  /** Shorthand to set execution.parentSession.toolCallId. Ignored when execution is supplied. */
+  runtime?: AdmittedSubagentRuntime;
   toolCallId?: string;
-  /** Passive lifecycle state shorthands. */
   status?: SubagentStatus;
   result?: string | undefined;
   error?: string | undefined;
-  /** Seed the never-started marker (the agent was stopped before it was admitted). */
   stoppedWhileQueued?: boolean;
   startedAt?: number;
   completedAt?: number | undefined;
-  /** Seed the consumed-outcome timestamp (undefined = obligation open). */
   consumedAt?: number;
-  /** Seed toolUses. */
   toolUses?: number;
-  /** Seed lifetimeUsage. */
   lifetimeUsage?: { input: number; output: number; cacheWrite: number };
-  /** Seed compactionCount. */
   compactionCount?: number;
-  /**
-   * Set turnCount. Starts at 1; pass a higher value to simulate multiple turns.
-   * Ignored when `execution` is supplied (maxTurns lives on the execution, not state).
-   */
   turnCount?: number;
-  /** Seed active tools by name. */
   activeTools?: string[];
-  /** Seed responseText. */
   responseText?: string;
-  /** Thread maxTurns into the stub execution. Ignored when `execution` is supplied. */
   maxTurns?: number;
+  graceTurns?: number;
 }
 
 export function createTestSubagent(overrides: TestSubagentOptions = {}): Subagent {
@@ -65,6 +63,7 @@ export function createTestSubagent(overrides: TestSubagentOptions = {}): Subagen
     description,
     invocation,
     execution,
+    runtime,
     toolCallId,
     toolUses,
     lifetimeUsage,
@@ -73,6 +72,7 @@ export function createTestSubagent(overrides: TestSubagentOptions = {}): Subagen
     activeTools,
     responseText,
     maxTurns,
+    graceTurns,
     ...stateOverrides
   } = overrides;
   const state = new SubagentState({
@@ -88,7 +88,7 @@ export function createTestSubagent(overrides: TestSubagentOptions = {}): Subagen
     ...(responseText !== undefined ? { responseText } : {}),
     ...stateOverrides,
   });
-  return new Subagent({
+  const record = new Subagent({
     id: id ?? "agent-1",
     type: type ?? "general-purpose",
     description: description ?? "Test task",
@@ -98,7 +98,10 @@ export function createTestSubagent(overrides: TestSubagentOptions = {}): Subagen
       makeStubExecution({
         ...(toolCallId ? { parentSession: { toolCallId } } : {}),
         ...(maxTurns !== undefined ? { maxTurns } : {}),
+        ...(graceTurns !== undefined ? { graceTurns } : {}),
       }),
     state,
   });
+  record.admit(runtime ?? makeStubRuntime());
+  return record;
 }

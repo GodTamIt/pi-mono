@@ -1,4 +1,4 @@
-import type { ParentSnapshot } from "../lifecycle/parent-snapshot.ts";
+import type { ChildRuntimeBaseline } from "../lifecycle/child-runtime-baseline.ts";
 import type { AgentSpawnConfig } from "../lifecycle/subagent-manager.ts";
 import type { ParentSessionInfo, Subagent } from "../types.ts";
 import { textResult } from "./helpers.ts";
@@ -6,14 +6,14 @@ import type { ResolvedSpawnConfig } from "./spawn-config.ts";
 
 /** Narrow manager interface for the background spawner. */
 export interface BackgroundManagerDeps {
-  spawn(snapshot: ParentSnapshot, type: string, prompt: string, opts: AgentSpawnConfig): string;
+  spawn(baseline: ChildRuntimeBaseline, type: string, task: string, opts: AgentSpawnConfig): string;
   getRecord(id: string): Subagent | undefined;
 }
 
 /** All values the background spawner needs beyond the resolved config. */
 export interface BackgroundParams {
   config: ResolvedSpawnConfig;
-  snapshot: ParentSnapshot;
+  baseline: ChildRuntimeBaseline;
   parentSession: ParentSessionInfo;
   settings: { readonly maxConcurrent: number };
 }
@@ -27,12 +27,12 @@ export function spawnBackground(manager: BackgroundManagerDeps, params: Backgrou
 
   let id: string;
   try {
-    id = manager.spawn(params.snapshot, identity.subagentType, execution.prompt, {
+    id = manager.spawn(params.baseline, identity.subagentType, execution.task, {
       parentSession: params.parentSession,
       description: execution.description,
       model: execution.model,
       maxTurns: execution.effectiveMaxTurns,
-      inheritContext: execution.inheritContext,
+      graceTurns: execution.effectiveGraceTurns,
       thinkingLevel: execution.thinking,
       isBackground: true,
       invocation: execution.agentInvocation,

@@ -77,8 +77,8 @@ export class AgentWidget implements SubagentManagerObserver {
   private uiCtx: UICtx | undefined;
   private widgetFrame = 0;
   private widgetInterval: ReturnType<typeof setInterval> | undefined;
-  /** Tracks how many turns each finished agent has survived. Key: agent ID, Value: turns since finished. */
-  private finishedTurnAge = new Map<string, number>();
+  /** Tracks each observed completion so resumed agents get a fresh linger window. */
+  private finishedTurnAge = new Map<string, { completedAt: number; age: number }>();
   /** How many extra turns errors/aborted agents linger (completed agents clear after 1 turn). */
   private static readonly ERROR_LINGER_TURNS = 2;
 
@@ -112,8 +112,8 @@ export class AgentWidget implements SubagentManagerObserver {
    */
   onTurnStart() {
     // Age all finished agents
-    for (const [id, age] of this.finishedTurnAge) {
-      this.finishedTurnAge.set(id, age + 1);
+    for (const completion of this.finishedTurnAge.values()) {
+      completion.age++;
     }
     // Trigger a widget refresh (will filter out expired agents)
     this.update();
@@ -159,7 +159,7 @@ export class AgentWidget implements SubagentManagerObserver {
 
   /** Check if a finished agent should still be shown in the widget. */
   private shouldShowFinished(agentId: string, status: string): boolean {
-    const age = this.finishedTurnAge.get(agentId) ?? 0;
+    const age = this.finishedTurnAge.get(agentId)?.age ?? 0;
     const maxAge = ERROR_STATUSES.has(status) ? AgentWidget.ERROR_LINGER_TURNS : 1;
     return age < maxAge;
   }
@@ -191,6 +191,7 @@ export class AgentWidget implements SubagentManagerObserver {
       compactionCount: record.compactionCount,
       turnCount: record.turnCount,
       maxTurns: record.maxTurns,
+      graceTurns: record.graceTurns,
       activeTools: record.activeTools,
       responseText: record.responseText,
       contextPercent: record.getContextPercent(),
@@ -216,12 +217,12 @@ export class AgentWidget implements SubagentManagerObserver {
    */
   private clearWidget(backgroundAgents: readonly AgentSummary[]): void {
     if (this.widgetRegistered) {
-      this.uiCtx!.setWidget("agents", undefined);
+      this.uiCtx?.setWidget("agents", undefined);
       this.widgetRegistered = false;
       this.tui = undefined;
     }
     if (this.lastStatusText !== undefined) {
-      this.uiCtx!.setStatus("subagents", undefined);
+      this.uiCtx?.setStatus("subagents", undefined);
       this.lastStatusText = undefined;
     }
     if (this.widgetInterval) {
@@ -247,7 +248,7 @@ export class AgentWidget implements SubagentManagerObserver {
       newStatusText = `${statusParts.join(", ")} agent${total === 1 ? "" : "s"}`;
     }
     if (newStatusText !== this.lastStatusText) {
-      this.uiCtx!.setStatus("subagents", newStatusText);
+      this.uiCtx?.setStatus("subagents", newStatusText);
       this.lastStatusText = newStatusText;
     }
   }
@@ -261,8 +262,10 @@ export class AgentWidget implements SubagentManagerObserver {
    */
   private seedFinishedAgents(agents: readonly AgentSummary[]): void {
     for (const a of agents) {
-      if (a.completedAt && !this.finishedTurnAge.has(a.id)) {
-        this.finishedTurnAge.set(a.id, 0);
+      if (!a.completedAt) continue;
+      const observed = this.finishedTurnAge.get(a.id);
+      if (observed?.completedAt !== a.completedAt) {
+        this.finishedTurnAge.set(a.id, { completedAt: a.completedAt, age: 0 });
       }
     }
   }
@@ -323,5 +326,6 @@ export class AgentWidget implements SubagentManagerObserver {
     this.widgetRegistered = false;
     this.tui = undefined;
     this.lastStatusText = undefined;
+    this.finishedTurnAge.clear();
   }
 }

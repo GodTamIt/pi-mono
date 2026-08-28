@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import { AgentTypeRegistry } from "../../src/config/agent-types.ts";
-import type { ParentSnapshot } from "../../src/lifecycle/parent-snapshot.ts";
+import type { ChildRuntimeBaseline } from "../../src/lifecycle/child-runtime-baseline.ts";
 import type {
   AgentToolManager,
   AgentToolRuntime,
@@ -39,7 +39,7 @@ export type AgentToolFixture = {
  */
 export function createToolDeps(overrides: Partial<AgentToolFixture> = {}): AgentToolFixture {
   const runtime: AgentToolRuntime = {
-    buildSnapshot: vi.fn((_inheritContext: boolean): ParentSnapshot => STUB_SNAPSHOT),
+    buildChildBaseline: vi.fn((): ChildRuntimeBaseline => STUB_SNAPSHOT),
     getModelInfo: vi.fn(() => ({
       parentModel: makeModel({ id: "claude-sonnet", name: "Claude Sonnet" }),
       modelRegistry: { find: () => undefined, getAll: () => [], getAvailable: () => [] },
@@ -58,7 +58,11 @@ export function createToolDeps(overrides: Partial<AgentToolFixture> = {}): Agent
       getRecord: vi.fn().mockReturnValue(createTestSubagent()),
     },
     runtime,
-    settings: { defaultMaxTurns: undefined as number | undefined, maxConcurrent: 4 },
+    settings: {
+      defaultMaxTurns: undefined as number | undefined,
+      graceTurns: undefined as number | undefined,
+      maxConcurrent: 4,
+    },
     registry: defaultRegistry,
     agentDir: "/home/user/.pi",
     ...overrides,

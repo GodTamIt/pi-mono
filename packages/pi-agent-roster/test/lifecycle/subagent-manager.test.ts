@@ -1034,6 +1034,7 @@ describe("SubagentManager — lifecycle observer forwarding", () => {
     const id = manager.spawn(STUB_SNAPSHOT, "general-purpose", "test", {
       description: "test",
       isBackground: true,
+      bypassQueue: true,
       observer: {
         onSessionCreated: (agent) => {
           received.agent = agent;

@@ -12,6 +12,7 @@
  * createSession), so threading the provider through here would be a relay smell.
  */
 
+import { dirname } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
 import type { AgentSession, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { AgentConfigLookup } from "../config/agent-types.ts";
@@ -20,7 +21,7 @@ import type { ModelRegistry } from "../session/model-resolver.ts";
 import { type AssemblerIO, assembleSessionConfig } from "../session/session-config.ts";
 import type { ParentSessionInfo, ShellExec, SubagentType, ThinkingLevel } from "../types.ts";
 import type { ChildLifecyclePublisher } from "./child-lifecycle.ts";
-import type { ParentSnapshot } from "./parent-snapshot.ts";
+import type { ChildRuntimeBaseline } from "./child-runtime-baseline.ts";
 import { SubagentSession } from "./subagent-session.ts";
 
 /**
@@ -97,6 +98,7 @@ export interface EnvironmentIO {
 export interface SessionFactoryIO {
   createResourceLoader: (opts: ResourceLoaderOptions) => ResourceLoaderLike;
   createSessionManager: (cwd: string, sessionDir: string) => SessionManagerLike;
+  openSessionManager: (path: string, cwd: string) => SessionManagerLike;
   createSettingsManager: (cwd: string, agentDir: string) => SettingsManager;
   /**
    * Settings view the child's resource loader resolves packages from.
@@ -130,7 +132,10 @@ export interface SubagentSessionDeps {
 
 /** Per-spawn parameters — the fields that vary per child session. */
 export interface CreateSubagentSessionParams {
-  snapshot: ParentSnapshot;
+  baseline: ChildRuntimeBaseline;
+  /** Live SDK values resolved only after admission. */
+  modelRegistry: ModelRegistry;
+  defaultModel?: Model<any> | undefined;
   type: SubagentType;
   /** Resolved workspace cwd; undefined → parent cwd. */
   cwd?: string | undefined;
@@ -138,6 +143,8 @@ export interface CreateSubagentSessionParams {
   parentSession?: ParentSessionInfo | undefined;
   model?: Model<any> | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
+  /** Existing child transcript to reconstruct; never a parent transcript. */
+  resumeTranscriptPath?: string | undefined;
 }
 
 /**
@@ -148,22 +155,21 @@ export async function createSubagentSession(
   params: CreateSubagentSessionParams,
   deps: SubagentSessionDeps,
 ): Promise<SubagentSession> {
-  const { snapshot, type } = params;
+  const { baseline, type } = params;
   const parentSessionId = params.parentSession?.parentSessionId;
   deps.lifecycle.spawning({ agentName: type, parentSessionId });
 
   // Resolve working directory upfront - needed for detectEnv before assembly.
-  const effectiveCwd = params.cwd ?? snapshot.cwd;
+  const effectiveCwd = params.cwd ?? baseline.cwd;
   const env = await deps.io.detectEnv(deps.exec, effectiveCwd);
 
   // Assemble session configuration (synchronous, no SDK objects).
   const cfg = assembleSessionConfig(
     type,
     {
-      cwd: snapshot.cwd,
-      parentSystemPrompt: snapshot.systemPrompt,
-      parentModel: snapshot.model,
-      modelRegistry: snapshot.modelRegistry,
+      cwd: baseline.cwd,
+      parentModel: params.defaultModel,
+      modelRegistry: params.modelRegistry,
     },
     {
       cwd: params.cwd,
@@ -179,14 +185,8 @@ export async function createSubagentSession(
   const sessionSettings = deps.io.createSettingsManager(cfg.effectiveCwd, agentDir);
   const loaderSettings = deps.io.createLoaderSettingsManager(sessionSettings);
 
-  // Children inherit the parent's skills and every extension the composition
-  // root did not exclude (#696).
-  //
-  // Suppress AGENTS.md/CLAUDE.md and APPEND_SYSTEM.md - upstream's
-  // buildSystemPrompt() re-appends both AFTER systemPromptOverride, which
-  // would defeat prompt_mode: replace. Parent context, if wanted, reaches the
-  // subagent via prompt_mode: append (parentSystemPrompt is embedded in
-  // systemPromptOverride) or inherit_context (conversation).
+  // Keep context files and ambient prompt fragments out of the child baseline;
+  // static agent instructions are assembled above.
   const loader = deps.io.createResourceLoader({
     cwd: cfg.effectiveCwd,
     agentDir,
@@ -202,16 +202,19 @@ export async function createSubagentSession(
   // Create a persisted SessionManager so transcripts are written in Pi's
   // official JSONL format. Falls back to a temp directory when the parent
   // session is not persisted (e.g. headless/API mode).
-  const sessionDir = deps.io.deriveSessionDir(
-    params.parentSession?.parentSessionFile,
-    cfg.effectiveCwd,
-  );
-  const sessionManager = deps.io.createSessionManager(cfg.effectiveCwd, sessionDir);
-  sessionManager.newSession(
-    params.parentSession?.parentSessionId === undefined
-      ? {}
-      : { parentSession: params.parentSession.parentSessionId },
-  );
+  const sessionDir = params.resumeTranscriptPath
+    ? dirname(params.resumeTranscriptPath)
+    : deps.io.deriveSessionDir(params.parentSession?.parentSessionFile, cfg.effectiveCwd);
+  const sessionManager = params.resumeTranscriptPath
+    ? deps.io.openSessionManager(params.resumeTranscriptPath, cfg.effectiveCwd)
+    : deps.io.createSessionManager(cfg.effectiveCwd, sessionDir);
+  if (!params.resumeTranscriptPath) {
+    sessionManager.newSession(
+      params.parentSession?.parentSessionId === undefined
+        ? {}
+        : { parentSession: params.parentSession.parentSessionId },
+    );
+  }
   const sessionId = sessionManager.getSessionId();
 
   const { session } = await deps.io.createSession({
@@ -219,7 +222,7 @@ export async function createSubagentSession(
     agentDir,
     sessionManager,
     settingsManager: sessionSettings,
-    modelRegistry: snapshot.modelRegistry,
+    modelRegistry: params.modelRegistry,
     model: cfg.model,
     tools: cfg.toolNames,
     excludeTools: EXCLUDED_TOOL_NAMES,
@@ -233,7 +236,7 @@ export async function createSubagentSession(
     sessionDir,
     agentName: type,
     agentMaxTurns: cfg.agentMaxTurns,
-    parentContext: snapshot.parentContext,
+    agentGraceTurns: cfg.agentGraceTurns,
     lifecycle: deps.lifecycle,
   });
 

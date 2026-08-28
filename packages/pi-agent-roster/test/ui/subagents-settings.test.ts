@@ -1,242 +1,174 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SubagentsSettingsHandler } from "../../src/ui/subagents-settings.ts";
 import { makeMenuUI } from "../helpers/ui-stubs.ts";
+
+function toast(message: string) {
+  return { message, level: "info" as const };
+}
 
 function makeSettings() {
   return {
     maxConcurrent: 4,
     defaultMaxTurns: undefined as number | undefined,
-    graceTurns: 5,
-    applyMaxConcurrent: vi.fn((): { message: string; level: "info" | "warning" } => ({
-      message: "Max concurrency set to 8",
-      level: "info",
-    })),
-    applyDefaultMaxTurns: vi.fn((): { message: string; level: "info" | "warning" } => ({
-      message: "Default max turns set to unlimited",
-      level: "info",
-    })),
-    applyGraceTurns: vi.fn((): { message: string; level: "info" | "warning" } => ({
-      message: "Grace turns set to 3",
-      level: "info",
-    })),
+    graceTurns: undefined as number | undefined,
     consumedSessionRetentionMinutes: 10,
     unconsumedSessionRetentionMinutes: 720,
-    applyConsumedSessionRetentionMinutes: vi.fn(
-      (): { message: string; level: "info" | "warning" } => ({
-        message: "Consumed-session retention set to 30 min",
-        level: "info",
-      }),
-    ),
-    applyUnconsumedSessionRetentionMinutes: vi.fn(
-      (): { message: string; level: "info" | "warning" } => ({
-        message: "Unconsumed-session retention set to 1440 min",
-        level: "info",
-      }),
-    ),
     abortAllOnInterrupt: true,
-    toggleAbortAllOnInterrupt: vi.fn((): { message: string; level: "info" | "warning" } => ({
-      message: "Abort all subagents on ESC: off",
-      level: "info",
-    })),
+    applyMaxConcurrent: vi.fn(() => toast("Max concurrency updated")),
+    applyDefaultMaxTurns: vi.fn(() => toast("Default max turns updated")),
+    applyGraceTurns: vi.fn(() => toast("Grace turns updated")),
+    applyConsumedSessionRetentionMinutes: vi.fn(() => toast("Consumed retention updated")),
+    applyUnconsumedSessionRetentionMinutes: vi.fn(() => toast("Unconsumed retention updated")),
+    toggleAbortAllOnInterrupt: vi.fn(() => toast("Interrupt policy updated")),
   };
 }
 
 function makeHandler(settings = makeSettings()) {
-  const handler = new SubagentsSettingsHandler(settings);
-  return { handler, settings };
+  return { handler: new SubagentsSettingsHandler(settings), settings };
 }
 
-beforeEach(() => {
-  vi.restoreAllMocks();
-});
-
 describe("SubagentsSettingsHandler", () => {
-  it("is constructable", () => {
+  it("labels the UI as project-only and shows effective unlimited budgets", async () => {
     const { handler } = makeHandler();
-    expect(handler).toBeInstanceOf(SubagentsSettingsHandler);
-  });
+    const ui = makeMenuUI([undefined]);
 
-  it("shows the six settings options with current values", async () => {
-    const { handler } = makeHandler();
-    const ui = makeMenuUI([undefined]); // cancel immediately
     await handler.handle({ ui });
-    const options = ui.select.mock.calls[0]![1] as string[];
-    expect(options).toEqual([
+
+    expect(ui.select).toHaveBeenCalledWith("Project settings (global defaults are read-only)", [
       "Max concurrency (current: 4)",
       "Default max turns (current: unlimited)",
-      "Grace turns (current: 5)",
+      "Grace turns (current: unlimited)",
       "Consumed-session retention (current: 10 min)",
       "Unconsumed-session retention (current: 720 min)",
       "Abort all subagents on ESC (current: on)",
     ]);
   });
 
-  it("renders the abort-on-ESC option as off when the policy is disabled", async () => {
-    const settings = makeSettings();
-    settings.abortAllOnInterrupt = false;
-    const { handler } = makeHandler(settings);
-    const ui = makeMenuUI([undefined]);
-    await handler.handle({ ui });
-    const options = ui.select.mock.calls[0]![1] as string[];
-    expect(options[5]).toBe("Abort all subagents on ESC (current: off)");
+  it("does nothing when the settings list or input is cancelled", async () => {
+    const first = makeHandler();
+    await first.handler.handle({ ui: makeMenuUI([undefined]) });
+    expect(first.settings.applyMaxConcurrent).not.toHaveBeenCalled();
+
+    const second = makeHandler();
+    const ui = makeMenuUI(["Max concurrency (current: 4)"]);
+    ui.input.mockResolvedValue(undefined);
+    await second.handler.handle({ ui });
+    expect(second.settings.applyMaxConcurrent).not.toHaveBeenCalled();
   });
 
-  it("applies no change when the settings list is cancelled", async () => {
-    const { handler, settings } = makeHandler();
-    const ui = makeMenuUI([undefined]);
-    await handler.handle({ ui });
-    expect(settings.applyMaxConcurrent).not.toHaveBeenCalled();
-    expect(settings.applyDefaultMaxTurns).not.toHaveBeenCalled();
-    expect(settings.applyGraceTurns).not.toHaveBeenCalled();
-    expect(ui.input).not.toHaveBeenCalled();
-  });
-});
-
-describe("SubagentsSettingsHandler — max concurrency", () => {
-  it("delegates a valid value to applyMaxConcurrent and notifies the returned toast", async () => {
+  it("applies bounded decimal values and reports the returned toast", async () => {
     const { handler, settings } = makeHandler();
     const ui = makeMenuUI(["Max concurrency (current: 4)"]);
-    ui.input = vi.fn().mockResolvedValue("8");
+    ui.input.mockResolvedValue(" 8 ");
+
     await handler.handle({ ui });
+
     expect(settings.applyMaxConcurrent).toHaveBeenCalledWith(8);
-    expect(ui.notify).toHaveBeenCalledWith("Max concurrency set to 8", "info");
+    expect(ui.notify).toHaveBeenCalledWith("Max concurrency updated", "info");
   });
 
-  it("rejects a value below 1 with a warning and does not apply", async () => {
-    const { handler, settings } = makeHandler();
-    const ui = makeMenuUI(["Max concurrency (current: 4)"]);
-    ui.input = vi.fn().mockResolvedValue("0");
-    await handler.handle({ ui });
-    expect(settings.applyMaxConcurrent).not.toHaveBeenCalled();
-    expect(ui.notify).toHaveBeenCalledWith("Must be a positive integer.", "warning");
-  });
+  it.each(["4agents", "1e2", "0", "1025", ""])(
+    "rejects malformed or out-of-range concurrency input %j",
+    async (input) => {
+      const { handler, settings } = makeHandler();
+      const ui = makeMenuUI(["Max concurrency (current: 4)"]);
+      ui.input.mockResolvedValue(input);
 
-  it("does not apply when the input is cancelled", async () => {
-    const { handler, settings } = makeHandler();
-    const ui = makeMenuUI(["Max concurrency (current: 4)"]);
-    ui.input = vi.fn().mockResolvedValue(undefined);
-    await handler.handle({ ui });
-    expect(settings.applyMaxConcurrent).not.toHaveBeenCalled();
-  });
+      await handler.handle({ ui });
 
-  it("rejects non-numeric input with a warning and does not apply", async () => {
-    const { handler, settings } = makeHandler();
-    const ui = makeMenuUI(["Max concurrency (current: 4)"]);
-    ui.input = vi.fn().mockResolvedValue("abc");
-    await handler.handle({ ui });
-    expect(settings.applyMaxConcurrent).not.toHaveBeenCalled();
-    expect(ui.notify).toHaveBeenCalledWith("Must be a positive integer.", "warning");
-  });
+      expect(settings.applyMaxConcurrent).not.toHaveBeenCalled();
+      expect(ui.notify).toHaveBeenCalledWith("Must be an integer from 1 through 1024.", "warning");
+    },
+  );
 });
 
-describe("SubagentsSettingsHandler — default max turns", () => {
-  it("delegates 0 (unlimited) to applyDefaultMaxTurns", async () => {
-    const { handler, settings } = makeHandler();
-    const ui = makeMenuUI(["Default max turns (current: unlimited)"]);
-    ui.input = vi.fn().mockResolvedValue("0");
-    await handler.handle({ ui });
-    expect(settings.applyDefaultMaxTurns).toHaveBeenCalledWith(0);
-    expect(ui.notify).toHaveBeenCalledWith("Default max turns set to unlimited", "info");
-  });
+describe("SubagentsSettingsHandler — optional turn budgets", () => {
+  it("explains the max-turn range and allows blank input to clear it", async () => {
+    const settings = makeSettings();
+    settings.defaultMaxTurns = 20;
+    const { handler } = makeHandler(settings);
+    const ui = makeMenuUI(["Default max turns (current: 20)"]);
+    ui.input.mockResolvedValue("");
 
-  it("delegates a positive value to applyDefaultMaxTurns", async () => {
-    const { handler, settings } = makeHandler();
-    const ui = makeMenuUI(["Default max turns (current: unlimited)"]);
-    ui.input = vi.fn().mockResolvedValue("20");
     await handler.handle({ ui });
-    expect(settings.applyDefaultMaxTurns).toHaveBeenCalledWith(20);
-  });
 
-  it("rejects a negative value with a warning and does not apply", async () => {
-    const { handler, settings } = makeHandler();
-    const ui = makeMenuUI(["Default max turns (current: unlimited)"]);
-    ui.input = vi.fn().mockResolvedValue("-1");
-    await handler.handle({ ui });
-    expect(settings.applyDefaultMaxTurns).not.toHaveBeenCalled();
-    expect(ui.notify).toHaveBeenCalledWith(
-      "Must be 0 (unlimited) or a positive integer.",
-      "warning",
+    expect(ui.input).toHaveBeenCalledWith(
+      'Default max turns before wrap-up (1–10000; blank or "unlimited" clears)',
+      "20",
     );
-  });
-});
-
-describe("SubagentsSettingsHandler — grace turns", () => {
-  it("delegates a valid value to applyGraceTurns and notifies the returned toast", async () => {
-    const { handler, settings } = makeHandler();
-    const ui = makeMenuUI(["Grace turns (current: 5)"]);
-    ui.input = vi.fn().mockResolvedValue("3");
-    await handler.handle({ ui });
-    expect(settings.applyGraceTurns).toHaveBeenCalledWith(3);
-    expect(ui.notify).toHaveBeenCalledWith("Grace turns set to 3", "info");
+    expect(settings.applyDefaultMaxTurns).toHaveBeenCalledWith(undefined);
   });
 
-  it("rejects a value below 1 with a warning and does not apply", async () => {
-    const { handler, settings } = makeHandler();
-    const ui = makeMenuUI(["Grace turns (current: 5)"]);
-    ui.input = vi.fn().mockResolvedValue("0");
+  it("accepts unlimited case-insensitively when clearing grace turns", async () => {
+    const settings = makeSettings();
+    settings.graceTurns = 3;
+    const { handler } = makeHandler(settings);
+    const ui = makeMenuUI(["Grace turns (current: 3)"]);
+    ui.input.mockResolvedValue(" Unlimited ");
+
     await handler.handle({ ui });
+
+    expect(ui.input).toHaveBeenCalledWith(
+      'Grace turns after wrap-up request (0–1000; blank or "unlimited" clears)',
+      "3",
+    );
+    expect(settings.applyGraceTurns).toHaveBeenCalledWith(undefined);
+  });
+
+  it("keeps zero as a finite grace value", async () => {
+    const { handler, settings } = makeHandler();
+    const ui = makeMenuUI(["Grace turns (current: unlimited)"]);
+    ui.input.mockResolvedValue("0");
+
+    await handler.handle({ ui });
+
+    expect(settings.applyGraceTurns).toHaveBeenCalledWith(0);
+  });
+
+  it.each([
+    {
+      choice: "Default max turns (current: unlimited)",
+      input: "0",
+      message: 'Must be an integer from 1 through 10000 or "unlimited".',
+    },
+    {
+      choice: "Grace turns (current: unlimited)",
+      input: "1001",
+      message: 'Must be an integer from 0 through 1000 or "unlimited".',
+    },
+  ])("rejects invalid finite budget input", async ({ choice, input, message }) => {
+    const { handler, settings } = makeHandler();
+    const ui = makeMenuUI([choice]);
+    ui.input.mockResolvedValue(input);
+
+    await handler.handle({ ui });
+
+    expect(settings.applyDefaultMaxTurns).not.toHaveBeenCalled();
     expect(settings.applyGraceTurns).not.toHaveBeenCalled();
-    expect(ui.notify).toHaveBeenCalledWith("Must be a positive integer.", "warning");
+    expect(ui.notify).toHaveBeenCalledWith(message, "warning");
   });
 });
 
-describe("SubagentsSettingsHandler — retention windows", () => {
-  it("delegates a valid consumed window to applyConsumedSessionRetentionMinutes", async () => {
+describe("SubagentsSettingsHandler — existing controls", () => {
+  it("preserves retention validation", async () => {
     const { handler, settings } = makeHandler();
     const ui = makeMenuUI(["Consumed-session retention (current: 10 min)"]);
-    ui.input = vi.fn().mockResolvedValue("30");
-    await handler.handle({ ui });
-    expect(settings.applyConsumedSessionRetentionMinutes).toHaveBeenCalledWith(30);
-    expect(ui.notify).toHaveBeenCalledWith("Consumed-session retention set to 30 min", "info");
-  });
+    ui.input.mockResolvedValue("20161");
 
-  it("delegates a valid unconsumed window to applyUnconsumedSessionRetentionMinutes", async () => {
-    const { handler, settings } = makeHandler();
-    const ui = makeMenuUI(["Unconsumed-session retention (current: 720 min)"]);
-    ui.input = vi.fn().mockResolvedValue("1440");
     await handler.handle({ ui });
-    expect(settings.applyUnconsumedSessionRetentionMinutes).toHaveBeenCalledWith(1440);
-    expect(ui.notify).toHaveBeenCalledWith("Unconsumed-session retention set to 1440 min", "info");
-  });
 
-  it("rejects a consumed window below 1 with a warning and does not apply", async () => {
-    const { handler, settings } = makeHandler();
-    const ui = makeMenuUI(["Consumed-session retention (current: 10 min)"]);
-    ui.input = vi.fn().mockResolvedValue("0");
-    await handler.handle({ ui });
     expect(settings.applyConsumedSessionRetentionMinutes).not.toHaveBeenCalled();
-    expect(ui.notify).toHaveBeenCalledWith("Must be a positive integer.", "warning");
+    expect(ui.notify).toHaveBeenCalledWith("Must be an integer from 1 through 20160.", "warning");
   });
-});
 
-describe("SubagentsSettingsHandler — abort all subagents on ESC", () => {
-  it("flips the policy directly and notifies the returned toast", async () => {
+  it("keeps the interrupt policy as a direct toggle", async () => {
     const { handler, settings } = makeHandler();
     const ui = makeMenuUI(["Abort all subagents on ESC (current: on)"]);
+
     await handler.handle({ ui });
+
     expect(settings.toggleAbortAllOnInterrupt).toHaveBeenCalledOnce();
-    expect(ui.notify).toHaveBeenCalledWith("Abort all subagents on ESC: off", "info");
-  });
-
-  it("never prompts for input — the toggle is a direct flip", async () => {
-    const { handler } = makeHandler();
-    const ui = makeMenuUI(["Abort all subagents on ESC (current: on)"]);
-    await handler.handle({ ui });
     expect(ui.input).not.toHaveBeenCalled();
-  });
-
-  it("does not flip the policy when the settings list is cancelled", async () => {
-    const { handler, settings } = makeHandler();
-    const ui = makeMenuUI([undefined]);
-    await handler.handle({ ui });
-    expect(settings.toggleAbortAllOnInterrupt).not.toHaveBeenCalled();
-  });
-
-  it("does not flip the policy when a numeric setting is chosen", async () => {
-    const { handler, settings } = makeHandler();
-    const ui = makeMenuUI(["Grace turns (current: 5)"]);
-    ui.input = vi.fn().mockResolvedValue("3");
-    await handler.handle({ ui });
-    expect(settings.toggleAbortAllOnInterrupt).not.toHaveBeenCalled();
+    expect(ui.notify).toHaveBeenCalledWith("Interrupt policy updated", "info");
   });
 });

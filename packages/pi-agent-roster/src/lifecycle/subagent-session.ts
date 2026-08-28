@@ -54,8 +54,8 @@ export interface SubagentSessionMeta {
   agentName: string;
   /** Per-agent max-turns from the resolved agent config — middle precedence. */
   agentMaxTurns: number | undefined;
-  /** Parent context prepended to the run prompt, captured at spawn time. */
-  parentContext: string | undefined;
+  /** Per-agent grace-turns from the resolved agent config. */
+  agentGraceTurns: number | undefined;
   lifecycle: ChildLifecyclePublisher;
 }
 
@@ -91,6 +91,7 @@ export class SubagentSession {
     const maxTurns = normalizeMaxTurns(
       opts.maxTurns ?? this.meta.agentMaxTurns ?? opts.defaultMaxTurns,
     );
+    const graceTurns = opts.graceTurns ?? this.meta.agentGraceTurns;
     let softLimitReached = false;
     let aborted = false;
 
@@ -103,7 +104,15 @@ export class SubagentSession {
             void session.steer(
               "You have reached your turn limit. Wrap up immediately - provide your final answer now.",
             );
-          } else if (softLimitReached && turnCount >= maxTurns + (opts.graceTurns ?? 5)) {
+            if (graceTurns === 0) {
+              aborted = true;
+              void session.abort();
+            }
+          } else if (
+            softLimitReached &&
+            graceTurns !== undefined &&
+            turnCount >= maxTurns + graceTurns
+          ) {
             aborted = true;
             void session.abort();
           }
@@ -114,11 +123,8 @@ export class SubagentSession {
     const collector = collectResponseText(session);
     const cleanupAbort = forwardAbortSignal(session, opts.signal);
 
-    // Prepend parent context if it was captured at spawn time.
-    const effectivePrompt = this.meta.parentContext ? this.meta.parentContext + prompt : prompt;
-
     try {
-      await session.prompt(effectivePrompt);
+      await session.prompt(prompt);
       this.meta.lifecycle.completed({
         sessionDir: this.meta.sessionDir,
         agentName: this.meta.agentName,
@@ -135,20 +141,10 @@ export class SubagentSession {
     return { responseText, aborted, steered: softLimitReached };
   }
 
-  /** Re-prompt the same session (resume); does not emit `completed`. */
-  async resumeTurnLoop(prompt: string, signal?: AbortSignal): Promise<string> {
-    const session = this._session;
-    const collector = collectResponseText(session);
-    const cleanupAbort = forwardAbortSignal(session, signal);
-
-    try {
-      await session.prompt(prompt);
-    } finally {
-      collector.unsubscribe();
-      cleanupAbort();
-    }
-
-    return collector.getText().trim() || getLastAssistantText(session);
+  /** Re-prompt the same child-owned session with independently resolved budgets. */
+  async resumeTurnLoop(task: string, opts: TurnLoopOptions): Promise<string> {
+    const result = await this.runTurnLoop(task, opts);
+    return result.responseText;
   }
 
   /** Deliver a steer to the live session. */

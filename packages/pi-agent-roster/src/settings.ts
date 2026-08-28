@@ -8,9 +8,8 @@ import { type LayeredSettingsSource, loadLayeredSettings } from "./layered-setti
 export interface SubagentsSettings {
   maxConcurrent?: number | undefined;
   /**
-   * 0 = unlimited — the extension's single source of truth for that convention:
-   * `normalizeMaxTurns()` in turn-limits.ts treats 0 → `undefined`, and the
-   * `/agents` → Settings input prompt explicitly says "0 = unlimited".
+   * Omission means unlimited. Legacy settings may use 0, which is normalized
+   * to omission in memory and on the next project-settings write.
    */
   defaultMaxTurns?: number | undefined;
   graceTurns?: number | undefined;
@@ -39,8 +38,8 @@ export interface SubagentsSettings {
  */
 export interface SettingsSnapshot {
   maxConcurrent: number;
-  defaultMaxTurns: number;
-  graceTurns: number;
+  defaultMaxTurns?: number | undefined;
+  graceTurns?: number | undefined;
   consumedSessionRetentionMinutes: number;
   unconsumedSessionRetentionMinutes: number;
   abortAllOnInterrupt: boolean;
@@ -56,7 +55,6 @@ export interface SettingsSnapshot {
 export type SettingsEmit = (event: string, payload: unknown) => void;
 
 const DEFAULT_MAX_CONCURRENT = 4;
-const DEFAULT_GRACE_TURNS = 5;
 const DEFAULT_CONSUMED_RETENTION_MINUTES = 10;
 const DEFAULT_UNCONSUMED_RETENTION_MINUTES = 720;
 const DEFAULT_ABORT_ALL_ON_INTERRUPT = true;
@@ -67,7 +65,7 @@ const DEFAULT_ABORT_ALL_ON_INTERRUPT = true;
  */
 export class SettingsManager {
   private _defaultMaxTurns: number | undefined = undefined;
-  private _graceTurns: number = DEFAULT_GRACE_TURNS;
+  private _graceTurns: number | undefined = undefined;
   private _maxConcurrent: number = DEFAULT_MAX_CONCURRENT;
   private _consumedSessionRetentionMinutes: number = DEFAULT_CONSUMED_RETENTION_MINUTES;
   private _unconsumedSessionRetentionMinutes: number = DEFAULT_UNCONSUMED_RETENTION_MINUTES;
@@ -105,14 +103,14 @@ export class SettingsManager {
     }
   }
 
-  // ── graceTurns: minimum 1 ──
+  // ── graceTurns: absent means unlimited; zero is a valid finite value ──
 
-  get graceTurns(): number {
+  get graceTurns(): number | undefined {
     return this._graceTurns;
   }
 
-  set graceTurns(n: number) {
-    this._graceTurns = Math.max(1, n);
+  set graceTurns(n: number | undefined) {
+    this._graceTurns = n;
   }
 
   // ── maxConcurrent: minimum 1 ──
@@ -164,6 +162,8 @@ export class SettingsManager {
    */
   load(): SubagentsSettings {
     const settings = loadSettings(this.agentDir, this.cwd);
+    this._defaultMaxTurns = undefined;
+    this._graceTurns = undefined;
     if (typeof settings.maxConcurrent === "number") this.maxConcurrent = settings.maxConcurrent;
     if (typeof settings.defaultMaxTurns === "number")
       this.defaultMaxTurns = settings.defaultMaxTurns;
@@ -180,19 +180,16 @@ export class SettingsManager {
     return settings;
   }
 
-  /**
-   * Snapshot current in-memory values for persistence.
-   * `defaultMaxTurns` uses 0 as the on-disk marker for unlimited (undefined).
-   */
+  /** Snapshot current in-memory values for project-local persistence. */
   snapshot(): SettingsSnapshot {
     const snapshot: SettingsSnapshot = {
       maxConcurrent: this._maxConcurrent,
-      defaultMaxTurns: this._defaultMaxTurns ?? 0,
-      graceTurns: this._graceTurns,
       consumedSessionRetentionMinutes: this._consumedSessionRetentionMinutes,
       unconsumedSessionRetentionMinutes: this._unconsumedSessionRetentionMinutes,
       abortAllOnInterrupt: this._abortAllOnInterrupt,
     };
+    if (this._defaultMaxTurns !== undefined) snapshot.defaultMaxTurns = this._defaultMaxTurns;
+    if (this._graceTurns !== undefined) snapshot.graceTurns = this._graceTurns;
     if (this._excludedExtensionPackages.length > 0) {
       snapshot.excludedExtensionPackages = [...this._excludedExtensionPackages];
     }
@@ -209,12 +206,9 @@ export class SettingsManager {
     return this.saveAndNotify(`Max concurrency set to ${this.maxConcurrent}`);
   }
 
-  /**
-   * Set defaultMaxTurns, persist, and return the toast.
-   * Pass 0 for unlimited (maps to undefined internally).
-   */
-  applyDefaultMaxTurns(n: number): { message: string; level: "info" | "warning" } {
-    this.defaultMaxTurns = n === 0 ? undefined : n; // setter normalizes further
+  /** Set defaultMaxTurns, persist, and return the toast. */
+  applyDefaultMaxTurns(n: number | undefined): { message: string; level: "info" | "warning" } {
+    this.defaultMaxTurns = n;
     const label = this.defaultMaxTurns == null ? "unlimited" : String(this.defaultMaxTurns);
     return this.saveAndNotify(`Default max turns set to ${label}`);
   }
@@ -222,9 +216,9 @@ export class SettingsManager {
   /**
    * Set graceTurns, persist, and return the toast.
    */
-  applyGraceTurns(n: number): { message: string; level: "info" | "warning" } {
-    this.graceTurns = n; // setter normalizes: max(1, n)
-    return this.saveAndNotify(`Grace turns set to ${this.graceTurns}`);
+  applyGraceTurns(n: number | undefined): { message: string; level: "info" | "warning" } {
+    this.graceTurns = n;
+    return this.saveAndNotify(`Grace turns set to ${this.graceTurns ?? "unlimited"}`);
   }
 
   /** Set the consumed-session retention window (minutes), persist, and return the toast. */
@@ -288,49 +282,88 @@ function isRetentionMinutes(n: unknown): n is number {
   return Number.isInteger(n) && (n as number) >= 1 && (n as number) <= RETENTION_MINUTES_CEILING;
 }
 
-/** Drop fields that don't match the expected shape. Silent — garbage becomes absent. */
-function sanitize(raw: unknown): SubagentsSettings {
-  if (!raw || typeof raw !== "object") return {};
+function sanitize(raw: unknown, diagnose: (message: string) => void = () => {}): SubagentsSettings {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    diagnose("expected a JSON object; fix or remove this file");
+    return {};
+  }
   const r = raw as Record<string, unknown>;
   const out: SubagentsSettings = {};
-  if (
-    Number.isInteger(r.maxConcurrent) &&
-    (r.maxConcurrent as number) >= 1 &&
-    (r.maxConcurrent as number) <= MAX_CONCURRENT_CEILING
-  ) {
-    out.maxConcurrent = r.maxConcurrent as number;
+  const known = new Set([
+    "maxConcurrent",
+    "defaultMaxTurns",
+    "graceTurns",
+    "consumedSessionRetentionMinutes",
+    "unconsumedSessionRetentionMinutes",
+    "abortAllOnInterrupt",
+    "excludedExtensionPackages",
+  ]);
+  for (const key of Object.keys(r)) {
+    if (!known.has(key)) {
+      const action =
+        key === "stacks" || key === "model_stacks"
+          ? "define stacks in agent Markdown files instead"
+          : "remove it from this settings file";
+      diagnose(`unknown field ${key}; ${action}`);
+    }
   }
-  if (
-    Number.isInteger(r.defaultMaxTurns) &&
-    (r.defaultMaxTurns as number) >= 0 &&
-    (r.defaultMaxTurns as number) <= MAX_TURNS_CEILING
-  ) {
-    out.defaultMaxTurns = r.defaultMaxTurns as number;
+  readInteger(r, out, "maxConcurrent", 1, MAX_CONCURRENT_CEILING, diagnose);
+  readInteger(r, out, "defaultMaxTurns", 0, MAX_TURNS_CEILING, diagnose);
+  readInteger(r, out, "graceTurns", 0, GRACE_TURNS_CEILING, diagnose);
+  for (const key of [
+    "consumedSessionRetentionMinutes",
+    "unconsumedSessionRetentionMinutes",
+  ] as const) {
+    if (r[key] !== undefined) {
+      if (isRetentionMinutes(r[key])) out[key] = r[key];
+      else {
+        diagnose(
+          `${key} must be an integer from 1 through ${RETENTION_MINUTES_CEILING}; fix or remove this value`,
+        );
+      }
+    }
   }
-  if (
-    Number.isInteger(r.graceTurns) &&
-    (r.graceTurns as number) >= 1 &&
-    (r.graceTurns as number) <= GRACE_TURNS_CEILING
-  ) {
-    out.graceTurns = r.graceTurns as number;
+  if (r.abortAllOnInterrupt !== undefined) {
+    if (typeof r.abortAllOnInterrupt === "boolean") out.abortAllOnInterrupt = r.abortAllOnInterrupt;
+    else diagnose("abortAllOnInterrupt must be a boolean; fix or remove this value");
   }
-  if (isRetentionMinutes(r.consumedSessionRetentionMinutes)) {
-    out.consumedSessionRetentionMinutes = r.consumedSessionRetentionMinutes;
-  }
-  if (isRetentionMinutes(r.unconsumedSessionRetentionMinutes)) {
-    out.unconsumedSessionRetentionMinutes = r.unconsumedSessionRetentionMinutes;
-  }
-  if (typeof r.abortAllOnInterrupt === "boolean") {
-    out.abortAllOnInterrupt = r.abortAllOnInterrupt;
-  }
-  if (Array.isArray(r.excludedExtensionPackages)) {
-    const sources = r.excludedExtensionPackages
-      .filter((value): value is string => typeof value === "string")
-      .map((value) => value.trim())
-      .filter(Boolean);
-    out.excludedExtensionPackages = [...new Set(sources)];
+  if (r.excludedExtensionPackages !== undefined) {
+    if (Array.isArray(r.excludedExtensionPackages)) {
+      const valid = r.excludedExtensionPackages
+        .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+        .map((value) => value.trim());
+      if (valid.length !== r.excludedExtensionPackages.length) {
+        diagnose(
+          "excludedExtensionPackages must contain only non-empty strings; fix or remove invalid entries",
+        );
+      }
+      out.excludedExtensionPackages = [...new Set(valid)];
+    } else {
+      diagnose(
+        "excludedExtensionPackages must be an array of non-empty strings; fix or remove this value",
+      );
+    }
   }
   return out;
+}
+
+function readInteger<K extends "maxConcurrent" | "defaultMaxTurns" | "graceTurns">(
+  raw: Record<string, unknown>,
+  out: SubagentsSettings,
+  key: K,
+  minimum: number,
+  maximum: number,
+  diagnose: (message: string) => void,
+): void {
+  const value = raw[key];
+  if (value === undefined) return;
+  if (Number.isInteger(value) && (value as number) >= minimum && (value as number) <= maximum) {
+    out[key] = value as number;
+  } else {
+    diagnose(
+      `${key} must be an integer from ${minimum} through ${maximum}; fix or remove this value`,
+    );
+  }
 }
 
 function projectPath(cwd: string): string {

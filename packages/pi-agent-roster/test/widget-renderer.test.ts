@@ -31,6 +31,7 @@ function makeAgent(overrides: Partial<WidgetAgent> = {}): WidgetAgent {
     // Activity fields (folded from the former WidgetActivity)
     turnCount: 3,
     maxTurns: 10,
+    graceTurns: 2,
     activeTools: new Map(),
     responseText: "",
     contextPercent: null,
@@ -55,8 +56,10 @@ describe("renderFinishedLine", () => {
     expect(line).toContain("5 tool uses");
     // Duration (5000ms = 5.0s)
     expect(line).toContain("5.0s");
-    // Turn count with max
-    expect(line).toContain("↻3≤10");
+    // Turn count and both effective budgets
+    expect(line).toContain("↻3");
+    expect(line).toContain("max 10");
+    expect(line).toContain("grace 2");
     // No trailing status text for completed
     expect(line).not.toContain("error");
     expect(line).not.toContain("aborted");
@@ -78,11 +81,13 @@ describe("renderFinishedLine", () => {
     expect(line).not.toContain("tool use");
   });
 
-  it("renders turn count from agent fields (always present after record migration)", () => {
-    const agent = makeAgent(); // defaults: turnCount: 3, maxTurns: 10
+  it("labels unlimited budgets instead of leaving an absent limit ambiguous", () => {
+    const agent = makeAgent({ maxTurns: undefined, graceTurns: undefined });
     const line = renderFinishedLine(agent, testRegistry, theme);
-    // Finished agents now always show turn count — accepted behavior change (#421)
-    expect(line).toContain("↻3≤10");
+
+    expect(line).toContain("↻3");
+    expect(line).toContain("max unlimited");
+    expect(line).toContain("grace unlimited");
   });
 
   it("uses Date.now() for duration when completedAt is undefined", () => {
@@ -155,6 +160,7 @@ describe("renderRunningLines", () => {
       activeTools: new Map([["read_1", "read"]]),
       turnCount: 2,
       maxTurns: 10,
+      graceTurns: 0,
     });
     const [header, activityLine] = renderRunningLines(agent, testRegistry, 0, theme);
 
@@ -162,8 +168,10 @@ describe("renderRunningLines", () => {
     expect(header).toContain("[accent:⠋]");
     expect(header).toContain("**Agent**");
     expect(header).toContain("[muted:test task]");
-    // Stats: turn count
-    expect(header).toContain("↻2≤10");
+    // Stats: turn count and finite budgets, including zero grace
+    expect(header).toContain("↻2");
+    expect(header).toContain("max 10");
+    expect(header).toContain("grace 0");
     // Tool uses
     expect(header).toContain("5 tool uses");
 

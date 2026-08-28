@@ -7,35 +7,45 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { AgentTypeRegistry } from "../config/agent-types.ts";
-import type { ParentSnapshot } from "../lifecycle/parent-snapshot.ts";
+import type { ChildRuntimeBaseline } from "../lifecycle/child-runtime-baseline.ts";
 import type { AgentSpawnConfig } from "../lifecycle/subagent-manager.ts";
 import type { ParentSessionInfo, Subagent } from "../types.ts";
 import { type AgentDetails, getDisplayName, type Theme } from "../ui/display.ts";
 import { GLYPHS } from "../ui/glyphs.ts";
 import { spawnBackground } from "./background-spawner.ts";
 import { runForeground } from "./foreground-runner.ts";
-import { buildAgentGuidelines, buildDetails, buildTypeListText, textResult } from "./helpers.ts";
+import { buildAgentGuidelines, buildTypeListText, textResult } from "./helpers.ts";
 import { renderAgentResult } from "./result-renderer.ts";
-import { type ModelInfo, resolveSpawnConfig } from "./spawn-config.ts";
+import { type ModelInfo, resolveResumeConfig, resolveSpawnConfig } from "./spawn-config.ts";
 
 // ---- Deps interfaces ----
 
 /** Narrow manager interface — only the methods the Agent tool calls. */
 export interface AgentToolManager {
-  spawn: (snapshot: ParentSnapshot, type: string, prompt: string, opts: AgentSpawnConfig) => string;
-  spawnAndWait: (
-    snapshot: ParentSnapshot,
+  spawn: (
+    baseline: ChildRuntimeBaseline,
     type: string,
-    prompt: string,
+    task: string,
+    opts: AgentSpawnConfig,
+  ) => string;
+  spawnAndWait: (
+    baseline: ChildRuntimeBaseline,
+    type: string,
+    task: string,
     opts: Omit<AgentSpawnConfig, "isBackground">,
   ) => Promise<Subagent>;
-  resume: (id: string, prompt: string, signal: AbortSignal) => Promise<Subagent | undefined>;
+  resume: (
+    id: string,
+    task: string,
+    signal: AbortSignal,
+    budgets?: { maxTurns?: number | undefined; graceTurns?: number | undefined },
+  ) => Promise<Subagent | undefined>;
   getRecord: (id: string) => Subagent | undefined;
 }
 
 /** Narrow runtime interface — the Agent tool's slice of SubagentRuntime. */
 export interface AgentToolRuntime {
-  buildSnapshot(inheritContext: boolean): ParentSnapshot;
+  buildChildBaseline(): ChildRuntimeBaseline;
   getModelInfo(): ModelInfo;
   getSessionInfo(): { parentSessionFile: string; parentSessionId: string };
 }
@@ -43,6 +53,7 @@ export interface AgentToolRuntime {
 /** Narrow settings accessor — only the fields the Agent tool reads. */
 export type AgentToolSettings = {
   readonly defaultMaxTurns: number | undefined;
+  readonly graceTurns: number | undefined;
   readonly maxConcurrent: number;
 };
 
@@ -75,6 +86,49 @@ export class AgentTool {
     // Reload custom agents so new .pi/agents/*.md files are picked up without restart
     this.registry.reload();
 
+    // ---- Resume existing agent ----
+    if (params.resume !== undefined) {
+      const config = resolveResumeConfig(params);
+      if ("error" in config) return textResult(config.error);
+      const resumeId = typeof params.resume === "string" ? params.resume.trim() : "";
+      if (!resumeId) return textResult("resume must be a non-empty string");
+      if (
+        params.stack !== undefined &&
+        (typeof params.stack !== "string" || !params.stack.trim())
+      ) {
+        return textResult("stack must be a non-empty string");
+      }
+      if (params.stack !== undefined) {
+        return textResult("stack selection is unavailable when resuming an existing child.");
+      }
+      const existing = this.manager.getRecord(resumeId);
+      if (!existing) {
+        return textResult(
+          `Agent not found: "${resumeId}". Records are cleared at session start/switch, so it may be from a previous session.`,
+        );
+      }
+      if (existing.isActive())
+        return textResult(`Agent "${resumeId}" is still running and cannot be resumed.`);
+      if (!existing.isSessionReady() && !existing.sessionReleased) {
+        return textResult(`Agent "${resumeId}" has no child transcript to resume.`);
+      }
+      const record = await this.manager.resume(
+        resumeId,
+        config.task,
+        signal ?? new AbortController().signal,
+        {
+          maxTurns: config.maxTurns,
+          graceTurns: config.graceTurns,
+        },
+      );
+      if (!record) {
+        return textResult(`Failed to resume agent "${resumeId}".`);
+      }
+      // Resume-return delivery edge: the resumed outcome is returned directly.
+      record.markConsumed();
+      return textResult(record.result?.trim() ?? record.error?.trim() ?? "No output.");
+    }
+
     // ---- Config resolution (pure) ----
     const config = resolveSpawnConfig(
       params,
@@ -84,55 +138,22 @@ export class AgentTool {
     );
     if ("error" in config) return textResult(config.error);
 
-    // ---- Boundary extraction (after config so inheritContext is resolved) ----
-    const snapshot = this.runtime.buildSnapshot(config.execution.inheritContext);
+    const baseline = this.runtime.buildChildBaseline();
     const { parentSessionFile, parentSessionId } = this.runtime.getSessionInfo();
     const parentSession: ParentSessionInfo = { parentSessionFile, parentSessionId, toolCallId };
-
-    // ---- Resume existing agent ----
-    if (params.resume) {
-      const existing = this.manager.getRecord(params.resume as string);
-      if (!existing) {
-        return textResult(
-          `Agent not found: "${params.resume as string}". Records are cleared at session start/switch, so it may be from a previous session.`,
-        );
-      }
-      if (!existing.isSessionReady()) {
-        if (existing.sessionReleased) {
-          return textResult(
-            `Agent "${params.resume as string}" had its session released after its retention window; resume is unavailable, but its result is still retrievable via get_subagent_result.`,
-          );
-        }
-        return textResult(`Agent "${params.resume as string}" has no active session to resume.`);
-      }
-      const record = await this.manager.resume(
-        params.resume as string,
-        params.prompt as string,
-        signal ?? new AbortController().signal,
-      );
-      if (!record) {
-        return textResult(`Failed to resume agent "${params.resume as string}".`);
-      }
-      // Resume-return delivery edge: the resumed outcome is returned directly.
-      record.markConsumed();
-      return textResult(
-        record.result?.trim() ?? record.error?.trim() ?? "No output.",
-        buildDetails(config.presentation.detailBase, record),
-      );
-    }
 
     // ---- Background execution ----
     if (config.execution.runInBackground) {
       return spawnBackground(this.manager, {
         config,
-        snapshot,
+        baseline,
         parentSession,
         settings: this.settings,
       });
     }
 
     // ---- Foreground execution — stream progress via onUpdate ----
-    return runForeground(this.manager, { config, snapshot, parentSession }, signal, onUpdate);
+    return runForeground(this.manager, { config, baseline, parentSession }, signal, onUpdate);
   }
 
   toToolDefinition() {
@@ -144,14 +165,13 @@ export class AgentTool {
     const guidelines = [
       "- For parallel work, use run_in_background: true on each agent. Foreground calls run sequentially — only one executes at a time.",
       ...this.agentGuidelines,
-      "- Provide clear, detailed prompts so the agent can work autonomously.",
+      "- The child sees none of the main conversation. Put every required fact, path, constraint, and expected output in task.",
       "- Subagent results are returned as text — summarize them for the user.",
       "- Use run_in_background for work you don't need immediately. You will be notified when it completes.",
-      "- Use resume with an agent ID to continue a previous agent's work.",
+      "- Resume requires a new self-contained task and uses only that child's own history.",
       "- Use steer_subagent to send mid-run messages to a running background agent.",
       '- Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").',
       "- Use thinking to control extended thinking level.",
-      "- Use inherit_context if the agent needs the parent conversation history.",
     ].join("\n");
 
     return defineTool({
@@ -169,15 +189,22 @@ Guidelines:
 ${guidelines}
 `,
       parameters: Type.Object({
-        prompt: Type.String({
-          description: "The task for the agent to perform.",
+        task: Type.String({
+          description:
+            "Required self-contained task. The child sees none of the main conversation, so include every required fact, path, constraint, and expected output.",
+          minLength: 1,
+          pattern: "\\S",
         }),
-        description: Type.String({
-          description: "A short (3-5 word) description of the task (shown in UI).",
-        }),
-        subagent_type: Type.String({
-          description: `The type of specialized agent to use. Available types: ${availableTypesText}. Custom agents from .pi/agents/<name>.md (project) or ${agentDir}/agents/<name>.md (global) are also available.`,
-        }),
+        description: Type.Optional(
+          Type.String({
+            description: "Optional short description for the UI; defaults to the task.",
+          }),
+        ),
+        subagent_type: Type.Optional(
+          Type.String({
+            description: `The type of specialized agent to use. Required for a new child. Available types: ${availableTypesText}. Custom agents from .pi/agents/<name>.md (project) or ${agentDir}/agents/<name>.md (global) are also available.`,
+          }),
+        ),
         model: Type.Optional(
           Type.String({
             description:
@@ -190,11 +217,25 @@ ${guidelines}
               "Thinking level: off, minimal, low, medium, high, xhigh. Overrides agent default.",
           }),
         ),
+        stack: Type.Optional(
+          Type.String({
+            description: "Optional named stack selection for this agent.",
+            minLength: 1,
+            pattern: "\\S",
+          }),
+        ),
         max_turns: Type.Optional(
-          Type.Number({
-            description:
-              "Maximum number of agentic turns before stopping. Omit for unlimited (default).",
+          Type.Integer({
+            description: "Maximum agentic turns. Omit for unlimited.",
             minimum: 1,
+            maximum: 10000,
+          }),
+        ),
+        grace_turns: Type.Optional(
+          Type.Integer({
+            description: "Additional turns after the soft limit. Omit for unlimited.",
+            minimum: 0,
+            maximum: 1000,
           }),
         ),
         run_in_background: Type.Optional(
@@ -205,13 +246,10 @@ ${guidelines}
         ),
         resume: Type.Optional(
           Type.String({
-            description: "Optional agent ID to resume from. Continues from previous context.",
-          }),
-        ),
-        inherit_context: Type.Optional(
-          Type.Boolean({
             description:
-              "If true, fork parent conversation into the agent. Default: false (fresh context).",
+              "Optional child agent ID to resume using only its persisted history and the new task.",
+            minLength: 1,
+            pattern: "\\S",
           }),
         ),
       }),

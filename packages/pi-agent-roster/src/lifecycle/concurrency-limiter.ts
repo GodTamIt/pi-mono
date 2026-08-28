@@ -1,55 +1,64 @@
-/**
- * concurrency-limiter.ts — FIFO admission gate for background work.
- *
- * Schedules run closures (thunks) against a dynamic limit, running them in
- * scheduling order as slots free. The limiter knows nothing about agents, IDs,
- * or the manager — it owns only the active count and the pending queue.
- *
- * Every scheduled promise settles: it follows the task's settlement when the
- * task runs, or resolves early if clear() drops it before it starts.
- */
-
+/** FIFO admission state for background child IDs. */
 export class ConcurrencyLimiter {
   private active = 0;
-  private readonly pending: Array<{ start: () => void; settle: () => void }> = [];
+  private readonly pending: string[] = [];
+  private readonly admitted = new Set<string>();
+  private readonly settlements = new Map<
+    string,
+    { promise: Promise<void>; resolve: () => void; reject: (reason?: unknown) => void }
+  >();
 
   constructor(private readonly getLimit: () => number) {}
 
-  /**
-   * Schedule a task to run FIFO once a slot is free.
-   * Returns a promise that settles with the task, or resolves early if the
-   * task is dropped by clear() before it starts.
-   */
-  schedule(task: () => Promise<void>): Promise<void> {
-    const { promise, resolve, reject } = Promise.withResolvers<void>(); // eslint-disable-line @typescript-eslint/no-invalid-void-type -- Promise.withResolvers<void> is valid; rule does not allow void in generic fn call type args
-    this.pending.push({
-      start: () => {
-        this.active++;
-        task()
-          .then(resolve, reject)
-          .finally(() => {
-            this.active--;
-            this.recheck();
-          });
-      },
-      settle: resolve,
-    });
-    this.recheck();
-    return promise;
+  /** Queue an ID. The returned promise settles when the admitted run settles or is dropped. */
+  schedule(id: string): Promise<void> {
+    if (this.settlements.has(id)) throw new Error(`Child ${id} is already scheduled`);
+    const settlement = Promise.withResolvers<void>(); // eslint-disable-line @typescript-eslint/no-invalid-void-type -- Promise.withResolvers<void> is valid
+    this.pending.push(id);
+    this.settlements.set(id, settlement);
+    return settlement.promise;
   }
 
-  /** Start pending tasks until the limit is reached. Call when the limit may have grown. */
-  recheck(): void {
+  /** Admit queued IDs in FIFO order up to the current dynamic limit. */
+  admit(): string[] {
+    const admitted: string[] = [];
     while (this.active < this.getLimit()) {
-      const next = this.pending.shift();
-      if (!next) break;
-      next.start();
+      const id = this.pending.shift();
+      if (id === undefined) break;
+      this.active++;
+      this.admitted.add(id);
+      admitted.push(id);
     }
+    return admitted;
   }
 
-  /** Drop all pending tasks, resolving their promises without running them. */
+  /** Settle an admitted ID and release its slot. */
+  settle(id: string, error?: unknown): void {
+    if (!this.admitted.delete(id)) return;
+    const settlement = this.settlements.get(id);
+    this.settlements.delete(id);
+    this.active--;
+    if (error === undefined) settlement?.resolve();
+    else settlement?.reject(error);
+  }
+
+  /** Remove an unadmitted ID and resolve its queue handle. */
+  cancel(id: string): boolean {
+    const index = this.pending.indexOf(id);
+    if (index === -1) return false;
+    this.pending.splice(index, 1);
+    const settlement = this.settlements.get(id);
+    this.settlements.delete(id);
+    settlement?.resolve();
+    return true;
+  }
+
+  /** Drop all IDs that have not been admitted, resolving their wait handles. */
   clear(): void {
-    const dropped = this.pending.splice(0);
-    for (const task of dropped) task.settle();
+    for (const id of this.pending.splice(0)) {
+      const settlement = this.settlements.get(id);
+      this.settlements.delete(id);
+      settlement?.resolve();
+    }
   }
 }

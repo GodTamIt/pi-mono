@@ -56,6 +56,12 @@ function loadFromDir(
     }
 
     const { frontmatter: fm, body } = parseFrontmatter(content);
+    if (Object.hasOwn(fm, "inherit_context")) {
+      console.warn(
+        `[pi-agent-roster] Ignoring agent ${join(dir, file)}: inherit_context is unsupported; put all context in the explicit task`,
+      );
+      continue;
+    }
 
     agents.set(name, {
       name,
@@ -64,10 +70,10 @@ function loadFromDir(
       toolNames: listField(fm.tools, BUILTIN_TOOL_NAMES),
       model: str(fm.model),
       thinking: str(fm.thinking) as ThinkingLevel | undefined,
-      maxTurns: nonNegativeInt(fm.max_turns),
+      maxTurns: legacyMaxTurns(fm.max_turns),
+      graceTurns: boundedInt(fm.grace_turns, 0, 1_000),
       systemPrompt: body.trim(),
       promptMode: fm.prompt_mode === "replace" ? "replace" : "append",
-      inheritContext: fm.inherit_context != null ? fm.inherit_context === true : undefined,
       runInBackground: fm.run_in_background != null ? fm.run_in_background === true : undefined,
       enabled: fm.enabled !== false, // default true; explicitly false disables
       source,
@@ -83,9 +89,16 @@ function str(val: unknown): string | undefined {
   return typeof val === "string" ? val : undefined;
 }
 
-/** Extract a non-negative integer or undefined. 0 means unlimited for max_turns. */
-function nonNegativeInt(val: unknown): number | undefined {
-  return typeof val === "number" && val >= 0 ? val : undefined;
+/** Parse the persisted max-turn convention where zero means unlimited. */
+function legacyMaxTurns(val: unknown): number | undefined {
+  if (val === 0) return undefined;
+  return boundedInt(val, 1, 10_000);
+}
+
+function boundedInt(val: unknown, minimum: number, maximum: number): number | undefined {
+  return Number.isInteger(val) && (val as number) >= minimum && (val as number) <= maximum
+    ? (val as number)
+    : undefined;
 }
 
 /**

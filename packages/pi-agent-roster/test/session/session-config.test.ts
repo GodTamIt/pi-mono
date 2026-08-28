@@ -95,29 +95,6 @@ describe("assembleSessionConfig — default agent shape", () => {
 
     expect(result.effectiveCwd).toBe("/tmp");
   });
-
-  it("systemPrompt reflects the parentSystemPrompt passed to buildAgentPrompt", () => {
-    mockBuildAgentPrompt.mockImplementationOnce(
-      (_config, _cwd, _env, inherited) => `assembled:${inherited?.systemPrompt}`,
-    );
-
-    const result = assembleSessionConfig("Explore", ctx, {}, mockEnv, mockAgentLookup, mockIO);
-
-    expect(result.systemPrompt).toBe("assembled:parent prompt");
-  });
-
-  it("forwards the parent's cwd alongside its system prompt", () => {
-    // The prompt builder needs the parent's cwd to redact the footer that text
-    // claims — the child's own cwd is a separate argument.
-    assembleSessionConfig("Explore", ctx, { cwd: "/worktree" }, mockEnv, mockAgentLookup, mockIO);
-
-    expect(mockBuildAgentPrompt).toHaveBeenCalledWith(
-      mockResolveAgentConfig(),
-      "/worktree",
-      mockEnv,
-      { systemPrompt: "parent prompt", cwd: "/tmp" },
-    );
-  });
 });
 
 describe("assembleSessionConfig — model resolution", () => {
