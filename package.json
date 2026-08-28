@@ -1,0 +1,34 @@
+{
+  "name": "pi-plugins",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.22.2"
+  },
+  "packageManager": "npm@12.0.2",
+  "scripts": {
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome lint .",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "unit": "vitest run",
+    "test": "npm run unit",
+    "declarations": "npm run declarations --workspaces --if-present",
+    "pack": "npm run declarations && npm pack --workspace pi-agent-roster",
+    "pack:inspect": "npm run declarations && npm run pack:inspect --workspace pi-agent-roster",
+    "smoke:installed": "npm run smoke:installed --workspace pi-agent-roster",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run declarations && npm run pack:inspect",
+    "verify:all": "npm run verify && npm run smoke:installed"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.11",
+    "@changesets/cli": "3.0.1",
+    "@types/node": "22.19.19",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  }
+}

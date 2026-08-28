@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+.direnv/
+*.tgz
+.pi/
+.DS_Store

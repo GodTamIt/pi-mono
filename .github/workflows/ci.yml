@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  workspace:
+    name: Workspace (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - node: "24"
+            shell: .
+          - node: "22"
+            shell: .#ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - name: Install dependencies and verify workspace
+        run: |
+          nix develop '${{ matrix.shell }}' --command bash -euo pipefail -c '
+            node --version
+            npm --version
+            npm ci
+            npm run format:check
+            npm run lint
+            npm run typecheck
+            npm run unit
+            npm run declarations
+            npm run pack:inspect
+            npm run smoke:installed
+          '
+
+  nix:
+    name: Nix flake
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - name: Build native checks
+        run: nix flake check
+      - name: Evaluate all default systems
+        run: nix flake show --all-systems

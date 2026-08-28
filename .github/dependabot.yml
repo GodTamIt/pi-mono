@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      pi-runtime:
+        patterns:
+          - "@earendil-works/pi-*"
+          - typebox
+      workspace-toolchain:
+        patterns:
+          - "@biomejs/biome"
+          - "@changesets/*"
+          - "@types/node"
+          - typescript
+          - vitest
