@@ -446,19 +446,19 @@ try {
     "Expanded invocation row lost the canonical child session ID",
   );
   assert(
-    expandedRow.includes("Task: SERVICE_FOREGROUND_TASK_a921"),
-    "Expanded invocation row omitted task semantics",
+    expandedRow.includes("Task\n  SERVICE_FOREGROUND_TASK_a921"),
+    "Expanded invocation row omitted task heading or task semantics",
   );
   assert(
-    expandedRow.includes("Agent: actual-pi") &&
+    expandedRow.includes("actual-pi ·") &&
       expandedRow.includes("Foreground") &&
-      expandedRow.includes("stack: deep") &&
-      expandedRow.includes("model: roster-faux/roster-faux-deep") &&
-      expandedRow.includes("thinking: —"),
+      expandedRow.includes("stack deep") &&
+      expandedRow.includes("model roster-faux/roster-faux-deep") &&
+      expandedRow.includes("thinking —"),
     `Expanded invocation row omitted invocation semantics: ${expandedRow}`,
   );
   assert(
-    expandedRow.includes("Read-only transcript: /subagents:sessions"),
+    expandedRow.includes("Read-only transcript · /subagents:sessions"),
     "Expanded invocation row omitted transcript ownership hint",
   );
   const workspacePrepares = workspaceCalls.filter((call) => "agentId" in call);
