@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.5
+
+### Patch Changes
+
+- 8661b78: Render subagents in Pi's native tool shell, avoid duplicate turn-limit wrap-ups, support asynchronous background resumes, and reinforce required child output contracts.
+
 ## 0.1.0-alpha.4
 
 ### Patch Changes
