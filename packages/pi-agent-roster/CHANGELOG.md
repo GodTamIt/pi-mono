@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.6
+
+### Patch Changes
+
+- 4236aba: Show the selected primary agent in Pi's footer and remove obsolete roster readiness diagnostics.
+
 ## 0.1.0-alpha.5
 
 ### Patch Changes
