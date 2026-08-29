@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AgentTypeRegistry } from "../../src/config/agent-types.ts";
 import { AgentStackOverrides } from "../../src/stacks/stack-resolver.ts";
-import { resolveSpawnConfig } from "../../src/tools/spawn-config.ts";
+import { resolveResumeConfig, resolveSpawnConfig } from "../../src/tools/spawn-config.ts";
 import type { AgentConfig } from "../../src/types.ts";
 import { makeModel } from "../helpers/make-model.ts";
 import { TEST_AGENTS } from "../helpers/test-agents.ts";
@@ -43,6 +43,37 @@ function makeModelInfo(overrides: Partial<Parameters<typeof resolveSpawnConfig>[
 }
 
 const defaultSettings = { defaultMaxTurns: undefined as number | undefined };
+
+describe("resolveResumeConfig", () => {
+  it("parses background mode with the resume overrides", () => {
+    expect(
+      resolveResumeConfig({
+        task: " continue ",
+        stack: "deep",
+        model: "anthropic/sonnet",
+        thinking: "high",
+        max_turns: 7,
+        grace_turns: 2,
+        run_in_background: true,
+      }),
+    ).toEqual({
+      task: "continue",
+      stack: "deep",
+      model: "anthropic/sonnet",
+      thinking: "high",
+      maxTurns: 7,
+      graceTurns: 2,
+      runInBackground: true,
+    });
+  });
+
+  it("defaults resume mode to foreground and rejects non-booleans", () => {
+    expect(resolveResumeConfig({ task: "continue" })).toMatchObject({ runInBackground: false });
+    expect(resolveResumeConfig({ task: "continue", run_in_background: "yes" })).toEqual({
+      error: "run_in_background must be a boolean",
+    });
+  });
+});
 
 describe("resolveSpawnConfig — type resolution", () => {
   it("resolves a known agent type", () => {

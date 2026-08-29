@@ -105,10 +105,12 @@ export class SubagentSession {
       if (event.type === "turn_end") {
         turnCount++;
         if (maxTurns != null) {
-          if (!softLimitReached && turnCount >= maxTurns) {
+          const isFinalResponse =
+            event.message.role === "assistant" && event.message.stopReason === "stop";
+          if (!softLimitReached && turnCount >= maxTurns && !isFinalResponse) {
             softLimitReached = true;
             void session.steer(
-              "You have reached your turn limit. Wrap up immediately - provide your final answer now.",
+              "You have reached your turn limit. Wrap up immediately: follow your required output format exactly and emit the final answer once.",
             );
             if (graceTurns === 0) {
               aborted = true;
@@ -117,7 +119,8 @@ export class SubagentSession {
           } else if (
             softLimitReached &&
             graceTurns !== undefined &&
-            turnCount >= maxTurns + graceTurns
+            turnCount >= maxTurns + graceTurns &&
+            !isFinalResponse
           ) {
             aborted = true;
             void session.abort();

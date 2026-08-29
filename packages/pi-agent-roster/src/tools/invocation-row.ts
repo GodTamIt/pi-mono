@@ -278,7 +278,6 @@ function collapsedLines(details: AgentDetails, theme: Theme, width: number): str
   const status = statusPresentation(details.status);
   const separator = theme.fg("dim", " · ");
   const first = [
-    theme.fg("toolTitle", theme.bold("Subagent")),
     theme.bold(sanitizeTerminalText(details.displayName)),
     theme.fg(status.color, `${status.icon} ${status.label}`),
   ].join(separator);

@@ -45,7 +45,16 @@ ${[...toolGuidance, "- Make independent tool calls in parallel", "- Be concise b
   const staticInstructions = instructions
     ? `<agent_instructions>\n${instructions}\n</agent_instructions>`
     : "";
-  return [runtimeBaseline, childGuidance, activeAgentTag, envBlock, staticInstructions]
+  const outputReminder = `# Final response
+Before returning, verify that your response includes every required output field from the agent instructions. Follow the required output format exactly and emit the final response once.`;
+  return [
+    runtimeBaseline,
+    childGuidance,
+    activeAgentTag,
+    envBlock,
+    staticInstructions,
+    outputReminder,
+  ]
     .filter(Boolean)
     .join("\n\n");
 }

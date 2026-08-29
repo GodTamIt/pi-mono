@@ -76,6 +76,7 @@ export interface ResumeConfig {
   thinking: ThinkingLevel | undefined;
   maxTurns: number | undefined;
   graceTurns: number | undefined;
+  runInBackground: boolean;
 }
 
 export interface ResolvedInvocationSelection {
@@ -117,6 +118,9 @@ export function resolveResumeConfig(
   if (maxError) return { error: maxError };
   const graceError = validateBudget(params.grace_turns, "grace_turns", 0, 1_000);
   if (graceError) return { error: graceError };
+  if (params.run_in_background !== undefined && typeof params.run_in_background !== "boolean") {
+    return { error: "run_in_background must be a boolean" };
+  }
   return {
     task,
     stack,
@@ -124,6 +128,7 @@ export function resolveResumeConfig(
     thinking,
     maxTurns: params.max_turns as number | undefined,
     graceTurns: params.grace_turns as number | undefined,
+    runInBackground: params.run_in_background === true,
   };
 }
 

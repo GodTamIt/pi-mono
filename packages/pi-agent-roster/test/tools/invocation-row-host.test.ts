@@ -4,6 +4,7 @@ import { KEYBINDINGS } from "../../../../node_modules/@earendil-works/pi-coding-
 import { ToolExecutionComponent } from "../../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js";
 import { initTheme } from "../../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { AgentTool } from "../../src/tools/agent-tool.ts";
+import { GetResultTool } from "../../src/tools/get-result-tool.ts";
 import { InvocationRowRegistry } from "../../src/tools/invocation-row.ts";
 import type { AgentDetails } from "../../src/ui/display.ts";
 import { createToolDeps } from "../helpers/make-deps.ts";
@@ -42,11 +43,13 @@ function text(component: ToolExecutionComponent, width = 120): string {
 }
 
 function baseline(component: ToolExecutionComponent, width = 120): string {
-  return component
-    .render(width)
-    .map((line) => stripTerminalSequences(line).trimEnd())
-    .filter((line, index) => index !== 0 || line !== "")
-    .join("\n");
+  const lines = component.render(width).map((line) => stripTerminalSequences(line).trimEnd());
+  while (lines[0]?.trim() === "") lines.shift();
+  while (lines.at(-1)?.trim() === "") lines.pop();
+  const indentation = Math.min(
+    ...lines.filter((line) => line.trim()).map((line) => line.match(/^ */)?.[0].length ?? 0),
+  );
+  return lines.map((line) => line.slice(indentation)).join("\n");
 }
 
 function standaloneHost(overrides: Partial<AgentDetails> = {}, output = "child output") {
@@ -78,6 +81,76 @@ function standaloneHost(overrides: Partial<AgentDetails> = {}, output = "child o
 }
 
 describe("native subagent invocation row", () => {
+  it("uses the same host-owned status shell as get_subagent_result", () => {
+    const deps = createToolDeps();
+    const subagentDefinition = new AgentTool(
+      deps.manager,
+      deps.runtime,
+      deps.settings,
+      deps.registry,
+      deps.agentDir,
+    ).toToolDefinition();
+    const getResultDefinition = new GetResultTool(deps.manager, deps.registry).toToolDefinition();
+    const requestRender = vi.fn();
+    const subagent = new ToolExecutionComponent(
+      "subagent",
+      "tc-shell-subagent",
+      { task: "Inspect the shell.", subagent_type: "Architect" },
+      {},
+      subagentDefinition,
+      { requestRender } as never,
+      process.cwd(),
+    );
+    const getResult = new ToolExecutionComponent(
+      "get_subagent_result",
+      "tc-shell-result",
+      { agent_id: "agent-1" },
+      {},
+      getResultDefinition,
+      { requestRender } as never,
+      process.cwd(),
+    );
+    const shellFrame = (component: ToolExecutionComponent) =>
+      component.render(72).find((line) => line.length > 0);
+
+    const pendingFrame = shellFrame(subagent);
+    expect(pendingFrame).toBe(shellFrame(getResult));
+    expect(baseline(subagent)).toBe("Subagent");
+
+    subagent.updateResult({
+      content: [{ type: "text", text: "done" }],
+      details: details({ status: "completed", agentId: undefined }),
+      isError: false,
+    });
+    getResult.updateResult({
+      content: [{ type: "text", text: "Status: completed" }],
+      isError: false,
+    });
+
+    const successFrame = shellFrame(subagent);
+    expect(successFrame).toBe(shellFrame(getResult));
+    expect(successFrame).not.toBe(pendingFrame);
+
+    subagent.updateResult({
+      content: [{ type: "text", text: "failed" }],
+      details: details({ status: "error", agentId: undefined }),
+      isError: true,
+    });
+    getResult.updateResult({
+      content: [{ type: "text", text: "failed" }],
+      isError: true,
+    });
+
+    expect(shellFrame(subagent)).toBe(shellFrame(getResult));
+    expect(shellFrame(subagent)).not.toBe(successFrame);
+    expect(
+      subagent
+        .render(72)
+        .slice(1)
+        .every((line) => visibleWidth(line) === 72),
+    ).toBe(true);
+  });
+
   it("pins collapsed lifecycle rows", () => {
     const statuses: AgentDetails["status"][] = [
       "queued",
@@ -94,19 +167,26 @@ describe("native subagent invocation row", () => {
 
     expect(rows).toMatchInlineSnapshot(`
       {
-        "aborted": "Subagent · Architect 🧭 · ✗ aborted (max turns)
+        "aborted": "Subagent
+      Architect 🧭 · ✗ aborted (max turns)
       ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
-        "completed": "Subagent · Architect 🧭 · ✓ completed
+        "completed": "Subagent
+      Architect 🧭 · ✓ completed
       ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
-        "error": "Subagent · Architect 🧭 · ✗ failed
+        "error": "Subagent
+      Architect 🧭 · ✗ failed
       ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
-        "queued": "Subagent · Architect 🧭 · ◦ queued
+        "queued": "Subagent
+      Architect 🧭 · ◦ queued
       ⎿ Background · stack deep · model sonnet · thinking high · 0.3s elapsed",
-        "running": "Subagent · Architect 🧭 · ▸ running
+        "running": "Subagent
+      Architect 🧭 · ▸ running
       ⎿ Background · stack deep · model sonnet · thinking high · 0.3s elapsed",
-        "steered": "Subagent · Architect 🧭 · ✓ completed (turn limit)
+        "steered": "Subagent
+      Architect 🧭 · ✓ completed (turn limit)
       ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
-        "stopped": "Subagent · Architect 🧭 · ■ stopped
+        "stopped": "Subagent
+      Architect 🧭 · ■ stopped
       ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
       }
     `);
@@ -134,9 +214,11 @@ describe("native subagent invocation row", () => {
 
     expect({ collapsed, expanded }).toMatchInlineSnapshot(`
       {
-        "collapsed": "Subagent · Architect 🧭 · ✓ completed
+        "collapsed": "Subagent
+      Architect 🧭 · ✓ completed
       ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
-        "expanded": "Subagent · Architect 🧭 · ✓ completed
+        "expanded": "Subagent
+      Architect 🧭 · ✓ completed
       ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration
 
       Task
@@ -239,7 +321,7 @@ describe("native subagent invocation row", () => {
     rows.onSubagentSessionCreated(record);
     rows.onSubagentSessionCreated(record);
     expect(firstSession.subscribe).toHaveBeenCalledOnce();
-    expect(text(host)).toContain("Subagent · Architect 🧭 · ▸ running");
+    expect(baseline(host)).toContain("Subagent\nArchitect 🧭 · ▸ running");
     expect(text(host)).toContain("Background · stack deep · model sonnet · thinking high");
 
     const beforeEvent = requestRender.mock.calls.length;
@@ -247,7 +329,7 @@ describe("native subagent invocation row", () => {
     expect(requestRender.mock.calls.length).toBeGreaterThan(beforeEvent);
 
     host.setExpanded(true);
-    const expanded = text(host);
+    const expanded = baseline(host);
     expect(expanded).toContain("Task\n  Inspect the child lifecycle exactly.");
     expect(expanded).toContain("Agent ID: agent-1");
     expect(expanded).toContain("Child session ID: child-1");
@@ -427,7 +509,7 @@ describe("native subagent invocation row", () => {
       details: details({ agentId: undefined, status }),
       isError: status === "error",
     });
-    expect(text(host).trimStart().split("\n")[0]?.endsWith(expected)).toBe(true);
+    expect(baseline(host).split("\n")[1]?.endsWith(expected)).toBe(true);
   });
 
   it("wraps ANSI and Unicode safely and handles records absent after restoration", () => {
@@ -462,9 +544,11 @@ describe("native subagent invocation row", () => {
       for (const line of host.render(width)) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }
     expect(baseline(host, 40)).toMatchInlineSnapshot(`
-      "Subagent · Architect 🧭 · ✓ completed
-      ⎿ Background · stack deep · model sonnet
-        thinking high · 0.3s duration"
+      "Subagent
+      Architect 🧭 · ✓ completed
+      ⎿ Background · stack deep
+        model sonnet · thinking high
+        0.3s duration"
     `);
     host.setExpanded(true);
     expect(text(host)).toContain("Agent ID: missing");

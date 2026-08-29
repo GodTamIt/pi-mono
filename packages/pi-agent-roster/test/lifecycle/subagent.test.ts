@@ -450,6 +450,15 @@ describe("Subagent — completeRun", () => {
     expect(record.result).toBe("done");
   });
 
+  it("keeps an unsteered final HANDOFF completed and stores it once", () => {
+    const { record } = createCompletionAgent();
+    const handoff = "## HANDOFF\n\n**status:** complete";
+    record.completeRun(createTurnLoopResult({ responseText: handoff }));
+    expect(record.status).toBe("completed");
+    expect(record.result).toBe(handoff);
+    expect(record.result?.match(/## HANDOFF/g)).toHaveLength(1);
+  });
+
   it("transitions to aborted when result.aborted is true", () => {
     const { record } = createCompletionAgent();
     record.completeRun(createTurnLoopResult({ aborted: true }));
@@ -1117,6 +1126,33 @@ describe("Subagent.resume() — happy path", () => {
 });
 
 describe("Subagent.resume() — observer lifecycle", () => {
+  it("sets the current background mode and emits a resume start", async () => {
+    const onStarted = vi.fn();
+    const stub = createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl");
+    const { agent } = createResumableAgent({ observer: { onStarted }, stub });
+
+    await agent.resume("more", undefined, undefined, {
+      model: undefined,
+      snapshot: { stack: "default", runInBackground: true },
+    });
+
+    expect(agent.execution.isBackground).toBe(true);
+    expect(onStarted).toHaveBeenCalledExactlyOnceWith(agent);
+  });
+
+  it("preserves the current mode when a resume snapshot omits it", async () => {
+    const stub = createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl");
+    const { agent } = createResumableAgent({ stub });
+    agent.execution.isBackground = true;
+
+    await agent.resume("more", undefined, undefined, {
+      model: undefined,
+      snapshot: { stack: "default" },
+    });
+
+    expect(agent.execution.isBackground).toBe(true);
+  });
+
   it("accumulates usage and compactions from session events during resume", async () => {
     const session = createMockSession();
     const stub = createSubagentSessionStub(session);

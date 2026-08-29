@@ -70,7 +70,7 @@ export interface SubagentExecution {
   graceTurns?: number | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
   readonly parentSession?: ParentSessionInfo | undefined;
-  readonly isBackground: boolean;
+  isBackground: boolean;
 }
 
 /** Live collaborators attached only once the manager admits the child. */
@@ -479,17 +479,21 @@ export class Subagent {
         ? { provider: invocation.model.provider, id: invocation.model.id }
         : undefined;
       this.execution.thinkingLevel = invocation.snapshot.thinking;
+      if (invocation.snapshot.runInBackground !== undefined) {
+        this.execution.isBackground = invocation.snapshot.runInBackground;
+      }
     }
     if (budgets?.maxTurns !== undefined) this.execution.maxTurns = budgets.maxTurns;
     if (budgets?.graceTurns !== undefined) this.execution.graceTurns = budgets.graceTurns;
     this.abortController = new AbortController();
+    this.resetForResume(Date.now());
+    runtime.observer?.onStarted?.(this);
 
     if (session && !runtime.workspaceProvider && !invocation) {
-      this._promise = this.runResume(session, task, signal, budgets);
+      this._promise = this.runResume(session, task, signal, budgets, true);
       return this._promise;
     }
 
-    this.resetForResume(Date.now());
     this._promise = this.reconstructAndResume(transcriptPath!, session, task, signal, budgets);
     return this._promise;
   }

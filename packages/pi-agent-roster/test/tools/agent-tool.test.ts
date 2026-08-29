@@ -312,6 +312,46 @@ describe("AgentTool — resume path", () => {
     });
     expect(resumed.consumed).toBe(true);
   });
+
+  it("starts a background resume and returns retrieval guidance without consuming it", async () => {
+    const deps = createToolDeps();
+    const resumeRecord = createTestSubagent({
+      invocation: { stack: "default", modelName: "anthropic/old", thinking: "low" },
+    });
+    resumeRecord.subagentSession = toSubagentSession(
+      createSubagentSessionStub(createMockSession()),
+    );
+    deps.manager.getRecord = vi.fn().mockReturnValue(resumeRecord);
+    deps.manager.resume = vi.fn(() => new Promise<never>(() => {}));
+
+    const result = await execute(deps, {
+      task: "continue",
+      resume: "agent-1",
+      max_turns: 4,
+      grace_turns: 1,
+      run_in_background: true,
+    });
+
+    expect(result.content[0]!.text).toContain("resumed in background");
+    expect(result.content[0]!.text).toContain("Agent ID: agent-1");
+    expect(result.content[0]!.text).toContain("get_subagent_result");
+    expect(result.content[0]!.text).toContain("steer_subagent");
+    expect(resumeRecord.consumed).toBe(false);
+    expect(deps.manager.resume).toHaveBeenCalledWith(
+      "agent-1",
+      "continue",
+      expect.objectContaining({ aborted: false }),
+      { maxTurns: 4, graceTurns: 1 },
+      expect.objectContaining({
+        snapshot: expect.objectContaining({
+          stack: "default",
+          maxTurns: 4,
+          graceTurns: 1,
+          runInBackground: true,
+        }),
+      }),
+    );
+  });
 });
 
 describe("AgentTool — model resolution error", () => {

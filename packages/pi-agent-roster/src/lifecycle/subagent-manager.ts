@@ -154,10 +154,7 @@ export class SubagentManager {
   }
 
   /** Compose a per-agent lifecycle observer from manager and spawn-config concerns. */
-  private buildObserver(
-    isBackground: boolean,
-    foregroundObserver?: SubagentLifecycleObserver,
-  ): SubagentLifecycleObserver {
+  private buildObserver(foregroundObserver?: SubagentLifecycleObserver): SubagentLifecycleObserver {
     return {
       onStarted: (agent) => {
         this.observer?.onSubagentStarted(agent);
@@ -167,7 +164,7 @@ export class SubagentManager {
         foregroundObserver?.onSessionCreated?.(agent);
       },
       onRunFinished: (agent) => {
-        if (isBackground) {
+        if (agent.execution.isBackground) {
           try {
             this.observer?.onSubagentCompleted(agent);
           } catch (err) {
@@ -176,7 +173,7 @@ export class SubagentManager {
         }
       },
       onResumeFinished: (agent) => {
-        if (isBackground) {
+        if (agent.execution.isBackground) {
           try {
             this.observer?.onSubagentResumed(agent);
           } catch (err) {
@@ -264,7 +261,7 @@ export class SubagentManager {
       model: selectedIdentity
         ? modelRegistry.find(selectedIdentity.provider, selectedIdentity.id)
         : undefined,
-      observer: this.buildObserver(record.execution.isBackground, foregroundObserver),
+      observer: this.buildObserver(foregroundObserver),
       runConfig: this.getRunConfig?.(),
       workspaceProvider: this._workspaceProvider,
       signal,

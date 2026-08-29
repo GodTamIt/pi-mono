@@ -46,8 +46,22 @@ function createSession(finalText: string) {
   return { session, listeners, calls };
 }
 
-function emitTurnEnd(listeners: Array<(e: any) => void>) {
-  for (const l of listeners) l({ type: "turn_end" });
+function emitTurnEnd(
+  listeners: Array<(e: any) => void>,
+  stopReason: "stop" | "toolUse" = "toolUse",
+) {
+  for (const l of listeners) {
+    l({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: stopReason === "stop" ? "done" : "working" }],
+        stopReason,
+        timestamp: Date.now(),
+      },
+      toolResults: [],
+    });
+  }
 }
 
 /**
@@ -60,9 +74,10 @@ function programTurns(
   listeners: ReturnType<typeof createSession>["listeners"],
   turns: number,
   finalText = "done",
+  stopReasons: Array<"stop" | "toolUse"> = [],
 ) {
   session.prompt = vi.fn(async () => {
-    for (let i = 0; i < turns; i++) emitTurnEnd(listeners);
+    for (let i = 0; i < turns; i++) emitTurnEnd(listeners, stopReasons[i] ?? "toolUse");
     session.messages.push({ role: "assistant", content: [{ type: "text", text: finalText }] });
   });
 }
@@ -145,12 +160,27 @@ describe("SubagentSession — runTurnLoop response capture", () => {
 });
 
 describe("SubagentSession — runTurnLoop turn limits", () => {
+  it("does not steer or duplicate a final HANDOFF that ends naturally at maxTurns", async () => {
+    const handoff = "## HANDOFF\n\n**status:** complete";
+    const { session, listeners } = createSession(handoff);
+    programTurns(session, listeners, 1, handoff, ["stop"]);
+    const { sub } = makeSubagentSession(session);
+
+    const result = await sub.runTurnLoop("go", { maxTurns: 1, graceTurns: 0 });
+
+    expect(session.steer).not.toHaveBeenCalled();
+    expect(session.abort).not.toHaveBeenCalled();
+    expect(result).toEqual({ responseText: handoff, aborted: false, steered: false });
+  });
+
   it("steers at the soft limit and aborts after the grace window", async () => {
     const { session, listeners } = createSession("done");
     programTurns(session, listeners, 3);
     const { sub } = makeSubagentSession(session);
     const result = await sub.runTurnLoop("go", { maxTurns: 2, graceTurns: 1 });
     expect(session.steer).toHaveBeenCalledWith(expect.stringContaining("turn limit"));
+    expect(session.steer).toHaveBeenCalledWith(expect.stringContaining("required output format"));
+    expect(session.steer).toHaveBeenCalledWith(expect.stringContaining("once"));
     expect(session.abort).toHaveBeenCalled();
     expect(result.aborted).toBe(true);
     expect(result.steered).toBe(true);
@@ -163,6 +193,17 @@ describe("SubagentSession — runTurnLoop turn limits", () => {
     const result = await sub.runTurnLoop("go", { maxTurns: 1, graceTurns: 3 });
     expect(result.steered).toBe(true);
     expect(result.aborted).toBe(false);
+    expect(session.abort).not.toHaveBeenCalled();
+  });
+
+  it("does not abort a final response on the grace boundary", async () => {
+    const { session, listeners } = createSession("done");
+    programTurns(session, listeners, 2, "done", ["toolUse", "stop"]);
+    const { sub } = makeSubagentSession(session);
+
+    const result = await sub.runTurnLoop("go", { maxTurns: 1, graceTurns: 1 });
+
+    expect(result).toMatchObject({ aborted: false, steered: true });
     expect(session.abort).not.toHaveBeenCalled();
   });
 

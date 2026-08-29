@@ -131,6 +131,7 @@ describe("isolated child contracts", () => {
       thinking: undefined,
       maxTurns: 2,
       graceTurns: 0,
+      runInBackground: false,
     });
 
     const deps = createToolDeps();

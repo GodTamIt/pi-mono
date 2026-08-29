@@ -52,6 +52,9 @@ function createManager(overrides?: {
         onSubagentResumed: overrides.observer.onSubagentResumed ?? (() => {}),
         onSubagentCompacted: overrides.observer.onSubagentCompacted ?? (() => {}),
         onSubagentCreated: overrides.observer.onSubagentCreated ?? (() => {}),
+        ...(overrides.observer.onSubagentSessionCreated
+          ? { onSubagentSessionCreated: overrides.observer.onSubagentSessionCreated }
+          : {}),
       }
     : undefined;
   const limiter = new ConcurrencyLimiter(
@@ -720,6 +723,32 @@ describe("SubagentManager — dependency injection via options bag", () => {
     await manager.resume(record.id, "continue");
 
     expect(onSubagentResumed).not.toHaveBeenCalled();
+  });
+
+  it("uses the current resume mode for lifecycle notifications", async () => {
+    const onSubagentStarted = vi.fn();
+    const onSubagentSessionCreated = vi.fn();
+    const onSubagentResumed = vi.fn();
+    const { factory, stub } = createSessionFactory(createMockSession(), "/sessions/child.jsonl");
+    stub.resumeTurnLoop.mockResolvedValue("second");
+    const created = createManager({
+      createSubagentSession: factory,
+      observer: { onSubagentStarted, onSubagentSessionCreated, onSubagentResumed },
+    });
+    manager = created.manager;
+    const schedule = vi.spyOn(created.limiter, "schedule");
+
+    const record = await spawnFg(manager);
+    await manager.resume(record.id, "continue", undefined, undefined, {
+      model: undefined,
+      snapshot: { stack: "default", runInBackground: true },
+    });
+
+    expect(record.execution.isBackground).toBe(true);
+    expect(onSubagentStarted).toHaveBeenCalledTimes(2);
+    expect(onSubagentSessionCreated).toHaveBeenCalledTimes(2);
+    expect(onSubagentResumed).toHaveBeenCalledExactlyOnceWith(record);
+    expect(schedule).not.toHaveBeenCalled();
   });
 });
 

@@ -55,4 +55,12 @@ describe("buildAgentPrompt", () => {
     expect(prompt).toContain("Platform: darwin");
     expect(prompt).not.toContain("PARENT_BRANCH_SENTINEL");
   });
+
+  it("ends with a generic output-contract reminder", () => {
+    const prompt = buildAgentPrompt(config(), "/workspace", env);
+    expect(prompt).toMatch(
+      /verify that your response includes every required output field from the agent instructions[\s\S]*emit the final response once\.$/,
+    );
+    expect(prompt).not.toContain("HANDOFF");
+  });
 });

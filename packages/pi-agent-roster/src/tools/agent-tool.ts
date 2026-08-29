@@ -7,6 +7,7 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { AgentTypeRegistry } from "../config/agent-types.ts";
+import { debugLog } from "../debug.ts";
 import type { ChildRuntimeBaseline } from "../lifecycle/child-runtime-baseline.ts";
 import type { AgentSpawnConfig } from "../lifecycle/subagent-manager.ts";
 import type { AgentStackOverrides } from "../stacks/stack-resolver.ts";
@@ -145,10 +146,13 @@ export class AgentTool {
       );
       if ("error" in selection) return textResult(selection.error);
       if (selection.notice) ctx.ui.notify(selection.notice, "warning");
-      const record = await this.manager.resume(
+      const resumeSignal = config.runInBackground
+        ? new AbortController().signal
+        : (signal ?? new AbortController().signal);
+      const resume = this.manager.resume(
         resumeId,
         config.task,
-        signal ?? new AbortController().signal,
+        resumeSignal,
         {
           maxTurns: config.maxTurns,
           graceTurns: config.graceTurns,
@@ -160,9 +164,21 @@ export class AgentTool {
             ...selection.invocation,
             maxTurns: config.maxTurns ?? existing.invocation?.maxTurns,
             graceTurns: config.graceTurns ?? existing.invocation?.graceTurns,
+            runInBackground: config.runInBackground,
           },
         },
       );
+      if (config.runInBackground) {
+        void resume.catch((err) => debugLog("background subagent resume", err));
+        return textResult(
+          `Agent resumed in background.\n` +
+            `Agent ID: ${resumeId}\n\n` +
+            `You will be notified when this agent completes.\n` +
+            `Use get_subagent_result to retrieve full results, or steer_subagent to send it messages.\n` +
+            `Do not duplicate this agent's work.`,
+        );
+      }
+      const record = await resume;
       if (!record) {
         return textResult(`Failed to resume agent "${resumeId}".`);
       }
@@ -301,10 +317,10 @@ ${guidelines}
         { additionalProperties: false },
       ),
 
-      // The result renderer owns the complete logical row; the call slot stays empty.
-      renderShell: "self",
-      renderCall() {
-        return new Text("", 0, 0);
+      // Compose with Pi's native pending/success/error shell, like get_subagent_result.
+      // The call slot remains visible before the first child update arrives.
+      renderCall(_args, theme) {
+        return new Text(theme.fg("toolTitle", theme.bold("Subagent")), 0, 0);
       },
 
       renderResult(
