@@ -4,4 +4,5 @@ coverage/
 .direnv/
 *.tgz
 .pi/
+.plans/
 .DS_Store
