@@ -41,6 +41,7 @@ The package intentionally ships **no built-in agents**. On a fresh install, `/ro
      read: allow
      grep: allow
      find: allow
+   context_files: false
    max_turns: 12
    grace_turns: 2
    ---
@@ -95,9 +96,15 @@ The Markdown body is the profile's system instruction. There are exactly two pro
 - **Child `append`:** roster's isolated-child runtime baseline, tool-aware operational guidance, active-agent and environment facts, then the wrapped profile body.
 - **Child `replace`:** the profile body only. It replaces every roster-owned child baseline, guidance, and metadata block.
 
-Children never use Pi's built-in default system prompt. Independently of either child prompt mode, `context_files: true` lets Pi's custom system-prompt builder append the normal `AGENTS.md`/`CLAUDE.md` hierarchy; `false` loads none. The field can appear on a `primary` or `all` profile, but only child execution reads it: Pi has already assembled the primary baseline, so roster cannot surgically remove primary context files. Children never inherit the parent conversation, prompt templates, themes, ambient `APPEND_SYSTEM.md` fragments, or other appended system fragments.
+#### Tool permissions
 
-`permission` is intentionally tool-name-only: nested mappings, arrays, `ask`, paths, command/file patterns, and globs such as `ba*` are invalid. Omission allows every currently available tool, and omission of `*` also defaults to allow. `*` changes that default; exact entries override it regardless of YAML order. This supports both a default allow with exact denies and `"*": deny` with exact allows. Exact names must resolve against Pi's registered tools for a primary or the child's built-ins plus child-extension tools for a child.
+`permission` is a flat mapping from exact tool names to lowercase `allow` or `deny`; `*` is the fallback. Nested mappings, arrays, `ask`, paths, command/file patterns, and globs such as `ba*` remain invalid. An omitted mapping or omitted `*` defaults to allow, and exact names override `*` regardless of YAML order. Permissions resolve against the current primary registered tools, or a child's built-ins plus child-extension tools; unknown exact names are rejected. Managed delegation tools are still stripped from children.
+
+For child `append` prompts, built-in operational guidance is added only for enabled `read`, `edit`, `write`, `find`, and `grep` tools. `replace` omits roster-owned guidance; tool descriptions themselves are unchanged.
+
+#### Context files
+
+`context_files` is a boolean profile frontmatter parameter that defaults to `true`. It may appear on any profile, but only child execution reads it: normal `AGENTS.md`/`CLAUDE.md` discovery applies in both `append` and `replace` modes, and `false` disables it. Child execution does not inherit the parent conversation or other prompt resources, and this setting cannot alter the already assembled primary prompt. Children never use Pi's built-in default system prompt.
 
 ### Primary and child example
 
