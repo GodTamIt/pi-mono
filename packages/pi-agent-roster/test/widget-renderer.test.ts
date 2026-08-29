@@ -205,9 +205,14 @@ describe("active-agent details", () => {
 
     expect(lines.some((line) => line.includes("task:"))).toBe(true);
     expect(lines.some((line) => line.includes("activity:"))).toBe(true);
-    expect(lines.every((line) => !/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/u.test(line))).toBe(
-      true,
-    );
+    expect(
+      lines.every((line) =>
+        [...line].every((character) => {
+          const code = character.charCodeAt(0);
+          return code >= 32 && code !== 127 && (code < 128 || code > 159);
+        }),
+      ),
+    ).toBe(true);
   });
 
   it("assigns semantic colors while keeping lifecycle states textual", () => {
