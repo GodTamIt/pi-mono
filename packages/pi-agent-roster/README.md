@@ -7,22 +7,21 @@ Primary-agent profiles and in-process subagent orchestration for Pi. Define a ro
   <img src="./media/terminal-light.svg" alt="Sanitized Pi terminal showing a lead profile, two running background agents, and one agent waiting for a concurrency slot." width="1200">
 </picture>
 
-> **Release status:** this package is currently unreleased at `0.0.0`. See [Compatibility and publication](#compatibility-and-publication) before relying on an install path.
-
 ## Installation
 
 Requirements: Node `>=22.22.2`, Pi `>=0.84.3 <0.85.0`, and authentication for every model named by a selected profile or stack.
 
-From this source checkout, install workspace dependencies and register the local package:
+For a persistent installation:
 
 ```sh
-npm ci
-pi install ./packages/pi-agent-roster
+pi install npm:pi-agent-roster@alpha
 ```
 
-For a single run without changing Pi's saved package list, use `pi -e ./packages/pi-agent-roster` instead.
+For a single run without changing Pi's saved package list:
 
-There is no npm install command yet because no npm release exists.
+```sh
+pi -e npm:pi-agent-roster@alpha
+```
 
 Pi packages execute with full system access. Review the extension and any child-loaded extensions before enabling them.
 
@@ -60,10 +59,6 @@ The package intentionally ships **no built-in agents**. On a fresh install, `/ro
 
 If Pi was already running when the file changed, use `/agents:reload`. Restarting also rebuilds the model-facing tool description, which is useful after adding the first agent.
 
-[View the sanitized terminal recording source](./media/quick-start.cast), or use its deterministic fallback:
-
-[![A terminal walkthrough of roster status, agent reload, profile selection, and a running background reviewer.](./media/quick-start.svg)](./media/quick-start.cast)
-
 ## Agent definitions
 
 Agent identity comes from the Markdown filename and is case-insensitive. Definitions are discovered in this order:
@@ -88,7 +83,7 @@ An invalid project override still masks the global definition. Files are scanned
 | `thinking` | `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. | Active parent level |
 | `stacks` | Named model/thinking profiles. Stack models must use `provider/model` format. | None |
 | `default_stack` | Named stack or the synthetic `default`. | `default` |
-| `max_turns` | Soft turn limit, `1–10000`; legacy `0` means unlimited. | Project/global setting |
+| `max_turns` | Soft turn limit, `1–10000`; `0` also means unlimited. | Project/global setting |
 | `grace_turns` | Turns allowed after the wrap-up request, `0–1000`. | Project/global setting |
 | `run_in_background` | When present, forces tool launches for this agent into that mode; otherwise the call chooses. | Foreground |
 | `prompt_mode` | `append` or `replace`. | `append` |
@@ -103,8 +98,6 @@ The Markdown body is the profile's system instruction. There are exactly two pro
 Children never use Pi's built-in default system prompt. Independently of either child prompt mode, `context_files: true` lets Pi's custom system-prompt builder append the normal `AGENTS.md`/`CLAUDE.md` hierarchy; `false` loads none. The field can appear on a `primary` or `all` profile, but only child execution reads it: Pi has already assembled the primary baseline, so roster cannot surgically remove primary context files. Children never inherit the parent conversation, prompt templates, themes, ambient `APPEND_SYSTEM.md` fragments, or other appended system fragments.
 
 `permission` is intentionally tool-name-only: nested mappings, arrays, `ask`, paths, command/file patterns, and globs such as `ba*` are invalid. Omission allows every currently available tool, and omission of `*` also defaults to allow. `*` changes that default; exact entries override it regardless of YAML order. This supports both a default allow with exact denies and `"*": deny` with exact allows. Exact names must resolve against Pi's registered tools for a primary or the child's built-ins plus child-extension tools for a child.
-
-The removed `tools` field, `inherit_context`, and `model_stacks` are unsupported and reject the file.
 
 ### Primary and child example
 
@@ -190,17 +183,7 @@ A finite `max_turns` first sends a wrap-up message. `grace_turns` controls how m
 
 Background and queued children are aborted when the parent is interrupted with `Esc` by default. Foreground children hold the parent run signal and always stop with it. The policy is configurable in `/subagents:settings`.
 
-Each child:
-
-1. Optionally prepares a workspace.
-2. Creates its own persisted JSONL session and parent-session lineage.
-3. Loads child extensions, validates configured tools, emits `session_start`, and runs the task.
-4. Emits completion data and retains the result record.
-5. On release or shutdown, emits child `session_shutdown` before disposal; handlers are bounded to five seconds so Pi can still exit.
-
-Child sessions live beside the parent transcript under `<parent-session>/tasks/`. Headless parents use a temporary, project-keyed directory. Consumed live sessions are released after 10 minutes by default; unconsumed sessions use a 12-hour safety cap. Lightweight records and transcript pointers remain available for the parent session. Settled records are cleared on session start or switch, and shutdown aborts and disposes all remaining work.
-
-The extension emits high-level `subagents:created`, `started`, `completed`, `failed`, `resumed`, `compacted`, and `steered` events, plus ordered `subagents:child:*` session lifecycle events for synchronous observers.
+Child sessions live beside the parent transcript under `<parent-session>/tasks/`. Headless parents use a temporary, project-keyed directory. Each child emits `session_shutdown` before release or shutdown disposal; handlers are bounded to five seconds so Pi can still exit. Consumed live sessions are released after 10 minutes by default; unconsumed sessions use a 12-hour safety cap. Lightweight records and transcript pointers remain available for the parent session. Settled records are cleared on session start or switch, and shutdown aborts and disposes all remaining work.
 
 ## Tools
 
@@ -240,7 +223,7 @@ const result = service.inspect(id);
 
 Service spawns are background by default. `foreground: true` starts immediately but still returns an ID synchronously; callers can inspect or await through the service. `bypassQueue` is intended for integrations that must start immediately.
 
-`SUBAGENT_EVENTS` exports the high-level event channel names. `SubagentRecord` includes status, invocation, usage, context, compaction, conversation, result/error, and transcript metadata.
+`SUBAGENT_EVENTS` exports the high-level event channel names: `subagents:created`, `started`, `completed`, `failed`, `resumed`, `compacted`, and `steered`. Ordered `subagents:child:*` session lifecycle events are also emitted for synchronous observers. `SubagentRecord` includes status, invocation, usage, context, compaction, conversation, result/error, and transcript metadata.
 
 Only one `WorkspaceProvider` can be registered. Its `prepare()` method may return a worktree, container mount, temporary directory, or remote workspace; its `dispose()` result can append provider-owned text to the child result.
 
@@ -290,16 +273,6 @@ The UI is designed to stay useful at both wide and narrow terminal widths:
 
 Viewer controls are `↑`/`↓` or `j`/`k`, `PgUp`/`PgDn`, `Home`/`End`, and `q`, `Esc`, or `Ctrl+C` to close. Footer hints shorten at narrow widths.
 
-<details>
-<summary>Narrow-terminal variant</summary>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./media/terminal-narrow-dark.svg">
-  <img src="./media/terminal-narrow-light.svg" alt="A 46-column terminal showing Agent Roster wrapping stack, model, usage, task, and activity details without clipping." width="520">
-</picture>
-
-</details>
-
 ## Isolation and security model
 
 Isolation is explicit rather than implied:
@@ -327,27 +300,13 @@ Do not put secrets or assumptions from the parent chat into agent definitions. P
 | The child seems unaware of the conversation | This is required isolation. Repeat every necessary fact, path, constraint, and output expectation in `task`. |
 | `/subagents:sessions` is empty | Queued work has no child session yet. Only records with a live session or persisted transcript are listed. |
 | A result can no longer resume live | The retention sweep may have released the heavy session; resume reconstructs from the child transcript while its record remains available. |
-| Installed CLI behavior differs | Confirm Pi `0.84.x`, Node `>=22.22.2`, public-root imports, and the exact installed-tarball smoke described below. |
+| The extension does not load | Confirm Node `>=22.22.2` and Pi `>=0.84.3 <0.85.0`, then reinstall the package. |
 
 For a lightweight load check, run `/roster-status`. A healthy response is `Roster <name>: roster_noop ready`.
 
-## Compatibility and publication
-
-The peer range is Pi `>=0.84.3 <0.85.0`; development and installed-package verification use exactly `0.84.3`. Extension code imports only public roots from `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, and `@earendil-works/pi-tui`.
-
-**No npm release exists.** The release workflow is manually gated and requires the exact-version npm CLI smoke. Do not substitute an unbundled development entrypoint to conceal a failure, and do not widen the peer range until the peer floor and installed-CLI evidence are updated together.
-
-```sh
-npm run smoke:installed
-```
-
-The smoke packs the tarball, installs it with exact peers into a fresh tree, launches the actual npm Pi CLI with a fresh Pi home, and verifies flags, commands, tools, foreground/background execution, delayed admission, workspace integration, steering, retained and reconstructed resume, transcript isolation, lifecycle events, retention, and shutdown without network credentials.
-
 ## Provenance
 
-This package adapts the in-process subagent implementation from `@gotgenes/pi-subagents@19.3.5`, itself a friendly fork of `@tintinweb/pi-subagents`. `pi-open-agents@0.1.17` is a semantic reference, not a copied-code source.
-
-Pinned commits, authors, licenses, retained notices, and path-level source mappings are recorded in [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md). The terminal media in [`media/`](./media/) was created for this package from sanitized fictional output; no upstream artwork or user environment was copied.
+Provenance details, including pinned commits, authors, licenses, retained notices, and path-level source mappings, are recorded in [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md).
 
 ## License
 

@@ -130,8 +130,9 @@ try {
   const installedManifest = JSON.parse(
     readFileSync(join(installedPackage, "package.json"), "utf8"),
   );
+  const sourceManifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
   assert(
-    installedManifest.version === "0.0.0",
+    installedManifest.version === sourceManifest.version,
     `Unexpected packed version: ${installedManifest.version}`,
   );
   for (const peer of Object.keys(installedManifest.peerDependencies ?? {})) {
@@ -175,27 +176,27 @@ try {
   writeAgent(
     globalAgents,
     "actual-pi",
-    `---\ndescription: Global definition that must be overridden\nmode: subagent\nmodel: roster-faux/roster-faux-model\ntools: read\n---\nGLOBAL_AGENT_PROMPT_must_not_win\n`,
+    `---\ndescription: Global definition that must be overridden\nmode: subagent\nmodel: roster-faux/roster-faux-model\npermission:\n  "*": deny\n  read: allow\n---\nGLOBAL_AGENT_PROMPT_must_not_win\n`,
   );
   writeAgent(
     globalAgents,
     "global-worker",
-    `---\ndescription: Globally installed child\nmode: subagent\nmodel: roster-faux/roster-faux-model\ntools: read\n---\nGLOBAL_WORKER_PROMPT_0f81\n`,
+    `---\ndescription: Globally installed child\nmode: subagent\nmodel: roster-faux/roster-faux-model\npermission:\n  "*": deny\n  read: allow\n---\nGLOBAL_WORKER_PROMPT_0f81\n`,
   );
   writeAgent(
     globalAgents,
     "primary-only",
-    `---\ndescription: Globally installed primary\nmode: primary\nmodel: openai/gpt-4.1-mini\ntools: read\n---\nPRIMARY_ONLY_PROMPT_f803\n`,
+    `---\ndescription: Globally installed primary\nmode: primary\nmodel: openai/gpt-4.1-mini\npermission:\n  "*": deny\n  read: allow\n---\nPRIMARY_ONLY_PROMPT_f803\n`,
   );
   writeAgent(
     projectAgents,
     "actual-pi",
-    `---\ndescription: Project override used by installed lifecycle runs\nmode: all\nmodel: roster-faux/roster-faux-model\ndefault_stack: fast\nstacks:\n  fast:\n    model: roster-faux/roster-faux-model\n    thinking: low\n  deep:\n    model: roster-faux/roster-faux-deep\n    thinking: high\ntools: read\n---\nPROJECT_AGENT_PROMPT_594a\n`,
+    `---\ndescription: Project override used by installed lifecycle runs\nmode: all\nmodel: roster-faux/roster-faux-model\ndefault_stack: fast\nstacks:\n  fast:\n    model: roster-faux/roster-faux-model\n    thinking: low\n  deep:\n    model: roster-faux/roster-faux-deep\n    thinking: high\npermission:\n  "*": deny\n  read: allow\n---\nPROJECT_AGENT_PROMPT_594a\n`,
   );
   writeAgent(
     projectAgents,
     "layered",
-    `---\ndescription: Project CLI primary\nmode: all\ndefault_stack: quick\nstacks:\n  quick:\n    model: openai/gpt-4.1-mini\n    thinking: low\n  thorough:\n    model: openai/gpt-4.1\n    thinking: high\ntools: read\n---\nPROJECT_PRIMARY_PROMPT_31af\n`,
+    `---\ndescription: Project CLI primary\nmode: all\ndefault_stack: quick\nstacks:\n  quick:\n    model: openai/gpt-4.1-mini\n    thinking: low\n  thorough:\n    model: openai/gpt-4.1\n    thinking: high\npermission:\n  "*": deny\n  read: allow\n---\nPROJECT_PRIMARY_PROMPT_31af\n`,
   );
   mkdirSync(join(workDir, ".pi"), { recursive: true });
   writeFileSync(
