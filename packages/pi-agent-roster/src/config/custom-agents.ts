@@ -12,8 +12,8 @@ import type {
   AgentMode,
   AgentStackProfile,
   ThinkingLevel,
+  ToolPermissions,
 } from "../types.ts";
-import { BUILTIN_TOOL_NAMES } from "./agent-types.ts";
 
 const THINKING_LEVELS = new Set<ThinkingLevel>([
   "minimal",
@@ -136,6 +136,7 @@ function parseAgent(
   const fm = raw;
   rejectUnsupported(path, fm, "inherit_context");
   rejectUnsupported(path, fm, "model_stacks");
+  rejectUnsupported(path, fm, "tools");
 
   const mode = optionalString(fm.mode, `${path}:mode`) ?? "subagent";
   if (!MODES.has(mode as AgentMode)) {
@@ -154,7 +155,8 @@ function parseAgent(
     allowedAgents: parseList(fm.allowed_agents, `${path}:allowed_agents`, false),
     stacks,
     defaultStack,
-    toolNames: parseTools(fm.tools, `${path}:tools`),
+    permission: parsePermission(fm.permission, `${path}:permission`),
+    contextFiles: optionalBoolean(fm.context_files, `${path}:context_files`) ?? true,
     model: optionalString(fm.model, `${path}:model`),
     thinking,
     maxTurns: parseMaxTurns(fm.max_turns, `${path}:max_turns`),
@@ -213,9 +215,21 @@ function parseDefaultStack(
   return canonical;
 }
 
-function parseTools(value: unknown, path: string): string[] {
-  if (value == null) return [...BUILTIN_TOOL_NAMES];
-  return parseList(value, path, true) ?? [];
+function parsePermission(value: unknown, path: string): ToolPermissions | undefined {
+  if (value == null) return undefined;
+  if (!isRecord(value) || Array.isArray(value)) throw new Error(`${path} must be a flat mapping`);
+
+  const result: Record<string, "allow" | "deny"> = {};
+  for (const [name, action] of Object.entries(value)) {
+    if (name !== "*" && (!name || name !== name.trim() || /[\\/*?\[\]{}]/.test(name))) {
+      throw new Error(`${path}.${name} must be an exact tool name or "*"`);
+    }
+    if (action !== "allow" && action !== "deny") {
+      throw new Error(`${path}.${name} must be exactly "allow" or "deny"`);
+    }
+    result[name] = action;
+  }
+  return result;
 }
 
 function parseList(value: unknown, path: string, allowNone: boolean): string[] | undefined {

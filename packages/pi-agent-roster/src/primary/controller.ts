@@ -8,6 +8,10 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { AgentTypeRegistry } from "../config/agent-types.ts";
 import { normalizeAgentId } from "../config/custom-agents.ts";
+import {
+  resolvePermittedToolNames,
+  unknownPermissionToolNames,
+} from "../config/tool-permissions.ts";
 import type { AgentStackOverrides } from "../stacks/stack-resolver.ts";
 import { resolveAgentStack } from "../stacks/stack-resolver.ts";
 import type { AgentConfig } from "../types.ts";
@@ -108,8 +112,8 @@ export class PrimaryController {
     const prompt = this.selected?.agent.systemPrompt.trim();
     return {
       systemPrompt:
-        prompt && this.selected?.agent.promptMode === "replace"
-          ? prompt
+        this.selected?.agent.promptMode === "replace"
+          ? (prompt ?? "")
           : prompt
             ? `${baseline}\n\n${prompt}`
             : baseline,
@@ -394,12 +398,12 @@ export class PrimaryController {
     if (stack.notice) this.ctx?.ui.notify(stack.notice.message, "warning");
     if (!stack.model) return `No available model resolved for agent ${JSON.stringify(canonical)}.`;
 
-    const registered = new Set(this.options.pi.getAllTools().map((tool) => tool.name));
-    const tools = agent.toolNames ?? this.options.registry.getToolNamesForType(canonical);
-    const unknown = tools.filter((tool) => !registered.has(tool));
+    const registered = this.options.pi.getAllTools().map((tool) => tool.name);
+    const unknown = unknownPermissionToolNames(registered, agent.permission);
     if (unknown.length) {
-      return `Agent ${JSON.stringify(canonical)} references unknown tools: ${unknown.join(", ")}.`;
+      return `Agent ${JSON.stringify(canonical)} has permission entries for unknown tools: ${unknown.join(", ")}.`;
     }
+    const tools = resolvePermittedToolNames(registered, agent.permission);
     return {
       name: canonical,
       agent,
@@ -484,7 +488,7 @@ export class PrimaryController {
   private reconcileToolVisibility(): void {
     const active = this.options.pi.getActiveTools();
     const desired = this.selected?.tools ?? this.baseline?.tools ?? active;
-    this.options.pi.setActiveTools(this.visibleTools(active, this.selected, desired));
+    this.options.pi.setActiveTools(this.visibleTools(desired, this.selected, desired));
   }
 
   private visibleTools(tools: string[], selection = this.selected, desired = tools): string[] {

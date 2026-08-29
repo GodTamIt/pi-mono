@@ -54,6 +54,9 @@ export interface AgentIdentity {
   promptMode: "replace" | "append";
 }
 
+export type ToolPermission = "allow" | "deny";
+export type ToolPermissions = Readonly<Record<string, ToolPermission>>;
+
 /** Prompt assembly — name, prompt mode, system prompt. */
 export interface AgentPromptConfig {
   name: string;
@@ -70,8 +73,10 @@ export interface AgentConfig extends AgentIdentity, AgentPromptConfig {
   allowedAgents?: string[] | undefined;
   stacks?: ReadonlyMap<string, AgentStackProfile> | undefined;
   defaultStack?: string | undefined;
-  /** The agent's tool allowlist. Entries name built-in or extension-registered tools; omitted means every built-in. */
-  toolNames?: string[] | undefined;
+  /** Tool permissions. Exact names override the optional wildcard; omission allows all available tools. */
+  permission?: ToolPermissions | undefined;
+  /** Whether child sessions discover AGENTS.md/CLAUDE.md context files. */
+  contextFiles?: boolean | undefined;
   model?: string | undefined;
   thinking?: ThinkingLevel | undefined;
   maxTurns?: number | undefined;

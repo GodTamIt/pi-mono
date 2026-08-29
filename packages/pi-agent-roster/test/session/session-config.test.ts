@@ -9,12 +9,10 @@ const mockResolveAgentConfig = vi.fn(
   (): AgentConfig => ({
     name: "Explore",
     description: "Fast codebase exploration agent",
-    toolNames: ["read"],
     systemPrompt: "You are Explore.",
     promptMode: "replace",
   }),
 );
-const mockGetToolNamesForType = vi.fn((): string[] => ["read"]);
 const mockBuildAgentPrompt: Mock<AssemblerIO["buildAgentPrompt"]> = vi.fn(
   () => "assembled system prompt",
 );
@@ -22,7 +20,6 @@ const mockBuildAgentPrompt: Mock<AssemblerIO["buildAgentPrompt"]> = vi.fn(
 /** Mock registry injected into assembleSessionConfig instead of module-level free functions. */
 const mockAgentLookup: AgentConfigLookup = {
   resolveAgentConfig: mockResolveAgentConfig,
-  getToolNamesForType: mockGetToolNamesForType,
 };
 
 import { assembleSessionConfig } from "../../src/session/session-config.ts";
@@ -59,7 +56,6 @@ function exploreConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 
 beforeEach(() => {
   mockResolveAgentConfig.mockClear();
-  mockGetToolNamesForType.mockClear();
   mockBuildAgentPrompt.mockClear();
   mockRegistry.find.mockReset();
   mockRegistry.getAll.mockClear();
@@ -72,7 +68,7 @@ describe("assembleSessionConfig — default agent shape", () => {
 
     expect(result.effectiveCwd).toBe("/tmp");
     expect(result.systemPrompt).toBe("assembled system prompt");
-    expect(result.toolNames).toEqual(["read"]);
+    expect(result.agentConfig.name).toBe("Explore");
     expect(result.model).toBeUndefined();
     expect(result.thinkingLevel).toBeUndefined();
   });

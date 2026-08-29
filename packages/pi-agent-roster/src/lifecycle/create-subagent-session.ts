@@ -16,6 +16,10 @@ import { dirname } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
 import type { AgentSession, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { BUILTIN_TOOL_NAMES, type AgentConfigLookup } from "../config/agent-types.ts";
+import {
+  resolvePermittedToolNames,
+  unknownPermissionToolNames,
+} from "../config/tool-permissions.ts";
 import type { EnvInfo } from "../session/env.ts";
 import type { ModelRegistry } from "../session/model-resolver.ts";
 import { type AssemblerIO, assembleSessionConfig } from "../session/session-config.ts";
@@ -202,20 +206,37 @@ export async function createSubagentSession(
   const sessionSettings = deps.io.createSettingsManager(cfg.effectiveCwd, agentDir);
   const loaderSettings = deps.io.createLoaderSettingsManager(sessionSettings);
 
-  // Keep context files and ambient prompt fragments out of the child baseline;
-  // static agent instructions are assembled above.
-  const loader = deps.io.createResourceLoader({
+  // Ambient prompt fragments remain isolated. Context discovery is independently
+  // controlled by the profile and is appended by Pi's custom prompt builder.
+  let enabledToolNames: string[] | undefined;
+  let loader: ResourceLoaderLike;
+  const assemblePrompt = (): string => {
+    const availableToolNames = getAvailableToolNames(loader);
+    validatePermissionTools(type, availableToolNames, cfg.agentConfig);
+    enabledToolNames = resolvePermittedToolNames(availableToolNames, cfg.agentConfig.permission);
+    const prompt = deps.io.assemblerIO.buildAgentPrompt(
+      cfg.agentConfig,
+      cfg.effectiveCwd,
+      env,
+      enabledToolNames,
+    );
+    // Pi treats an empty custom prompt as a request for its default prompt.
+    return prompt || " ";
+  };
+  loader = deps.io.createResourceLoader({
     cwd: cfg.effectiveCwd,
     agentDir,
     settingsManager: loaderSettings,
     noPromptTemplates: true,
     noThemes: true,
-    noContextFiles: true,
-    systemPromptOverride: () => cfg.systemPrompt,
+    noContextFiles: !(cfg.agentConfig.contextFiles ?? true),
+    systemPromptOverride: assemblePrompt,
     appendSystemPromptOverride: () => [],
   });
   await loader.reload();
-  validateConfiguredTools(type, cfg.toolNames, loader, deps.registry.resolveAgentConfig(type));
+  // Test doubles and alternate loaders may not evaluate the override during reload.
+  if (!enabledToolNames) assemblePrompt();
+  const permittedToolNames = enabledToolNames ?? [];
 
   // Create a persisted SessionManager so transcripts are written in Pi's
   // official JSONL format. Falls back to a temp directory when the parent
@@ -242,7 +263,7 @@ export async function createSubagentSession(
     settingsManager: sessionSettings,
     modelRegistry: params.modelRegistry,
     model: cfg.model,
-    tools: cfg.toolNames,
+    tools: permittedToolNames,
     excludeTools: EXCLUDED_TOOL_NAMES,
     resourceLoader: loader,
     thinkingLevel: cfg.thinkingLevel,
@@ -291,22 +312,29 @@ export async function createSubagentSession(
   return subagentSession;
 }
 
-function validateConfiguredTools(
+function getAvailableToolNames(loader: ResourceLoaderLike): string[] {
+  const available = [...BUILTIN_TOOL_NAMES];
+  const seen = new Set(available);
+  for (const extension of loader.getExtensions().extensions) {
+    for (const name of extension.tools.keys()) {
+      if (!seen.has(name)) available.push(name);
+      seen.add(name);
+    }
+  }
+  return available;
+}
+
+function validatePermissionTools(
   type: SubagentType,
-  configured: string[],
-  loader: ResourceLoaderLike,
+  available: readonly string[],
   agent: AgentConfig,
 ): void {
-  const available = new Set<string>(BUILTIN_TOOL_NAMES);
-  for (const extension of loader.getExtensions().extensions) {
-    for (const name of extension.tools.keys()) available.add(name);
-  }
-  const unknown = configured.filter((name) => !available.has(name));
+  const unknown = unknownPermissionToolNames(available, agent.permission);
   if (!unknown.length) return;
   const location = agent.source
-    ? `${agent.source}:${agent.name}.md:tools`
-    : `agent ${JSON.stringify(type)} tools`;
+    ? `${agent.source}:${agent.name}.md:permission`
+    : `agent ${JSON.stringify(type)} permission`;
   throw new Error(
-    `${location} references unknown child tools: ${unknown.join(", ")}. Install or enable the child extension that registers them, or remove them from tools.`,
+    `${location} references unknown child tools: ${unknown.join(", ")}. Install or enable the child extension that registers them, or remove those permission entries.`,
   );
 }

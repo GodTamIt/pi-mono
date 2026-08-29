@@ -28,7 +28,7 @@ function config(overrides: Partial<AgentConfig> = {}): AgentConfig {
     promptMode: "append",
     model: "anthropic/primary",
     thinking: "high",
-    toolNames: ["read", ...MANAGED_SUBAGENT_TOOLS],
+    permission: { bash: "deny" },
     ...overrides,
   };
 }
@@ -43,7 +43,7 @@ function harness(
     name: "Worker",
     mode: "subagent",
     model: "anthropic/base",
-    toolNames: ["read"],
+    permission: { "*": "deny", read: "allow" },
   });
   const registry = new AgentTypeRegistry(
     () =>
@@ -139,6 +139,26 @@ describe("PrimaryController", () => {
     expect(h.controller.authorizeTarget("WORKER")).toBeUndefined();
   });
 
+  it("does not re-enable managed tools denied by primary permissions", async () => {
+    const h = harness(config({ permission: { "*": "deny", read: "allow" } }), {
+      [PRIMARY_AGENT_FLAG]: "lead",
+    });
+    await h.controller.handleSessionStart(h.ctx);
+    expect(h.getActive()).toEqual(["read"]);
+  });
+
+  it("rejects primary selection with an unknown exact permission key", async () => {
+    const h = harness(config({ permission: { missing_tool: "deny" } }), {
+      [PRIMARY_AGENT_FLAG]: "lead",
+    });
+    await h.controller.handleSessionStart(h.ctx);
+    expect(h.pi.setModel).not.toHaveBeenCalled();
+    expect(h.notify).toHaveBeenCalledWith(
+      expect.stringContaining("unknown tools: missing_tool"),
+      "error",
+    );
+  });
+
   it("requires --stack to accompany an enabled non-default primary without mutating startup state", async () => {
     const h = harness(config(), { [PRIMARY_STACK_FLAG]: "deep" });
 
@@ -194,6 +214,16 @@ describe("PrimaryController", () => {
     ]);
     expect(h.controller.beforeAgentStart({ systemPrompt: "mutated prompt" } as never)).toEqual({
       systemPrompt: "Baseline prompt",
+    });
+  });
+
+  it("uses an empty replacement body instead of the captured baseline", async () => {
+    const h = harness(config({ promptMode: "replace", systemPrompt: "" }), {
+      [PRIMARY_AGENT_FLAG]: "lead",
+    });
+    await h.controller.handleSessionStart(h.ctx);
+    expect(h.controller.beforeAgentStart({ systemPrompt: "ignored" } as never)).toEqual({
+      systemPrompt: "",
     });
   });
 
@@ -270,6 +300,17 @@ describe("PrimaryController", () => {
     h.controller.reconcileBeforeDelegation();
 
     expect(h.controller.authorizeTarget("worker")).toContain("not authorized");
+    expect(h.getActive()).toEqual(["read"]);
+  });
+
+  it("reapplies refreshed primary permissions before delegation", async () => {
+    const lead = config({ permission: undefined });
+    const h = harness(lead, { [PRIMARY_AGENT_FLAG]: "lead" });
+    await h.controller.handleSessionStart(h.ctx);
+
+    lead.permission = { "*": "deny", read: "allow" };
+    h.controller.reconcileBeforeDelegation();
+
     expect(h.getActive()).toEqual(["read"]);
   });
 

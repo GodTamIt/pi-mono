@@ -12,7 +12,7 @@
 
 import type { Model } from "@earendil-works/pi-ai";
 import type { AgentConfigLookup } from "../config/agent-types.ts";
-import type { AgentPromptConfig, SubagentType, ThinkingLevel } from "../types.ts";
+import type { AgentConfig, AgentPromptConfig, SubagentType, ThinkingLevel } from "../types.ts";
 import type { EnvInfo } from "./env.ts";
 import type { ModelRegistry } from "./model-resolver.ts";
 
@@ -27,7 +27,12 @@ import type { ModelRegistry } from "./model-resolver.ts";
  * at the edge (`create-subagent-session.ts`) or stubs in tests.
  */
 export interface AssemblerIO {
-  buildAgentPrompt: (config: AgentPromptConfig, cwd: string, env: EnvInfo) => string;
+  buildAgentPrompt: (
+    config: AgentPromptConfig,
+    cwd: string,
+    env: EnvInfo,
+    enabledToolNames?: readonly string[],
+  ) => string;
 }
 
 /**
@@ -68,10 +73,10 @@ export interface AssemblerOptions {
 export interface SessionConfig {
   /** Resolved working directory (`options.cwd ?? ctx.cwd`). */
   effectiveCwd: string;
-  /** Fully-assembled system prompt string (ready for `systemPromptOverride`). */
+  /** Initial prompt; the child factory rebuilds it after extension tool discovery. */
   systemPrompt: string;
-  /** Built-in tool name allowlist for this agent type. */
-  toolNames: string[];
+  /** Resolved profile used for post-loader permission and prompt assembly. */
+  agentConfig: AgentConfig;
   /**
    * Resolved model instance (undefined → use parent model as passed to SDK).
    * The assembler passes it through without inspection.
@@ -132,7 +137,7 @@ function resolveDefaultModel(
  * @param ctx        Narrow context from the parent session.
  * @param options    Per-call overrides (cwd, model, thinkingLevel).
  * @param env        Pre-resolved environment info from `detectEnv()`.
- * @param registry   Agent config lookup — provides resolveAgentConfig and getToolNamesForType.
+ * @param registry   Agent config lookup.
  * @param io         IO collaborators (skill loader, memory builder, prompt builder).
  */
 export function assembleSessionConfig(
@@ -147,9 +152,7 @@ export function assembleSessionConfig(
 
   const effectiveCwd = options.cwd ?? ctx.cwd;
 
-  const toolNames = registry.getToolNamesForType(type);
-
-  // Build system prompt from the resolved agent config
+  // Build an initial prompt. The factory rebuilds it with the loaded tool set.
   const systemPrompt = io.buildAgentPrompt(agentConfig, effectiveCwd, env);
 
   // Model resolution: explicit option > config model string > parent model
@@ -166,7 +169,7 @@ export function assembleSessionConfig(
   return {
     effectiveCwd,
     systemPrompt,
-    toolNames,
+    agentConfig,
     model,
     thinkingLevel,
     agentMaxTurns,

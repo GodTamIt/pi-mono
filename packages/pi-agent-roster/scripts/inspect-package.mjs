@@ -40,6 +40,7 @@ const sourceFiles = new Set([
   "src/config/agent-types.ts",
   "src/config/custom-agents.ts",
   "src/config/invocation-config.ts",
+  "src/config/tool-permissions.ts",
   "src/debug.ts",
   "src/handlers/index.ts",
   "src/handlers/interrupt.ts",

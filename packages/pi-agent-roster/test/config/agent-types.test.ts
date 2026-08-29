@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AgentTypeRegistry, BUILTIN_TOOL_NAMES } from "../../src/config/agent-types.ts";
+import { AgentTypeRegistry } from "../../src/config/agent-types.ts";
 import type { AgentConfig } from "../../src/types.ts";
 import { TEST_AGENTS } from "../helpers/test-agents.ts";
 
@@ -7,7 +7,6 @@ function makeAgentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
     name: "test-agent",
     description: "Test agent",
-    toolNames: ["read", "grep"],
     systemPrompt: "You are a test agent.",
     promptMode: "replace",
     runInBackground: false,
@@ -239,39 +238,6 @@ describe("AgentTypeRegistry", () => {
       const registry = makeRegistry();
       expect(registry.isValidType("nonexistent")).toBe(false);
       expect(registry.isValidType("")).toBe(false);
-    });
-  });
-
-  describe("getToolNamesForType", () => {
-    it("returns all built-in tools for general-purpose", () => {
-      const registry = makeRegistry();
-      const names = registry.getToolNamesForType("general-purpose");
-      expect(names).toEqual(BUILTIN_TOOL_NAMES);
-    });
-
-    it("returns restricted tools for Explore", () => {
-      const registry = makeRegistry();
-      const names = registry.getToolNamesForType("Explore");
-      expect(names).toEqual(["read", "bash", "grep", "find", "ls"]);
-    });
-
-    it("returns custom tool names for user agent", () => {
-      const registry = makeRegistry(
-        new Map([["auditor", makeAgentConfig({ name: "auditor", toolNames: ["read", "grep"] })]]),
-      );
-      expect(registry.getToolNamesForType("auditor")).toEqual(["read", "grep"]);
-    });
-
-    it("returns no tools for an unknown type", () => {
-      const registry = makeRegistry();
-      expect(registry.getToolNamesForType("nonexistent")).toEqual([]);
-    });
-
-    it("preserves an explicit empty tool allowlist", () => {
-      const registry = makeRegistry(
-        new Map([["notool", makeAgentConfig({ name: "notool", toolNames: [] })]]),
-      );
-      expect(registry.getToolNamesForType("notool")).toEqual([]);
     });
   });
 

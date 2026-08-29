@@ -6,7 +6,6 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
     name: "Explore",
     description: "Explore",
-    toolNames: ["read"],
     systemPrompt: "Test agent",
     promptMode: "replace",
     runInBackground: false,

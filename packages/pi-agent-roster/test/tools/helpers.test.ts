@@ -30,7 +30,6 @@ function makeRegistry(opts: {
       ({ ...(opts.resolve?.(name) ?? { description: "", model: undefined }) }) as ReturnType<
         TypeListRegistry["resolveAgentConfig"]
       >,
-    getToolNamesForType: () => [],
   };
 }
 

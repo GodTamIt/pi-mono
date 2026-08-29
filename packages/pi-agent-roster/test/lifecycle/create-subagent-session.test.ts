@@ -126,7 +126,7 @@ describe("createSubagentSession — assembly", () => {
     expect(io.createLoaderSettingsManager).toHaveBeenCalledTimes(1);
   });
 
-  it("suppresses AGENTS.md/CLAUDE.md/APPEND_SYSTEM.md for subagents", async () => {
+  it("loads context files by default while suppressing ambient APPEND_SYSTEM.md", async () => {
     await createSubagentSession(
       { baseline: STUB_SNAPSHOT, modelRegistry: MODEL_REGISTRY, type: "Explore" },
       createSubagentSessionDeps({ io, exec, registry: mockAgentLookup }),
@@ -134,12 +134,56 @@ describe("createSubagentSession — assembly", () => {
 
     expect(io.createResourceLoader).toHaveBeenCalledWith(
       expect.objectContaining({
-        noContextFiles: true,
+        noContextFiles: false,
         appendSystemPromptOverride: expect.any(Function),
       }),
     );
     const loaderOpts = io.createResourceLoader.mock.calls[0]![0];
     expect(loaderOpts.appendSystemPromptOverride()).toEqual([]);
+  });
+
+  it.each(["append", "replace"] as const)(
+    "disables context discovery when context_files is false in %s mode",
+    async (promptMode) => {
+      const registry = createAgentLookup({ contextFiles: false, promptMode });
+      await createSubagentSession(
+        { baseline: STUB_SNAPSHOT, modelRegistry: MODEL_REGISTRY, type: "Explore" },
+        createSubagentSessionDeps({ io, exec, registry }),
+      );
+      expect(io.createResourceLoader).toHaveBeenCalledWith(
+        expect.objectContaining({ noContextFiles: true }),
+      );
+    },
+  );
+
+  it("prevents Pi from treating an empty replacement body as its default prompt", async () => {
+    io.assemblerIO.buildAgentPrompt.mockReturnValue("");
+    await createSubagentSession(
+      { baseline: STUB_SNAPSHOT, modelRegistry: MODEL_REGISTRY, type: "Explore" },
+      defaultDeps(),
+    );
+    const loaderOpts = io.createResourceLoader.mock.calls[0]![0];
+    expect(loaderOpts.systemPromptOverride!()).toBe(" ");
+  });
+
+  it("passes only permitted built-ins to prompt guidance and session creation", async () => {
+    const registry = createAgentLookup({
+      promptMode: "append",
+      permission: { "*": "deny", read: "allow", powershell: "allow", grep: "allow" },
+    });
+    await createSubagentSession(
+      { baseline: STUB_SNAPSHOT, modelRegistry: MODEL_REGISTRY, type: "Explore" },
+      createSubagentSessionDeps({ io, exec, registry }),
+    );
+    expect(io.assemblerIO.buildAgentPrompt).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.any(String),
+      expect.anything(),
+      ["read", "powershell", "grep"],
+    );
+    expect(io.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ tools: ["read", "powershell", "grep"] }),
+    );
   });
 
   it("calls newSession with parentSession when parentSessionId is provided", async () => {
@@ -166,7 +210,7 @@ describe("createSubagentSession — configured tools", () => {
     const registry = createAgentLookup({
       name: "Custom",
       source: "project",
-      toolNames: ["read", "missing_tool"],
+      permission: { missing_tool: "deny" },
     });
 
     await expect(
@@ -174,19 +218,24 @@ describe("createSubagentSession — configured tools", () => {
         { baseline: STUB_SNAPSHOT, modelRegistry: MODEL_REGISTRY, type: "Custom" },
         createSubagentSessionDeps({ io, exec, registry }),
       ),
-    ).rejects.toThrow("project:Custom.md:tools references unknown child tools: missing_tool");
+    ).rejects.toThrow("project:Custom.md:permission references unknown child tools: missing_tool");
     expect(io.createSession).not.toHaveBeenCalled();
   });
 
-  it("accepts a tool registered by a loaded child extension", async () => {
+  it("resolves a child extension tool after the loader reloads", async () => {
     const session = arrangeFactory();
+    let loaded = false;
     io.createResourceLoader.mockReturnValue({
-      reload: vi.fn().mockResolvedValue(undefined),
-      getExtensions: vi.fn().mockReturnValue({
-        extensions: [{ tools: new Map([["custom_tool", {}]]) }],
+      reload: vi.fn(async () => {
+        loaded = true;
       }),
+      getExtensions: vi.fn(() => ({
+        extensions: loaded ? [{ tools: new Map([["custom_tool", {}]]) }] : [],
+      })),
     });
-    const registry = createAgentLookup({ toolNames: ["read", "custom_tool"] });
+    const registry = createAgentLookup({
+      permission: { "*": "deny", read: "allow", custom_tool: "allow" },
+    });
 
     const sub = await createSubagentSession(
       { baseline: STUB_SNAPSHOT, modelRegistry: MODEL_REGISTRY, type: "Explore" },

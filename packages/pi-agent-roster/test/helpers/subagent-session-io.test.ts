@@ -73,15 +73,9 @@ describe("createAgentLookup", () => {
     expect(config.promptMode).toBe("replace");
   });
 
-  it("default config toolNames includes 'read'", () => {
-    const lookup = createAgentLookup();
-    const config = lookup.resolveAgentConfig("Explore");
-    expect(config.toolNames).toContain("read");
-  });
-
-  it("getToolNamesForType returns ['read'] by default", () => {
-    const lookup = createAgentLookup();
-    expect(lookup.getToolNamesForType("Explore")).toEqual(["read"]);
+  it("default config allows only read", () => {
+    const config = createAgentLookup().resolveAgentConfig("Explore");
+    expect(config.permission).toEqual({ "*": "deny", read: "allow" });
   });
 
   it("accepts a partial config override", () => {
@@ -94,10 +88,9 @@ describe("createAgentLookup", () => {
     expect(config.promptMode).toBe("replace");
   });
 
-  it("resolveAgentConfig and getToolNamesForType are vi.fn() stubs", () => {
+  it("resolveAgentConfig is a vi.fn() stub", () => {
     const lookup = createAgentLookup();
     expect(lookup.resolveAgentConfig.mock).toBeDefined();
-    expect(lookup.getToolNamesForType.mock).toBeDefined();
   });
 });
 

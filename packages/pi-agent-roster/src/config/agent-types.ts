@@ -25,7 +25,6 @@ export interface AgentRegistrySnapshot {
  */
 export interface AgentConfigLookup {
   resolveAgentConfig(type: string): AgentConfig;
-  getToolNamesForType(type: string): string[];
 }
 
 // ── AgentTypeRegistry class ──────────────────────────────────────────────────
@@ -150,13 +149,6 @@ export class AgentTypeRegistry implements AgentConfigLookup {
     return this.agents.get(key)?.enabled !== false;
   }
 
-  /** Get tool names for an enabled type (case-insensitive). Unknown and disabled types are unavailable. */
-  getToolNamesForType(type: string): string[] {
-    const config = this.findAgentConfig(type);
-    if (!config || config.enabled === false) return [];
-    return config.toolNames ?? [...BUILTIN_TOOL_NAMES];
-  }
-
   /** Resolve a known config without substituting another agent. Disabled definitions remain inspectable. */
   findAgentConfig(type: string): AgentConfig | undefined {
     const key = this.resolveKey(type);
@@ -181,4 +173,13 @@ export class AgentTypeRegistry implements AgentConfigLookup {
 }
 
 /** All known built-in tool names. */
-export const BUILTIN_TOOL_NAMES: string[] = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+export const BUILTIN_TOOL_NAMES: string[] = [
+  "read",
+  "bash",
+  "powershell",
+  "edit",
+  "write",
+  "grep",
+  "find",
+  "ls",
+];

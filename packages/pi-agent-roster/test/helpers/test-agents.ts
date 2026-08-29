@@ -6,8 +6,6 @@
 
 import type { AgentConfig } from "../../src/types.ts";
 
-const READ_ONLY_TOOLS = ["read", "bash", "grep", "find", "ls"];
-
 export const TEST_AGENTS: Map<string, AgentConfig> = new Map([
   [
     "general-purpose",
@@ -16,7 +14,6 @@ export const TEST_AGENTS: Map<string, AgentConfig> = new Map([
       displayName: "Agent",
       description: "General-purpose agent for complex, multi-step tasks",
       toolGuideline: "- Use general-purpose for complex tasks that need file editing.",
-      // toolNames omitted — means "all available tools" (resolved at lookup time)
       // inheritContext / runInBackground omitted — strategy fields, callers decide per-call.
       // Setting them to false would lock callsite intent (see resolveAgentInvocationConfig in invocation-config.ts).
       systemPrompt: "",
@@ -31,7 +28,14 @@ export const TEST_AGENTS: Map<string, AgentConfig> = new Map([
       displayName: "Explore",
       description: "Fast codebase exploration agent (read-only)",
       toolGuideline: "- Use Explore for codebase searches and code understanding.",
-      toolNames: READ_ONLY_TOOLS,
+      permission: {
+        "*": "deny",
+        read: "allow",
+        bash: "allow",
+        grep: "allow",
+        find: "allow",
+        ls: "allow",
+      },
       model: "anthropic/claude-haiku-4-5-20251001",
       systemPrompt: `# CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS
 You are a file search specialist. You excel at thoroughly navigating and exploring codebases.
@@ -72,7 +76,14 @@ Use Bash ONLY for read-only operations: ls, git status, git log, git diff, find,
       displayName: "Architect",
       description: "Software architect for implementation design (read-only)",
       toolGuideline: "- Use Architect for architecture and implementation design.",
-      toolNames: READ_ONLY_TOOLS,
+      permission: {
+        "*": "deny",
+        read: "allow",
+        bash: "allow",
+        grep: "allow",
+        find: "allow",
+        ls: "allow",
+      },
       systemPrompt: `# CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS
 You are a software architect and design specialist.
 Your role is EXCLUSIVELY to explore the codebase and design implementation solutions.

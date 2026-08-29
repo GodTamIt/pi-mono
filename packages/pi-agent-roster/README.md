@@ -37,7 +37,11 @@ The package intentionally ships **no built-in agents**. On a fresh install, `/ro
    display_name: Reviewer
    description: Reviews a focused change for correctness and missed edge cases
    mode: subagent
-   tools: [read, grep, find]
+   permission:
+     "*": deny
+     read: allow
+     grep: allow
+     find: allow
    max_turns: 12
    grace_turns: 2
    ---
@@ -78,7 +82,8 @@ An invalid project override still masks the global definition. Files are scanned
 | `mode` | `primary`, `subagent`, or `all`. | `subagent` |
 | `enabled` | Keeps a definition discoverable but unavailable when `false`. | `true` |
 | `allowed_agents` | Case-insensitive delegation allowlist used when this profile is the selected primary. `[]` denies all; omission is unrestricted. | Unrestricted |
-| `tools` | Tool allowlist. Accepts a comma-separated string or YAML sequence; `none` means no tools. Extension tools must be registered in the child. | `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls` |
+| `permission` | Flat mapping from exact tool names, or `*`, to lowercase `allow` or `deny`. | All available tools allowed |
+| `context_files` | Whether child sessions discover and append the normal `AGENTS.md`/`CLAUDE.md` hierarchy. It has no effect on primary prompt assembly. | `true` |
 | `model` | Exact `provider/model` or fuzzy available-model name. | Active parent model |
 | `thinking` | `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. | Active parent level |
 | `stacks` | Named model/thinking profiles. Stack models must use `provider/model` format. | None |
@@ -88,13 +93,22 @@ An invalid project override still masks the global definition. Files are scanned
 | `run_in_background` | When present, forces tool launches for this agent into that mode; otherwise the call chooses. | Foreground |
 | `prompt_mode` | `append` or `replace`. | `append` |
 
-The Markdown body is the profile's system instruction. For a primary, `append` adds it to Pi's session-start prompt and `replace` replaces that prompt. For a child, the body is combined with a roster-owned runtime baseline containing only the explicit child role and sanitized environment facts; `replace` omits the optional child-guidance block but not that runtime baseline.
+The Markdown body is the profile's system instruction. There are exactly two prompt modes:
 
-`inherit_context` and `model_stacks` are unsupported and reject the file. Children never inherit the parent conversation.
+- **Primary `append`:** Pi's system prompt, already assembled when roster selection begins, followed by the profile body.
+- **Primary `replace`:** the profile body replaces that captured Pi prompt.
+- **Child `append`:** roster's isolated-child runtime baseline, tool-aware operational guidance, active-agent and environment facts, then the wrapped profile body.
+- **Child `replace`:** the profile body only. It replaces every roster-owned child baseline, guidance, and metadata block.
+
+Children never use Pi's built-in default system prompt. Independently of either child prompt mode, `context_files: true` lets Pi's custom system-prompt builder append the normal `AGENTS.md`/`CLAUDE.md` hierarchy; `false` loads none. The field can appear on a `primary` or `all` profile, but only child execution reads it: Pi has already assembled the primary baseline, so roster cannot surgically remove primary context files. Children never inherit the parent conversation, prompt templates, themes, ambient `APPEND_SYSTEM.md` fragments, or other appended system fragments.
+
+`permission` is intentionally tool-name-only: nested mappings, arrays, `ask`, paths, command/file patterns, and globs such as `ba*` are invalid. Omission allows every currently available tool, and omission of `*` also defaults to allow. `*` changes that default; exact entries override it regardless of YAML order. This supports both a default allow with exact denies and `"*": deny` with exact allows. Exact names must resolve against Pi's registered tools for a primary or the child's built-ins plus child-extension tools for a child.
+
+The removed `tools` field, `inherit_context`, and `model_stacks` are unsupported and reject the file.
 
 ### Primary and child example
 
-A primary that may delegate must include the managed tools in its own `tools` allowlist:
+A primary may delegate whenever its permissions do not deny the managed tools and `allowed_agents` admits a child:
 
 ```markdown
 ---
@@ -102,7 +116,8 @@ display_name: Lead
 description: Coordinates implementation and review
 mode: primary
 allowed_agents: [reviewer, tests]
-tools: [read, grep, find, subagent, get_subagent_result, steer_subagent]
+permission:
+  bash: deny
 default_stack: balanced
 stacks:
   fast:
@@ -116,7 +131,7 @@ stacks:
 Split independent work, give each child a self-contained task, and synthesize the results.
 ```
 
-A child profile does not need to list the three managed tools; they are denied inside children as a recursion guard.
+The three managed delegation tools are always excluded inside children as a recursion guard, even if child permissions would otherwise allow them.
 
 ## Stacks, precedence, and reload
 
@@ -290,8 +305,8 @@ Viewer controls are `↑`/`↓` or `j`/`k`, `PgUp`/`PgDn`, `Home`/`End`, and `q`
 Isolation is explicit rather than implied:
 
 - **Conversation:** a child receives no parent messages. `inherit_context` and service equivalents are rejected. Resume sees only the child's transcript plus the new task.
-- **Prompt/resources:** child context files, prompt templates, and themes are disabled. The selected agent body, child role, working directory, platform, and Git state form the system prompt.
-- **Tools:** each profile is an allowlist. Child-loaded extensions may add named tools, but `subagent`, `get_subagent_result`, and `steer_subagent` are always denied to prevent recursive orchestration.
+- **Prompt/resources:** children never use Pi's default prompt; prompt templates, themes, and ambient append fragments are disabled. `context_files` independently enables or disables discovered `AGENTS.md`/`CLAUDE.md` files for either child prompt mode.
+- **Tools:** flat permissions resolve against built-ins and child-extension tools. `subagent`, `get_subagent_result`, and `steer_subagent` are always excluded afterward to prevent recursive orchestration.
 - **Sessions:** every child has its own ID, JSONL transcript, lifecycle, usage accounting, and bounded shutdown.
 - **Filesystem:** there is **no filesystem isolation by default**. Children use the parent working directory and run in the same process with the privileges of loaded extensions. Register a `WorkspaceProvider` when worktree, container, temporary-directory, or remote isolation is required.
 - **Packages:** `excludedExtensionPackages` can prevent selected package extensions from loading in children without rewriting Pi's real settings.
@@ -304,10 +319,10 @@ Do not put secrets or assumptions from the parent chat into agent definitions. P
 | --- | --- |
 | No agents or managed tools appear | The empty default is intentional. Add an enabled `mode: subagent` or `mode: all` definition, reload, and restart if the tool catalog needs rebuilding. |
 | A project agent does not fall back to the global one | Project identity wins even when invalid. Fix or remove the project file and read the `[pi-agent-roster]` diagnostic. |
-| A primary cannot delegate | Include the managed tools in its `tools` allowlist and ensure `allowed_agents` admits at least one enabled child profile. |
+| A primary cannot delegate | Ensure its `permission` does not deny the managed tools and `allowed_agents` admits at least one enabled child profile. |
 | “Model not found” or authentication error | Use `/login`, confirm the model is in Pi's available registry, and use `provider/model` for named stack entries. Failed selection preserves the current profile. |
 | A stack disappeared | Run `/stack <agent> auto` to clear the override, or choose `default`; stale overrides otherwise fall back with a warning. |
-| “Unknown child tools” | The name in `tools` must be built in or registered by an extension that the child actually loads. Check Pi package filters and `excludedExtensionPackages`. |
+| “Unknown child tools” | Each exact `permission` key must be built in or registered by an extension that the child actually loads. Check Pi package filters and `excludedExtensionPackages`. |
 | Background work stopped on `Esc` | `abortAllOnInterrupt` defaults to `true`. Toggle it in `/subagents:settings`; foreground work still follows the parent interrupt. |
 | The child seems unaware of the conversation | This is required isolation. Repeat every necessary fact, path, constraint, and output expectation in `task`. |
 | `/subagents:sessions` is empty | Queued work has no child session yet. Only records with a live session or persisted transcript are listed. |

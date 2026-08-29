@@ -14,35 +14,40 @@ function config(overrides: Partial<AgentPromptConfig> = {}): AgentPromptConfig {
 }
 
 describe("buildAgentPrompt", () => {
-  it("assembles an isolated replace prompt in deterministic order", () => {
-    const prompt = buildAgentPrompt(config(), "/workspace", env);
-    const parts = [
-      "isolated child session",
-      '<active_agent name="reviewer"/>',
-      "# Environment",
-      "Working directory: /workspace",
+  it("uses the profile body alone in replace mode", () => {
+    expect(buildAgentPrompt(config(), "/workspace", env, ["read"])).toBe(
       "Review only the requested files.",
-    ];
-    for (const part of parts) expect(prompt).toContain(part);
-    expect(parts.map((part) => prompt.indexOf(part))).toEqual(
-      [...parts].map((part) => prompt.indexOf(part)).sort((a, b) => a - b),
     );
-    expect(prompt).not.toContain("PARENT_SYSTEM_SENTINEL");
   });
 
-  it("adds child tool guidance and wraps static instructions in append mode", () => {
-    const prompt = buildAgentPrompt(config({ promptMode: "append" }), "/workspace", env);
-    expect(prompt).toContain("<sub_agent_context>");
+  it("assembles the isolated baseline, enabled-tool guidance, metadata, and wrapped body in append mode", () => {
+    const prompt = buildAgentPrompt(config({ promptMode: "append" }), "/workspace", env, [
+      "read",
+      "grep",
+    ]);
+    expect(prompt).toContain("isolated child session");
     expect(prompt).toContain("Use the read tool instead of cat/head/tail");
+    expect(prompt).toContain("Use the grep tool instead of shell content search");
+    expect(prompt).not.toContain("Use the edit tool");
+    expect(prompt).toContain('<active_agent name="reviewer"/>');
+    expect(prompt).toContain("Working directory: /workspace");
     expect(prompt).toContain("<agent_instructions>\nReview only the requested files.");
   });
 
-  it("reports a non-git child environment without inventing a branch", () => {
-    const prompt = buildAgentPrompt(config({ systemPrompt: "" }), "/tmp/child", {
-      isGitRepo: false,
-      branch: "PARENT_BRANCH_SENTINEL",
-      platform: "darwin",
-    });
+  it("omits guidance for every disabled file tool", () => {
+    const prompt = buildAgentPrompt(config({ promptMode: "append" }), "/workspace", env, ["bash"]);
+    for (const name of ["read", "edit", "write", "find", "grep"]) {
+      expect(prompt).not.toContain(`Use the ${name} tool`);
+    }
+  });
+
+  it("reports a non-git append environment without inventing a branch", () => {
+    const prompt = buildAgentPrompt(
+      config({ promptMode: "append", systemPrompt: "" }),
+      "/tmp/child",
+      { isGitRepo: false, branch: "PARENT_BRANCH_SENTINEL", platform: "darwin" },
+      [],
+    );
     expect(prompt).toContain("Not a git repository");
     expect(prompt).toContain("Platform: darwin");
     expect(prompt).not.toContain("PARENT_BRANCH_SENTINEL");

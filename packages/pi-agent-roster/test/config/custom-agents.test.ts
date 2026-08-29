@@ -2,7 +2,6 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { BUILTIN_TOOL_NAMES } from "../../src/config/agent-types.ts";
 import { loadCustomAgents } from "../../src/config/custom-agents.ts";
 
 describe("loadCustomAgents", () => {
@@ -32,12 +31,16 @@ describe("loadCustomAgents", () => {
     expect(result.size).toBe(0);
   });
 
-  it("loads a basic agent with all frontmatter fields", () => {
+  it("loads permission and context_files fields", () => {
     writeAgent(
       "auditor",
       `---
 description: Security Auditor
-tools: read, grep, find
+permission:
+  "*": deny
+  read: allow
+  audit_tool: allow
+context_files: false
 model: anthropic/claude-opus-4-6
 thinking: high
 max_turns: 30
@@ -48,175 +51,59 @@ run_in_background: true
 You are a security auditor.`,
     );
 
-    const result = loadCustomAgents(tmpDir);
-    expect(result.size).toBe(1);
-
-    const agent = result.get("auditor")!;
-    expect(agent.name).toBe("auditor");
-    expect(agent.description).toBe("Security Auditor");
-    expect(agent.toolNames).toEqual(["read", "grep", "find"]);
-    expect(agent.model).toBe("anthropic/claude-opus-4-6");
-    expect(agent.thinking).toBe("high");
-    expect(agent.maxTurns).toBe(30);
+    const agent = loadCustomAgents(tmpDir).get("auditor")!;
+    expect(agent.permission).toEqual({ "*": "deny", read: "allow", audit_tool: "allow" });
+    expect(agent.contextFiles).toBe(false);
     expect(agent.promptMode).toBe("replace");
-    expect(agent).not.toHaveProperty("inheritContext");
-    expect(agent.runInBackground).toBe(true);
     expect(agent.systemPrompt).toBe("You are a security auditor.");
   });
 
-  it("uses sensible defaults when frontmatter is empty", () => {
-    writeAgent(
-      "minimal",
-      `---
----
-
-Just a prompt.`,
-    );
-
-    const result = loadCustomAgents(tmpDir);
-    const agent = result.get("minimal")!;
-
-    expect(agent.name).toBe("minimal");
-    expect(agent.description).toBe("minimal"); // defaults to filename
-    expect(agent.toolNames).toEqual(BUILTIN_TOOL_NAMES); // all tools
-    expect(agent.model).toBeUndefined();
-    expect(agent.thinking).toBeUndefined();
-    expect(agent.maxTurns).toBeUndefined();
-    expect(agent.promptMode).toBe("append");
-    expect(agent).not.toHaveProperty("inheritContext");
-    expect(agent.runInBackground).toBeUndefined();
-    expect(agent.systemPrompt).toBe("Just a prompt.");
+  it("accepts an exact extension tool name outside the old built-in-name pattern", () => {
+    writeAgent("extension", "---\npermission:\n  plugin.tool: allow\n---\nExtension.");
+    expect(loadCustomAgents(tmpDir).get("extension")?.permission).toEqual({
+      "plugin.tool": "allow",
+    });
   });
 
-  it("uses sensible defaults when no frontmatter at all", () => {
+  it("defaults to append, all tools allowed, and child context discovery enabled", () => {
     writeAgent("bare", "Just a system prompt, no frontmatter.");
-
-    const result = loadCustomAgents(tmpDir);
-    const agent = result.get("bare")!;
-
-    expect(agent.name).toBe("bare");
-    expect(agent.description).toBe("bare");
+    const agent = loadCustomAgents(tmpDir).get("bare")!;
     expect(agent.mode).toBe("subagent");
-    expect(agent.toolNames).toEqual(BUILTIN_TOOL_NAMES);
+    expect(agent.permission).toBeUndefined();
+    expect(agent.contextFiles).toBe(true);
     expect(agent.promptMode).toBe("append");
-    expect(agent.systemPrompt).toBe("Just a system prompt, no frontmatter.");
+  });
+
+  it("rejects the removed tools field with an unsupported-field diagnostic", () => {
+    writeAgent("legacy", "---\ntools: [read]\n---\nLegacy.");
+    const diagnostics: string[] = [];
+    const result = loadCustomAgents(tmpDir, (diagnostic) => diagnostics.push(diagnostic.message));
+    expect(result.has("legacy")).toBe(false);
+    expect(diagnostics).toContainEqual(expect.stringContaining("tools is unsupported"));
+  });
+
+  it.each([
+    ["nested", "permission:\n  bash:\n    command: allow", "exactly"],
+    ["ask", "permission:\n  bash: ask", "allow"],
+    ["array", "permission: [read, deny]", "flat mapping"],
+    ["glob", "permission:\n  ba*: deny", "exact tool name"],
+    ["path", "permission:\n  src/file: deny", "exact tool name"],
+  ])("rejects malformed permission form %s", (_name, yaml, expected) => {
+    writeAgent(String(_name), `---\n${yaml}\n---\nInvalid.`);
+    const diagnostics: string[] = [];
+    const result = loadCustomAgents(tmpDir, (diagnostic) => diagnostics.push(diagnostic.message));
+    expect(result.has(String(_name))).toBe(false);
+    expect(diagnostics.join("\n")).toContain(expected);
   });
 
   it("isolates malformed YAML without changing the default mode of valid files", () => {
     writeAgent("broken", "---\nstacks: [unterminated\n---\nBroken prompt.");
     writeAgent("worker", "A valid child prompt.");
-
     const diagnostics: string[] = [];
     const result = loadCustomAgents(tmpDir, (diagnostic) => diagnostics.push(diagnostic.message));
-
     expect(result.has("broken")).toBe(false);
     expect(result.get("worker")?.mode).toBe("subagent");
     expect(diagnostics).toHaveLength(1);
-  });
-
-  it("handles tools: none → empty array", () => {
-    writeAgent(
-      "notool",
-      `---
-tools: none
----
-
-No tools.`,
-    );
-
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("notool")!.toolNames).toEqual([]);
-  });
-
-  it("passes through unknown tool names (not filtered)", () => {
-    writeAgent(
-      "custom-tools",
-      `---
-tools: read, my_custom_tool, grep
----
-
-Custom tools.`,
-    );
-
-    const result = loadCustomAgents(tmpDir);
-    // An extension-registered tool name is a supported `tools:` entry: the child's
-    // allowlist admits it when the extension registers it during bind (#725).
-    expect(result.get("custom-tools")!.toolNames).toEqual(["read", "my_custom_tool", "grep"]);
-  });
-
-  describe("tools field forms", () => {
-    it("accepts a YAML block sequence", () => {
-      writeAgent(
-        "block-seq",
-        `---
-tools:
-  - read
-  - my_custom_tool
-  - grep
----
-
-Block sequence.`,
-      );
-
-      const result = loadCustomAgents(tmpDir);
-      expect(result.get("block-seq")!.toolNames).toEqual(["read", "my_custom_tool", "grep"]);
-    });
-
-    it("accepts a YAML flow sequence", () => {
-      writeAgent(
-        "flow-seq",
-        `---
-tools: [read, grep]
----
-
-Flow sequence.`,
-      );
-
-      const result = loadCustomAgents(tmpDir);
-      expect(result.get("flow-seq")!.toolNames).toEqual(["read", "grep"]);
-    });
-
-    it("treats a single-element none sequence as no tools", () => {
-      writeAgent(
-        "seq-none",
-        `---
-tools: [none]
----
-
-No tools.`,
-      );
-
-      const result = loadCustomAgents(tmpDir);
-      expect(result.get("seq-none")!.toolNames).toEqual([]);
-    });
-
-    it("treats an empty sequence as no tools", () => {
-      writeAgent(
-        "seq-empty",
-        `---
-tools: []
----
-
-No tools.`,
-      );
-
-      const result = loadCustomAgents(tmpDir);
-      expect(result.get("seq-empty")!.toolNames).toEqual([]);
-    });
-
-    it("keeps a comma inside a quoted sequence entry", () => {
-      writeAgent(
-        "seq-comma",
-        `---
-tools: ["read", "weird,name"]
----
-
-Comma entry.`,
-      );
-
-      const result = loadCustomAgents(tmpDir);
-      expect(result.get("seq-comma")!.toolNames).toEqual(["read", "weird,name"]);
-    });
   });
 
   it("isolates an unsupported thinking level", () => {
@@ -354,7 +241,8 @@ Should be loaded.`,
       "nobody",
       `---
 description: No body
-tools: read
+permission:
+  read: allow
 ---
 `,
     );
