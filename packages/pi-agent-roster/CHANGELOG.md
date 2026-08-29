@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.4
+
+### Patch Changes
+
+- 97e077c: Polish subagent panels, preserve full results and child runtime prompts, restrict delegation to child-capable agents, improve usage formatting, and prevent background activity from resetting terminal scrollback.
+
 ## 0.1.0-alpha.3
 
 ### Patch Changes
