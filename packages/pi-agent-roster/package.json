@@ -2,6 +2,15 @@
   "name": "pi-agent-roster",
   "version": "0.0.0",
   "description": "Primary-agent profiles and subagent orchestration for Pi",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GodTamIt/pi-mono.git",
+    "directory": "packages/pi-agent-roster"
+  },
+  "homepage": "https://github.com/GodTamIt/pi-mono/tree/master/packages/pi-agent-roster#readme",
+  "bugs": {
+    "url": "https://github.com/GodTamIt/pi-mono/issues"
+  },
   "license": "MIT",
   "type": "module",
   "keywords": [
