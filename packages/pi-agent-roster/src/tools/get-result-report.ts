@@ -8,6 +8,7 @@
  */
 
 import type { SubagentStatus } from "../lifecycle/subagent.ts";
+import { formatContextPercent } from "../ui/display.ts";
 
 /** The data a get_subagent_result report renders from — only what the formatter reads. */
 export interface AgentReport {
@@ -39,7 +40,8 @@ export interface AgentReport {
 export function renderStatsParts(report: AgentReport): string[] {
   const parts = [`Tool uses: ${report.toolUses}`];
   if (report.tokens) parts.push(report.tokens);
-  if (report.contextPercent !== null) parts.push(`Context: ${Math.round(report.contextPercent)}%`);
+  if (report.contextPercent !== null)
+    parts.push(`Context: ${formatContextPercent(report.contextPercent)}`);
   if (report.compactionCount) parts.push(`Compactions: ${report.compactionCount}`);
   parts.push(`Duration: ${report.duration}`);
   return parts;

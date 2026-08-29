@@ -98,7 +98,7 @@ export class AgentTool {
     private readonly invocationRows?: InvocationRowRegistry | undefined,
   ) {
     this.typeListText = buildTypeListText(registry, agentDir);
-    this.availableTypesText = registry.getAvailableTypes().join(", ");
+    this.availableTypesText = registry.getSubagentTypes().join(", ");
     this.agentGuidelines = buildAgentGuidelines(registry);
   }
 

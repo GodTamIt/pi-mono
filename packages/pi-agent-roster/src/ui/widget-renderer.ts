@@ -8,6 +8,7 @@ import { getLifetimeTotal } from "../lifecycle/usage.ts";
 import type { SubagentType } from "../types.ts";
 import {
   describeActivity,
+  formatContextPercent,
   formatMs,
   formatTokens,
   getDisplayName,
@@ -50,7 +51,7 @@ function statusPresentation(status: SubagentStatus): {
 } {
   switch (status) {
     case "queued":
-      return { text: "queued", color: "muted", icon: GLYPHS.queued };
+      return { text: "queued", color: "warning", icon: GLYPHS.queued };
     case "running":
       return { text: "running", color: "accent", icon: "" };
     case "completed":
@@ -75,9 +76,9 @@ function identity(
   const name = sanitizeTerminalText(getDisplayName(agent.type, registry));
   const mode = getPromptModeLabel(agent.type, registry);
   const status = statusPresentation(agent.status);
-  const modeText = mode ? ` (${mode})` : "";
+  const modeText = mode ? theme.fg("dim", ` (${mode})`) : "";
   const prefix = icon || status.icon;
-  return `${theme.fg(status.color, prefix)} ${theme.bold(name)}${modeText} ${theme.fg(status.color, `[Background · ${status.text}]`)}`.trimStart();
+  return `${theme.fg(status.color, prefix)} ${theme.bold(name)}${modeText}  ${theme.fg("dim", "Background · ")}${theme.fg(status.color, status.text)}`.trimStart();
 }
 
 function activeMetadata(agent: WidgetAgent, now: number): string[] {
@@ -86,13 +87,13 @@ function activeMetadata(agent: WidgetAgent, now: number): string[] {
     `stack: ${sanitizeTerminalText(agent.stack ?? "unavailable")}`,
     `model: ${sanitizeTerminalText(agent.model ?? "unavailable")}`,
     `thinking: ${sanitizeTerminalText(agent.thinking ?? "unavailable")}`,
-    `turn ${agent.turnCount}`,
+    `${GLYPHS.turns} turn ${agent.turnCount}`,
     `max ${agent.maxTurns ?? "unlimited"}`,
     `grace ${agent.graceTurns ?? "unlimited"}`,
     `${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`,
     formatTokens(tokens),
-    `context: ${agent.contextPercent == null ? "unavailable" : `${agent.contextPercent}%`}`,
-    `compactions: ${agent.compactionCount}`,
+    `context: ${agent.contextPercent == null ? "unavailable" : formatContextPercent(agent.contextPercent)}`,
+    `${GLYPHS.compactions} compactions: ${agent.compactionCount}`,
     `elapsed: ${formatMs(now - agent.startedAt)}`,
   ];
 }
@@ -119,6 +120,17 @@ function packParts(parts: readonly string[], width: number): string[] {
 function activeActivity(agent: WidgetAgent): string {
   if (agent.status === "queued") return "waiting for a background slot";
   return sanitizeTerminalText(describeActivity(agent.activeTools, agent.responseText));
+}
+
+function detailLine(
+  label: "task" | "activity" | "error",
+  value: string,
+  theme: Theme,
+  color: StatusColor,
+): string {
+  const paddedLabel = `${label}:`.padEnd(10);
+  const marker = label === "activity" ? `${GLYPHS.toolCall} ` : "";
+  return theme.fg("dim", paddedLabel) + theme.fg(color, `${marker}${value}`);
 }
 
 /** Legacy single-agent formatter retained for focused consumers and tests. */
@@ -167,11 +179,16 @@ function activeBlock(
   const metadata = packParts(activeMetadata(agent, now), contentWidth).map((line) =>
     theme.fg("dim", line),
   );
-  const description = clipToWidth(`task: ${sanitizeTerminalText(agent.description)}`, contentWidth);
-  const activity = clipToWidth(`activity: ${activeActivity(agent)}`, contentWidth);
+  const description = detailLine("task", sanitizeTerminalText(agent.description), theme, "muted");
+  const activity = detailLine(
+    "activity",
+    activeActivity(agent),
+    theme,
+    statusPresentation(agent.status).color,
+  );
   return {
     status: agent.status,
-    lines: [first, ...metadata, theme.fg("muted", description), theme.fg("dim", activity)],
+    lines: [first, description, activity, ...metadata],
   };
 }
 
@@ -184,12 +201,18 @@ function finishedBlock(
   const contentWidth = Math.max(1, width - 4);
   const duration = formatMs((agent.completedAt ?? Date.now()) - agent.startedAt);
   const required = `${identity(agent, registry, theme, "")} · duration: ${duration}`;
-  const detail = sanitizeTerminalText(
-    agent.status === "error" && agent.error ? agent.error : agent.description,
-  );
+  const hasError = agent.status === "error" && Boolean(agent.error);
+  const detail = sanitizeTerminalText(hasError ? (agent.error ?? "") : agent.description);
+  const detailColor = hasError ? "error" : "muted";
   return {
     status: agent.status,
-    lines: [clipToWidth(required, contentWidth), clipToWidth(detail, contentWidth)],
+    lines: [
+      clipToWidth(required, contentWidth),
+      clipToWidth(
+        detailLine(hasError ? "error" : "task", detail, theme, detailColor),
+        contentWidth,
+      ),
+    ],
   };
 }
 
@@ -266,17 +289,15 @@ export function renderWidgetLines(params: {
 
   const activeCount = running.length + queued.length;
   const countParts: string[] = [];
-  if (running.length) countParts.push(`${running.length} running`);
-  if (queued.length) countParts.push(`${queued.length} queued`);
-  const headingState = countParts.length ? countParts.join(", ") : `${finished.length} recent`;
+  if (running.length) countParts.push(theme.fg("accent", `${running.length} running`));
+  if (queued.length) countParts.push(theme.fg("warning", `${queued.length} queued`));
+  const headingState = countParts.length
+    ? countParts.join(theme.fg("dim", " · "))
+    : theme.fg("dim", `${finished.length} recent`);
   const headingIcon = activeCount ? GLYPHS.agentsActive : GLYPHS.agentsIdle;
   const headingColor = activeCount ? "accent" : "dim";
-  const lines = [
-    clipToWidth(
-      theme.fg(headingColor, `${headingIcon} Background agents — ${headingState}`),
-      width,
-    ),
-  ];
+  const heading = `${theme.fg(headingColor, headingIcon)} ${theme.bold("Background agents")}  ${headingState}`;
+  const lines = [clipToWidth(heading, width)];
   selected.forEach((block, index) => {
     const last = hidden.length === 0 && index === selected.length - 1;
     lines.push(...decorateBlock(block, last, width, theme));

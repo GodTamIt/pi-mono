@@ -20,6 +20,7 @@ function makeRegistry(opts: {
     description: string;
     model: string | undefined;
     enabled?: boolean;
+    mode?: "primary" | "subagent" | "all";
     toolGuideline?: string;
   };
 }): TypeListRegistry {
@@ -62,7 +63,7 @@ describe("formatLifetimeTokens", () => {
     const result = formatLifetimeTokens({
       lifetimeUsage: { input: 500, output: 500, cacheWrite: 0 },
     });
-    expect(result).toBe("1.0k token");
+    expect(result).toBe("1.0k tokens");
   });
 
   it('returns "" when total is zero', () => {
@@ -74,7 +75,7 @@ describe("formatLifetimeTokens", () => {
     const result = formatLifetimeTokens({
       lifetimeUsage: { input: 15000, output: 18800, cacheWrite: 0 },
     });
-    expect(result).toBe("33.8k token");
+    expect(result).toBe("33.8k tokens");
   });
 });
 
@@ -152,6 +153,20 @@ describe("buildTypeListText", () => {
     expect(result).not.toContain("Architect");
   });
 
+  it("excludes primary-only agents from the advertised type list", () => {
+    const registry = makeRegistry({
+      defaults: ["architect", "reviewer"],
+      resolve: (name) => ({
+        description: `${name} agent`,
+        model: undefined,
+        mode: name === "architect" ? "primary" : "subagent",
+      }),
+    });
+    const result = buildTypeListText(registry, "/home/.pi");
+    expect(result).not.toContain("architect agent");
+    expect(result).toContain("reviewer agent");
+  });
+
   it("excludes disabled agents from the custom agents list", () => {
     const registry = makeRegistry({
       defaults: ["general-purpose"],
@@ -200,6 +215,19 @@ describe("buildAgentGuidelines", () => {
       "- Use Explore for stuff.",
       "- Use Architect for stuff.",
     ]);
+  });
+
+  it("omits a primary-only default agent's guideline line", () => {
+    const registry = makeRegistry({
+      defaults: ["architect", "reviewer"],
+      resolve: (name) => ({
+        description: `${name} agent`,
+        model: undefined,
+        mode: name === "architect" ? "primary" : "subagent",
+        toolGuideline: `- Use ${name} for stuff.`,
+      }),
+    });
+    expect(buildAgentGuidelines(registry)).toEqual(["- Use reviewer for stuff."]);
   });
 
   it("omits a disabled default agent's guideline line", () => {
@@ -309,8 +337,8 @@ describe("buildDetails", () => {
   });
 
   it("applies overrides on top of computed fields", () => {
-    const details = buildDetails(base, record, { tokens: "99.9k token" });
-    expect(details.tokens).toBe("99.9k token");
+    const details = buildDetails(base, record, { tokens: "99.9k tokens" });
+    expect(details.tokens).toBe("99.9k tokens");
   });
 
   it("uses Date.now() for durationMs when completedAt is absent", () => {

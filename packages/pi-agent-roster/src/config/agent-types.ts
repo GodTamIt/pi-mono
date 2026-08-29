@@ -116,7 +116,7 @@ export class AgentTypeRegistry implements AgentConfigLookup {
     return [...this.snapshot().subagent];
   }
 
-  /** Get all enabled type names (for spawning and tool descriptions). */
+  /** Get all enabled type names across primary and child modes. */
   getAvailableTypes(): string[] {
     return [...this.agents.entries()]
       .filter(([_, config]) => config.enabled !== false)

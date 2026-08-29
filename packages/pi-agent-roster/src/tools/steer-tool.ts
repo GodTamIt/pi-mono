@@ -1,6 +1,7 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { SteerOutcome, Subagent } from "../types.ts";
+import { formatContextPercent } from "../ui/display.ts";
 import { formatLifetimeTokens, textResult } from "./helpers.ts";
 
 // ---- Deps interfaces ----
@@ -69,7 +70,8 @@ export class SteerTool {
     const stateParts: string[] = [];
     if (tokens) stateParts.push(tokens);
     stateParts.push(`${record.toolUses} tool ${record.toolUses === 1 ? "use" : "uses"}`);
-    if (contextPercent !== null) stateParts.push(`context ${Math.round(contextPercent)}% full`);
+    if (contextPercent !== null)
+      stateParts.push(`context ${formatContextPercent(contextPercent)} full`);
     if (record.compactionCount)
       stateParts.push(
         `${record.compactionCount} compaction${record.compactionCount === 1 ? "" : "s"}`,

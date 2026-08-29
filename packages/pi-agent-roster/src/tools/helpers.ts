@@ -88,8 +88,8 @@ export interface TypeListRegistry extends AgentConfigLookup {
 export function buildTypeListText(registry: TypeListRegistry, agentDir: string): string {
   const defaultNames = registry
     .getDefaultAgentNames()
-    .filter((name) => isEnabledAgent(registry, name));
-  const userNames = registry.getUserAgentNames().filter((name) => isEnabledAgent(registry, name));
+    .filter((name) => isSubagentAgent(registry, name));
+  const userNames = registry.getUserAgentNames().filter((name) => isSubagentAgent(registry, name));
 
   const defaultDescs = defaultNames.map((name) => {
     const cfg = registry.resolveAgentConfig(name);
@@ -110,9 +110,13 @@ export function buildTypeListText(registry: TypeListRegistry, agentDir: string):
   ].join("\n");
 }
 
-/** True when an agent config is present and not explicitly disabled. */
-function isEnabledAgent(registry: AgentConfigLookup, name: string): boolean {
-  return registry.resolveAgentConfig(name).enabled !== false;
+/** True when an agent config is enabled and may run as a child. */
+function isSubagentAgent(registry: AgentConfigLookup, name: string): boolean {
+  const config = registry.resolveAgentConfig(name);
+  return (
+    config.enabled !== false &&
+    ((config.mode ?? "subagent") === "subagent" || config.mode === "all")
+  );
 }
 
 /**
@@ -123,7 +127,7 @@ function isEnabledAgent(registry: AgentConfigLookup, name: string): boolean {
 export function buildAgentGuidelines(registry: TypeListRegistry): string[] {
   return registry
     .getDefaultAgentNames()
-    .filter((name) => isEnabledAgent(registry, name))
+    .filter((name) => isSubagentAgent(registry, name))
     .map((name) => registry.resolveAgentConfig(name).toolGuideline)
     .filter((line): line is string => line !== undefined);
 }

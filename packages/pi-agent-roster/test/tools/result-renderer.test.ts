@@ -86,8 +86,8 @@ describe("renderStats", () => {
   });
 
   it("includes tokens", () => {
-    const details = makeDetails({ tokens: "33.8k token" });
-    expect(renderStats(details, theme)).toContain("[dim:33.8k token]");
+    const details = makeDetails({ tokens: "33.8k tokens" });
+    expect(renderStats(details, theme)).toContain("[dim:33.8k tokens]");
   });
 
   it("joins multiple parts with dim separator", () => {
@@ -231,15 +231,13 @@ describe("renderCompleted", () => {
     expect(result).toContain("\n[dim:  line two]");
   });
 
-  it("expanded view truncates to 50 lines and adds overflow message", () => {
+  it("expanded view shows every result line", () => {
     const details = makeDetails({ status: "completed", durationMs: 2000 });
     const manyLines = Array.from({ length: 55 }, (_, i) => `line ${i + 1}`).join("\n");
     const result = renderCompleted(details, manyLines, true, theme);
     expect(result).toContain("[dim:  line 50]");
-    expect(result).not.toContain("[dim:  line 51]");
-    expect(result).toContain(
-      "[muted:  ... (use get_subagent_result with verbose for full output)]",
-    );
+    expect(result).toContain("[dim:  line 55]");
+    expect(result).not.toContain("full output");
   });
 
   it("expanded view with empty result text shows no content lines", () => {

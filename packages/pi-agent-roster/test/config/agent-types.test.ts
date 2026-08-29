@@ -158,6 +158,21 @@ describe("AgentTypeRegistry", () => {
     });
   });
 
+  describe("getSubagentTypes", () => {
+    it("returns only enabled child-capable agents", () => {
+      const registry = new AgentTypeRegistry(
+        () =>
+          new Map([
+            ["Primary", makeAgentConfig({ name: "Primary", mode: "primary" })],
+            ["Worker", makeAgentConfig({ name: "Worker", mode: "subagent" })],
+            ["Both", makeAgentConfig({ name: "Both", mode: "all" })],
+            ["Off", makeAgentConfig({ name: "Off", mode: "subagent", enabled: false })],
+          ]),
+      );
+      expect(registry.getSubagentTypes()).toEqual(["Worker", "Both"]);
+    });
+  });
+
   describe("getAvailableTypes", () => {
     it("includes all enabled defaults", () => {
       const registry = makeRegistry();

@@ -33,8 +33,8 @@ describe("renderStatsParts", () => {
   });
 
   it("includes tokens when present", () => {
-    const parts = renderStatsParts(makeReport({ tokens: "33.8k token" }));
-    expect(parts).toEqual(["Tool uses: 3", "33.8k token", "Duration: 12.3s"]);
+    const parts = renderStatsParts(makeReport({ tokens: "33.8k tokens" }));
+    expect(parts).toEqual(["Tool uses: 3", "33.8k tokens", "Duration: 12.3s"]);
   });
 
   it("omits tokens when empty string", () => {
@@ -42,9 +42,9 @@ describe("renderStatsParts", () => {
     expect(parts).not.toContain("");
   });
 
-  it("includes rounded context percent when present", () => {
-    const parts = renderStatsParts(makeReport({ contextPercent: 42.6 }));
-    expect(parts).toContain("Context: 43%");
+  it("rounds context percent to the nearest tenth when present", () => {
+    const parts = renderStatsParts(makeReport({ contextPercent: 42.664 }));
+    expect(parts).toContain("Context: 42.7%");
   });
 
   it("omits context when null", () => {
@@ -100,7 +100,7 @@ describe("formatAgentReport", () => {
         displayName: "General",
         status: "completed",
         toolUses: 3,
-        tokens: "33.8k token",
+        tokens: "33.8k tokens",
         contextPercent: 42.6,
         compactionCount: 1,
         duration: "12.3s",
@@ -110,7 +110,7 @@ describe("formatAgentReport", () => {
     );
     expect(text).toBe(
       "Agent: agent-1\n" +
-        "Type: General | Status: completed | Tool uses: 3 | 33.8k token | Context: 43% | Compactions: 1 | Duration: 12.3s\n" +
+        "Type: General | Status: completed | Tool uses: 3 | 33.8k tokens | Context: 42.6% | Compactions: 1 | Duration: 12.3s\n" +
         "Description: Investigate the bug\n\n" +
         "All done.",
     );

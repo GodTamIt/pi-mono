@@ -80,33 +80,33 @@ describe("background widget statuses", () => {
 
     expect(baseline).toMatchInlineSnapshot(`
       {
-        "aborted": "○ Background agents — 1 recent
-      └─ ✗ Agent [Background · aborted] · duration: 5.0s
-         inspect Unicode café 🚀 and report progress",
-        "completed": "○ Background agents — 1 recent
-      └─ ✓ Agent [Background · completed] · duration: 5.0s
-         inspect Unicode café 🚀 and report progress",
-        "error": "○ Background agents — 1 recent
-      └─ ✗ Agent [Background · failed] · duration: 5.0s
-         provider unavailable",
-        "queued": "● Background agents — 1 queued
-      └─ ◦ Agent [Background · queued]
-         stack: deep · model: anthropic/claude-opus · thinking: high · turn 3 · max 10 · grace 2
-         0 tool uses · 0 token · context: unavailable · compactions: 0 · elapsed: 5.0s
-         task: inspect Unicode café 🚀 and report progress
-         activity: waiting for a background slot",
-        "running": "● Background agents — 1 running
-      └─ ⠋ Agent [Background · running]
-         stack: deep · model: anthropic/claude-opus · thinking: high · turn 3 · max 10 · grace 2
-         0 tool uses · 0 token · context: unavailable · compactions: 0 · elapsed: 5.0s
-         task: inspect Unicode café 🚀 and report progress
-         activity: thinking…",
-        "steered": "○ Background agents — 1 recent
-      └─ ✓ Agent [Background · steered (turn limit)] · duration: 5.0s
-         inspect Unicode café 🚀 and report progress",
-        "stopped": "○ Background agents — 1 recent
-      └─ ■ Agent [Background · stopped] · duration: 5.0s
-         inspect Unicode café 🚀 and report progress",
+        "aborted": "○ Background agents  1 recent
+      └─ ✗ Agent  Background · aborted · duration: 5.0s
+         task:     inspect Unicode café 🚀 and report progress",
+        "completed": "○ Background agents  1 recent
+      └─ ✓ Agent  Background · completed · duration: 5.0s
+         task:     inspect Unicode café 🚀 and report progress",
+        "error": "○ Background agents  1 recent
+      └─ ✗ Agent  Background · failed · duration: 5.0s
+         error:    provider unavailable",
+        "queued": "● Background agents  1 queued
+      └─ ◦ Agent  Background · queued
+         task:     inspect Unicode café 🚀 and report progress
+         activity: ▸ waiting for a background slot
+         stack: deep · model: anthropic/claude-opus · thinking: high · ↻ turn 3 · max 10 · grace 2
+         0 tool uses · 0 tokens · context: unavailable · ⇊ compactions: 0 · elapsed: 5.0s",
+        "running": "● Background agents  1 running
+      └─ ⠋ Agent  Background · running
+         task:     inspect Unicode café 🚀 and report progress
+         activity: ▸ thinking…
+         stack: deep · model: anthropic/claude-opus · thinking: high · ↻ turn 3 · max 10 · grace 2
+         0 tool uses · 0 tokens · context: unavailable · ⇊ compactions: 0 · elapsed: 5.0s",
+        "steered": "○ Background agents  1 recent
+      └─ ✓ Agent  Background · steered (turn limit) · duration: 5.0s
+         task:     inspect Unicode café 🚀 and report progress",
+        "stopped": "○ Background agents  1 recent
+      └─ ■ Agent  Background · stopped · duration: 5.0s
+         task:     inspect Unicode café 🚀 and report progress",
       }
     `);
     expect(Object.values(baseline).every((value) => !value.includes("\u001b"))).toBe(true);
@@ -150,7 +150,7 @@ describe("active-agent details", () => {
         toolUses: 4,
         lifetimeUsage: { input: 5000, output: 2000, cacheWrite: 1000 },
         compactionCount: 2,
-        contextPercent: 45,
+        contextPercent: 45.678,
         activeTools: new Map([["read-1", "read"]]),
       }),
     ]).join("\n");
@@ -163,11 +163,11 @@ describe("active-agent details", () => {
       "max 10",
       "grace 2",
       "4 tool uses",
-      "8.0k token",
-      "context: 45%",
+      "8.0k tokens",
+      "context: 45.7%",
       "compactions: 2",
       "elapsed:",
-      "activity: reading",
+      "activity: ▸ reading",
     ]) {
       expect(text).toContain(required);
     }
@@ -180,7 +180,7 @@ describe("active-agent details", () => {
     expect(text).toContain("max unlimited");
     expect(text).toContain("grace unlimited");
     expect(text).toContain("0 tool uses");
-    expect(text).toContain("0 token");
+    expect(text).toContain("0 tokens");
     expect(text).toContain("context: unavailable");
     expect(text).toContain("compactions: 0");
   });
@@ -189,7 +189,36 @@ describe("active-agent details", () => {
     const text = render([makeAgent({ status: "queued" })]).join("\n");
     expect(text).toContain("Background · queued");
     expect(text).toContain("stack: deep");
-    expect(text).toContain("activity: waiting for a background slot");
+    expect(text).toContain("activity: ▸ waiting for a background slot");
+  });
+
+  it("sanitizes every untrusted detail without flattening the hierarchy", () => {
+    const lines = render([
+      makeAgent({
+        description: "inspect\u001b]8;;https://example.test\u0007link\u001b]8;;\u0007\nforged row",
+        stack: "\u001b[31mdeep\u001b[0m",
+        model: "provider/model\nforged model",
+        thinking: "high\tpriority",
+        responseText: "working\u0007\nforged activity",
+      }),
+    ]);
+
+    expect(lines.some((line) => line.includes("task:"))).toBe(true);
+    expect(lines.some((line) => line.includes("activity:"))).toBe(true);
+    expect(lines.every((line) => !/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/u.test(line))).toBe(
+      true,
+    );
+  });
+
+  it("assigns semantic colors while keeping lifecycle states textual", () => {
+    const fg = vi.fn((_color: string, text: string) => text);
+    const theme: Theme = { fg, bold: (text) => text };
+
+    render([makeAgent({ status: "queued" })], 120, theme);
+
+    expect(fg).toHaveBeenCalledWith("warning", "queued");
+    expect(fg).toHaveBeenCalledWith("warning", "1 queued");
+    expect(fg).toHaveBeenCalledWith("dim", "Background · ");
   });
 });
 
@@ -207,7 +236,7 @@ describe("width and row budgets", () => {
       "max 10",
       "grace 2",
       "0 tool uses",
-      "0 token",
+      "0 tokens",
       "context:",
       "compactions:",
       "elapsed:",
@@ -249,14 +278,14 @@ describe("width and row budgets", () => {
     expect(text).toMatch(/\d+ failed/);
     expect(text).toMatch(/\d+ completed/);
     expect(text).toMatchInlineSnapshot(`
-      "● Background agents — 1 running, 1 queued
-      ├─ ⠋ Agent [Background · running]
+      "● Background agents  1 running · 1 queued
+      ├─ ⠋ Agent  Background · running
+      │  task:     RUN-FIRST
+      │  activity: ▸ thinking…
       │  stack: deep · model: anthropic/claude-opus
-      │  thinking: high · turn 3 · max 10 · grace 2 · 0 tool uses
-      │  0 token · context: unavailable · compactions: 0
-      │  elapsed: 5.0s
-      │  task: RUN-FIRST
-      │  activity: thinking…
+      │  thinking: high · ↻ turn 3 · max 10 · grace 2
+      │  0 tool uses · 0 tokens · context: unavailable
+      │  ⇊ compactions: 0 · elapsed: 5.0s
       └─ hidden: 1 queued · 1 failed · 1 completed"
     `);
   });

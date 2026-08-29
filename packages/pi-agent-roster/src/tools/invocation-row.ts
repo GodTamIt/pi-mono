@@ -1,14 +1,20 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
-import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { SubagentManagerObserver } from "../lifecycle/subagent-manager.ts";
 import type { CompactionInfo, SessionMessage, Subagent } from "../types.ts";
-import { sanitizeTerminalText, type AgentDetails, formatMs, type Theme } from "../ui/display.ts";
+import {
+  type AgentDetails,
+  formatContextPercent,
+  formatMs,
+  sanitizeTerminalText,
+  type Theme,
+} from "../ui/display.ts";
+import { GLYPHS } from "../ui/glyphs.ts";
 import { formatLifetimeTokens } from "./helpers.ts";
 
 const MAX_BINDINGS = 128;
 const MAX_ACTIVITY = 40;
-const MAX_OUTPUT_LINES = 50;
 
 type RenderState = { invocationRow?: InvocationRowComponent };
 export interface InvocationRowRenderContext {
@@ -225,10 +231,18 @@ export class InvocationRowComponent implements Component {
     if (width <= 0) return [];
     const record = this.details.agentId ? this.getRecord(this.details.agentId) : undefined;
     const details = record ? detailsFromRecord(this.details, record) : this.details;
-    const lines = collapsedLines(details, this.theme);
+    const lines = collapsedLines(details, this.theme, width);
     if (this.expanded) {
       lines.push(
-        ...expandedLines(details, record, this.resultText, this.toolCallId, this.registry, width),
+        ...expandedLines(
+          details,
+          record,
+          this.resultText,
+          this.toolCallId,
+          this.registry,
+          width,
+          this.theme,
+        ),
       );
     }
     return lines.flatMap((line) => wrapTextWithAnsi(line, width));
@@ -260,20 +274,44 @@ export function renderInvocationRow(
   return component;
 }
 
-function collapsedLines(details: AgentDetails, theme: Theme): string[] {
-  const status = statusText(details.status);
-  const first = ["Subagent", sanitizeTerminalText(details.displayName), status]
-    .map((part, index) => (index === 0 ? theme.fg("toolTitle", theme.bold(part)) : part))
-    .join(theme.fg("dim", " · "));
-  const timing = `${isActive(details.status) ? "elapsed" : "duration"}: ${formatMs(details.durationMs)}`;
-  const metadata = [
-    details.isBackground ? "Background" : "Foreground",
-    `stack: ${sanitizeTerminalText(details.stack ?? "—")}`,
-    `model: ${sanitizeTerminalText(details.modelName ?? "—")}`,
-    `thinking: ${sanitizeTerminalText(details.thinking ?? "—")}`,
-    timing,
-  ].join(" · ");
-  return [first, theme.fg("dim", metadata)];
+function collapsedLines(details: AgentDetails, theme: Theme, width: number): string[] {
+  const status = statusPresentation(details.status);
+  const separator = theme.fg("dim", " · ");
+  const first = [
+    theme.fg("toolTitle", theme.bold("Subagent")),
+    theme.bold(sanitizeTerminalText(details.displayName)),
+    theme.fg(status.color, `${status.icon} ${status.label}`),
+  ].join(separator);
+  const timing = `${formatMs(details.durationMs)} ${isActive(details.status) ? "elapsed" : "duration"}`;
+  const metadata = packMetadata(
+    [
+      details.isBackground ? "Background" : "Foreground",
+      `stack ${sanitizeTerminalText(details.stack ?? "—")}`,
+      `model ${sanitizeTerminalText(details.modelName ?? "—")}`,
+      `thinking ${sanitizeTerminalText(details.thinking ?? "—")}`,
+      timing,
+    ],
+    width,
+  );
+  return [first, ...metadata.map((line) => theme.fg("dim", line))];
+}
+
+/** Wrap compact metadata only between facts, never before an orphaned separator. */
+function packMetadata(parts: readonly string[], width: number): string[] {
+  const contentWidth = Math.max(1, width - 2);
+  const rows: string[] = [];
+  let row = "";
+  for (const part of parts) {
+    const candidate = row ? `${row} · ${part}` : part;
+    if (row && visibleWidth(candidate) > contentWidth) {
+      rows.push(row);
+      row = part;
+    } else {
+      row = candidate;
+    }
+  }
+  if (row) rows.push(row);
+  return rows.map((line, index) => `${index === 0 ? `${GLYPHS.subLine} ` : "  "}${line}`);
 }
 
 function expandedLines(
@@ -283,18 +321,25 @@ function expandedLines(
   toolCallId: string,
   registry: InvocationRowRegistry | undefined,
   width: number,
+  theme: Theme,
 ): string[] {
+  const status = statusPresentation(details.status);
+  const execution = details.isBackground ? "Background" : "Foreground";
+  const compactions = record?.compactionCount ?? details.compactions ?? 0;
+  const heading = (label: string) => theme.fg("toolTitle", theme.bold(label));
   const lines = [
     "",
-    `Task: ${sanitizeTerminalText(details.task ?? record?.task ?? details.description)}`,
-    `Agent: ${sanitizeTerminalText(details.displayName)} · ${statusText(details.status)} · ${details.isBackground ? "Background" : "Foreground"} · stack: ${sanitizeTerminalText(details.stack ?? "—")} · model: ${sanitizeTerminalText(details.modelName ?? "—")} · thinking: ${sanitizeTerminalText(details.thinking ?? "—")}`,
-    `Agent ID: ${sanitizeTerminalText(details.agentId ?? "unknown")}`,
-    `Child session ID: ${sanitizeTerminalText(record?.childSessionId ?? details.childSessionId ?? "not available")}`,
-    `Timing: started ${record ? new Date(record.startedAt).toISOString() : "not available"} · ${isActive(details.status) ? "elapsed" : "duration"}: ${formatMs(details.durationMs)}`,
-    `Budgets: turns ${details.turnCount ?? 0}/${details.maxTurns ?? "unlimited"} · grace ${details.graceTurns ?? "unlimited"}`,
-    `Tool uses: ${details.toolUses}`,
-    `Tokens/context/compactions: ${details.tokens || "0 token"} · ${formatContext(record?.getContextPercent())} · ${record?.compactionCount ?? details.compactions ?? 0} compactions`,
-    "Activity:",
+    heading("Task"),
+    `  ${sanitizeTerminalText(details.task ?? record?.task ?? details.description)}`,
+    heading("Run details"),
+    `  ${status.label} · ${execution}`,
+    `  Turns: ${details.turnCount ?? 0}/${details.maxTurns ?? "unlimited"} · grace: ${details.graceTurns ?? "unlimited"} · tool uses: ${details.toolUses}`,
+    `  Usage: ${details.tokens || "0 tokens"} · ${formatContext(record?.getContextPercent())} · ${compactions} compaction${compactions === 1 ? "" : "s"}`,
+    `  Started: ${record ? new Date(record.startedAt).toISOString() : "not available"} · ${isActive(details.status) ? "elapsed" : "duration"}: ${formatMs(details.durationMs)}`,
+    heading("Identifiers"),
+    `  Agent ID: ${sanitizeTerminalText(details.agentId ?? "unknown")}`,
+    `  Child session ID: ${sanitizeTerminalText(record?.childSessionId ?? details.childSessionId ?? "not available")}`,
+    heading("Activity"),
   ];
   const activity =
     details.agentId && registry
@@ -303,18 +348,19 @@ function expandedLines(
         ? [details.activity]
         : [];
   lines.push(
-    ...(activity.length ? activity.map((item) => `  ${item}`) : ["  No child activity yet."]),
+    ...(activity.length
+      ? activity.map((item) => `  ${GLYPHS.subLine} ${item}`)
+      : [`  ${GLYPHS.subLine} No child activity yet.`]),
   );
-  lines.push("Current/final output:");
+  lines.push(heading("Current/final output"));
   const output =
     record?.result ?? record?.error ?? record?.responseText ?? details.output ?? resultText;
   const outputLines = wrapTextWithAnsi(
     sanitizeOutput(output || "No output."),
     Math.max(1, width - 2),
   );
-  lines.push(...outputLines.slice(0, MAX_OUTPUT_LINES).map((line) => `  ${line}`));
-  if (outputLines.length > MAX_OUTPUT_LINES) lines.push("  … output truncated to 50 lines");
-  lines.push("Read-only transcript: /subagents:sessions");
+  lines.push(...outputLines.map((line) => `  ${line}`));
+  lines.push("", theme.fg("dim", "Read-only transcript · /subagents:sessions"));
   return lines;
 }
 
@@ -358,23 +404,29 @@ function sanitizeOutput(output: string): string {
   return sanitizeTerminalText(output, true);
 }
 
-function statusText(status: string): string {
+type StatusColor = "muted" | "accent" | "success" | "warning" | "dim" | "error";
+
+function statusPresentation(status: string): { label: string; color: StatusColor; icon: string } {
   switch (status) {
     case "queued":
-      return "queued";
+      return { label: "queued", color: "muted", icon: GLYPHS.queued };
     case "running":
-      return "running";
+      return { label: "running", color: "accent", icon: GLYPHS.toolCall };
     case "completed":
-      return "completed";
+      return { label: "completed", color: "success", icon: GLYPHS.success };
     case "steered":
-      return "completed (turn limit)";
+      return { label: "completed (turn limit)", color: "warning", icon: GLYPHS.success };
     case "aborted":
-      return "aborted (max turns)";
+      return { label: "aborted (max turns)", color: "warning", icon: GLYPHS.failure };
     case "stopped":
-      return "stopped";
+      return { label: "stopped", color: "dim", icon: GLYPHS.stopped };
     default:
-      return "failed";
+      return { label: "failed", color: "error", icon: GLYPHS.failure };
   }
+}
+
+function statusText(status: string): string {
+  return statusPresentation(status).label;
 }
 
 function isActive(status: string): boolean {
@@ -382,7 +434,7 @@ function isActive(status: string): boolean {
 }
 
 function formatContext(percent: number | null | undefined): string {
-  return percent == null ? "context unknown" : `${Math.round(percent)}% context`;
+  return percent == null ? "context unknown" : `${formatContextPercent(percent)} context`;
 }
 
 function bindingKey(toolCallId: string, agentId: string): string {

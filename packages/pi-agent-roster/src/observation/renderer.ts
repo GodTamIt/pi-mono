@@ -63,12 +63,9 @@ function renderDetailLine(parts: readonly string[], theme: RendererTheme): strin
   return `\n  ${parts.map((part) => theme.fg("dim", part)).join(separator)}`;
 }
 
-/**
- * Content lines for the result preview: the whole result (capped at 30 lines)
- * when expanded, or just the first line (capped at 80 columns) when collapsed.
- */
+/** Content lines for the complete result when expanded, or a compact collapsed summary. */
 export function buildPreviewLines(resultPreview: string, expanded: boolean): string[] {
-  if (expanded) return resultPreview.split("\n").slice(0, 30);
+  if (expanded) return resultPreview.split("\n");
   return [resultPreview.split("\n")[0]?.slice(0, 80) ?? ""];
 }
 

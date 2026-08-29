@@ -86,7 +86,7 @@ describe("buildStatsParts", () => {
       totalTokens: 1000,
       durationMs: 5000,
     });
-    expect(parts).toEqual(["↻5≤10", "3 tool uses", "1.0k token", "5.0s"]);
+    expect(parts).toEqual(["↻5≤10", "3 tool uses", "1.0k tokens", "5.0s"]);
   });
 
   it("omits a part when its field is zero", () => {
@@ -98,7 +98,7 @@ describe("buildStatsParts", () => {
         totalTokens: 1000,
         durationMs: 5000,
       }),
-    ).toEqual(["3 tool uses", "1.0k token", "5.0s"]);
+    ).toEqual(["3 tool uses", "1.0k tokens", "5.0s"]);
     expect(
       buildStatsParts({
         turnCount: 5,
@@ -107,7 +107,7 @@ describe("buildStatsParts", () => {
         totalTokens: 1000,
         durationMs: 5000,
       }),
-    ).toEqual(["↻5≤10", "1.0k token", "5.0s"]);
+    ).toEqual(["↻5≤10", "1.0k tokens", "5.0s"]);
     expect(
       buildStatsParts({
         turnCount: 5,
@@ -125,7 +125,7 @@ describe("buildStatsParts", () => {
         totalTokens: 1000,
         durationMs: 0,
       }),
-    ).toEqual(["↻5≤10", "3 tool uses", "1.0k token"]);
+    ).toEqual(["↻5≤10", "3 tool uses", "1.0k tokens"]);
   });
 
   it("returns an empty array when all fields are zero", () => {
@@ -173,12 +173,12 @@ describe("buildPreviewLines", () => {
     expect(buildPreviewLines("short result\nsecond line", false)).toEqual(["short result"]);
   });
 
-  it("returns up to 30 lines when expanded", () => {
+  it("returns every line when expanded", () => {
     const lines = Array.from({ length: 35 }, (_, i) => `line${i}`);
-    expect(buildPreviewLines(lines.join("\n"), true)).toEqual(lines.slice(0, 30));
+    expect(buildPreviewLines(lines.join("\n"), true)).toEqual(lines);
   });
 
-  it("returns all lines when expanded and under 30 lines", () => {
+  it("returns all lines when expanded", () => {
     expect(buildPreviewLines("line1\nline2\nline3", true)).toEqual(["line1", "line2", "line3"]);
   });
 
@@ -243,7 +243,7 @@ describe("createNotificationRenderer", () => {
     expect(collapsed).not.toContain("thinking: high");
   });
 
-  it("retains bounded result and transcript details when expanded", () => {
+  it("retains the full result and transcript details when expanded", () => {
     const renderer = createNotificationRenderer();
     const result = renderer(
       {
@@ -264,7 +264,7 @@ describe("createNotificationRenderer", () => {
     expect(text).toContain("thinking: high");
     expect(text).toContain("3 tool uses");
     expect(text).toContain("line29");
-    expect(text).not.toContain("line30");
+    expect(text).toContain("line34");
     expect(text).toContain("/tmp/transcript.jsonl");
   });
 
@@ -297,6 +297,6 @@ describe("createNotificationRenderer", () => {
     );
     const text = renderText(result);
     expect(text).toContain("7 tool uses");
-    expect(text).toContain("5.0k token");
+    expect(text).toContain("5.0k tokens");
   });
 });

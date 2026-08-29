@@ -57,6 +57,7 @@ export function assembleWidgetState(
 /** The slice of the TUI the widget factory callback touches. */
 export interface TuiSurface {
   readonly terminal: { readonly columns: number };
+  readonly mode: "regular" | "fullscreen";
   requestRender(): void;
 }
 
@@ -84,7 +85,7 @@ export class AgentWidget implements SubagentManagerObserver {
 
   /** Whether the widget callback is currently registered with the TUI. */
   private widgetRegistered = false;
-  /** Cached TUI reference from widget factory callback, used for requestRender(). */
+  /** Cached TUI reference from widget factory callback, used for fullscreen animation. */
   private tui: TuiSurface | undefined;
   /** Last status bar text, used to avoid redundant setStatus calls. */
   private lastStatusText: string | undefined;
@@ -293,8 +294,8 @@ export class AgentWidget implements SubagentManagerObserver {
     this.updateStatusBar(state);
     this.widgetFrame++;
 
-    // Register widget callback once; subsequent updates use requestRender()
-    // which re-invokes render() without replacing the component (avoids layout thrashing).
+    // Register the widget callback once. Fullscreen mode can safely animate it;
+    // recurring regular-mode renders move terminal scrollback back to the bottom.
     if (!this.widgetRegistered) {
       this.uiCtx.setWidget(
         "agents",
@@ -312,9 +313,9 @@ export class AgentWidget implements SubagentManagerObserver {
         { placement: "aboveEditor" },
       );
       this.widgetRegistered = true;
-    } else {
-      // Widget already registered — just request a re-render of existing components.
-      this.tui?.requestRender();
+    } else if (this.tui?.mode === "fullscreen") {
+      // ScrollView preserves its offset in fullscreen mode, so live animation is safe there.
+      this.tui.requestRender();
     }
   }
 

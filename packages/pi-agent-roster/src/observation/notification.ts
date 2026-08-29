@@ -2,6 +2,7 @@ import { debugLog } from "../debug.ts";
 import type { SubagentStatus } from "../lifecycle/subagent-state.ts";
 import { getLifetimeTotal } from "../lifecycle/usage.ts";
 import type { Subagent } from "../types.ts";
+import { roundContextPercent } from "../ui/display.ts";
 
 /** Details attached to custom notification messages for visual rendering. */
 export interface NotificationDetails {
@@ -54,7 +55,7 @@ export function getStatusLabel(status: string, error?: string): string {
 }
 
 /** Format a structured <task-notification> XML block for the parent agent to parse. */
-export function formatTaskNotification(record: Subagent, resultMaxLen: number): string {
+export function formatTaskNotification(record: Subagent, _legacyResultMaxLen?: number): string {
   if (record.stoppedWhileQueued) return formatNeverStartedNotification(record);
 
   const status = getStatusLabel(record.status, record.error);
@@ -63,18 +64,13 @@ export function formatTaskNotification(record: Subagent, resultMaxLen: number): 
   const contextPercent = record.getContextPercent();
   const ctxXml =
     contextPercent !== null
-      ? `<context_percent>${Math.round(contextPercent)}</context_percent>`
+      ? `<context_percent>${roundContextPercent(contextPercent)}</context_percent>`
       : "";
   const compactXml = record.compactionCount
     ? `<compactions>${record.compactionCount}</compactions>`
     : "";
 
-  const resultPreview = record.result
-    ? record.result.length > resultMaxLen
-      ? record.result.slice(0, resultMaxLen) +
-        "\n...(truncated, use get_subagent_result for full output)"
-      : record.result
-    : "No output.";
+  const result = record.result || "No output.";
 
   const toolCallId = record.toolCallId;
   const outputFile = record.outputFile;
@@ -92,7 +88,7 @@ export function formatTaskNotification(record: Subagent, resultMaxLen: number): 
     record.invocation?.thinking
       ? `<thinking>${escapeXml(record.invocation.thinking)}</thinking>`
       : null,
-    `<result>${escapeXml(resultPreview)}</result>`,
+    `<result>${escapeXml(result)}</result>`,
     `<usage><total_tokens>${totalTokens}</total_tokens><tool_uses>${record.toolUses}</tool_uses>${ctxXml}${compactXml}<duration_ms>${durationMs}</duration_ms></usage>`,
     "</task-notification>",
   ]);
@@ -123,7 +119,7 @@ function joinNotificationLines(lines: (string | null)[]): string {
 /** Build notification details for the custom message renderer. */
 export function buildNotificationDetails(
   record: Subagent,
-  resultMaxLen: number,
+  _legacyResultMaxLen?: number,
 ): NotificationDetails {
   const totalTokens = getLifetimeTotal(record.lifetimeUsage);
 
@@ -141,17 +137,14 @@ export function buildNotificationDetails(
     durationMs: record.completedAt ? record.completedAt - record.startedAt : 0,
     outputFile: record.outputFile,
     error: record.error,
-    resultPreview: buildResultPreview(record, resultMaxLen),
+    resultPreview: buildResultPreview(record),
   };
 }
 
-/** The renderer's preview text: the (truncated) result, or why there is none. */
-function buildResultPreview(record: Subagent, resultMaxLen: number): string {
+/** The renderer's result text, or why there is none. */
+function buildResultPreview(record: Subagent): string {
   if (record.stoppedWhileQueued) return "Never started — stopped while queued.";
-  if (!record.result) return "No output.";
-  return record.result.length > resultMaxLen
-    ? record.result.slice(0, resultMaxLen) + "…"
-    : record.result;
+  return record.result || "No output.";
 }
 
 /** Build event data for lifecycle events from a Subagent. */
@@ -255,7 +248,7 @@ export class NotificationManager implements NotificationSystem {
   private emitIndividualNudge(record: Subagent): void {
     if (record.consumed) return;
 
-    const notification = formatTaskNotification(record, 500);
+    const notification = formatTaskNotification(record);
     // A never-started agent has no transcript and nothing to collect.
     const pointerLines = record.stoppedWhileQueued ? "" : this.buildPointerLines(record);
 
@@ -264,7 +257,7 @@ export class NotificationManager implements NotificationSystem {
         customType: "subagent-notification",
         content: notification + pointerLines,
         display: true,
-        details: buildNotificationDetails(record, 500),
+        details: buildNotificationDetails(record),
       },
       { deliverAs: "followUp", triggerTurn: true },
     );

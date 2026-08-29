@@ -88,11 +88,22 @@ const TOOL_DISPLAY: Record<string, string> = {
 
 // ---- Pure formatters ----
 
-/** Format a token count compactly: "33.8k token", "1.2M token". */
+/** Round a context-window percentage to the nearest tenth. */
+export function roundContextPercent(percent: number): number {
+  return Math.round(percent * 10) / 10;
+}
+
+/** Format a context-window percentage with at most one decimal place. */
+export function formatContextPercent(percent: number): string {
+  return `${roundContextPercent(percent)}%`;
+}
+
+/** Format a token count compactly: "1 token", "33.8k tokens", "1.2M tokens". */
 export function formatTokens(count: number): string {
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M token`;
-  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k token`;
-  return `${count} token`;
+  const unit = count === 1 ? "token" : "tokens";
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M ${unit}`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k ${unit}`;
+  return `${count} ${unit}`;
 }
 
 /**
@@ -100,10 +111,10 @@ export function formatTokens(count: number): string {
  * Thresholds for percent: <70% dim, 70–85% warning, ≥85% error.
  * Compaction count rendered as `⇊N` in dim (see `glyphs.ts`).
  *
- *   "12.3k token"               — no annotations
- *   "12.3k token (45%)"         — percent only
- *   "12.3k token (⇊2)"          — compactions only (e.g. right after compact)
- *   "12.3k token (45% · ⇊2)"    — both
+ *   "12.3k tokens"               — no annotations
+ *   "12.3k tokens (45%)"         — percent only
+ *   "12.3k tokens (⇊2)"          — compactions only (e.g. right after compact)
+ *   "12.3k tokens (45% · ⇊2)"    — both
  */
 export function formatSessionTokens(
   tokens: number,
@@ -115,7 +126,7 @@ export function formatSessionTokens(
   const annot: string[] = [];
   if (percent !== null) {
     const color = percent >= 85 ? "error" : percent >= 70 ? "warning" : "dim";
-    annot.push(theme.fg(color, `${Math.round(percent)}%`));
+    annot.push(theme.fg(color, formatContextPercent(percent)));
   }
   if (compactions > 0) {
     annot.push(theme.fg("dim", `${GLYPHS.compactions}${compactions}`));

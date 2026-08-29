@@ -14,10 +14,13 @@ function config(overrides: Partial<AgentPromptConfig> = {}): AgentPromptConfig {
 }
 
 describe("buildAgentPrompt", () => {
-  it("uses the profile body alone in replace mode", () => {
-    expect(buildAgentPrompt(config(), "/workspace", env, ["read"])).toBe(
-      "Review only the requested files.",
-    );
+  it("keeps the isolated runtime baseline around the profile body in replace mode", () => {
+    const prompt = buildAgentPrompt(config(), "/workspace", env, ["read"]);
+    expect(prompt).toContain("isolated child session");
+    expect(prompt).toContain("Use the read tool instead of cat/head/tail");
+    expect(prompt).toContain('<active_agent name="reviewer"/>');
+    expect(prompt).toContain("Working directory: /workspace");
+    expect(prompt).toContain("<agent_instructions>\nReview only the requested files.");
   });
 
   it("assembles the isolated baseline, enabled-tool guidance, metadata, and wrapped body in append mode", () => {

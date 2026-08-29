@@ -1,7 +1,9 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
+import { AgentTypeRegistry } from "../../src/config/agent-types.ts";
 import { AgentTool } from "../../src/tools/agent-tool.ts";
+import type { AgentConfig } from "../../src/types.ts";
 import { createToolDeps, createToolDepsWithDisabledBuiltInAgents } from "../helpers/make-deps.ts";
 import { createTestSubagent } from "../helpers/make-subagent.ts";
 import {
@@ -84,6 +86,35 @@ describe("AgentTool", () => {
     // testRegistry loads default agents: general-purpose, Explore, Architect
     expect(def.description).toContain("- general-purpose: General-purpose agent");
     expect(def.description).toContain("- Explore: Fast codebase exploration agent");
+  });
+
+  it("does not advertise primary-only agents as subagents", () => {
+    const agent = (name: string, mode: AgentConfig["mode"]): AgentConfig => ({
+      name,
+      description: `${name} description`,
+      systemPrompt: `${name} prompt`,
+      promptMode: "replace",
+      mode,
+      isDefault: true,
+      toolGuideline: `- Use ${name}.`,
+    });
+    const registry = new AgentTypeRegistry(
+      () =>
+        new Map([
+          ["architect", agent("architect", "primary")],
+          ["reviewer", agent("reviewer", "subagent")],
+          ["utility", agent("utility", "all")],
+        ]),
+    );
+    const def = makeTool(createToolDeps({ registry })).toToolDefinition();
+    const typeDescription = def.parameters.properties.subagent_type.description;
+
+    expect(typeDescription).toContain("reviewer, utility");
+    expect(typeDescription).not.toContain("architect");
+    expect(def.description).toContain("- reviewer: reviewer description");
+    expect(def.description).toContain("- utility: utility description");
+    expect(def.description).not.toContain("architect description");
+    expect(def.description).not.toContain("Use architect");
   });
 
   it("lists the built-in agent guidelines in registry order", () => {

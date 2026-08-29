@@ -24,8 +24,9 @@ export function buildAgentPrompt(
   enabledToolNames: readonly string[] = [],
 ): string {
   const instructions = config.systemPrompt.trim();
-  if (config.promptMode === "replace") return instructions;
 
+  // promptMode controls how a profile relates to Pi's primary-agent prompt, but
+  // every child still needs the roster's isolation and runtime baseline.
   const activeAgentTag = `<active_agent name="${config.name}"/>`;
   const envBlock = `# Environment
 Working directory: ${cwd}

@@ -94,20 +94,20 @@ describe("native subagent invocation row", () => {
 
     expect(rows).toMatchInlineSnapshot(`
       {
-        "aborted": "Subagent · Architect 🧭 · aborted (max turns)
-      Background · stack: deep · model: sonnet · thinking: high · duration: 0.3s",
-        "completed": "Subagent · Architect 🧭 · completed
-      Background · stack: deep · model: sonnet · thinking: high · duration: 0.3s",
-        "error": "Subagent · Architect 🧭 · failed
-      Background · stack: deep · model: sonnet · thinking: high · duration: 0.3s",
-        "queued": "Subagent · Architect 🧭 · queued
-      Background · stack: deep · model: sonnet · thinking: high · elapsed: 0.3s",
-        "running": "Subagent · Architect 🧭 · running
-      Background · stack: deep · model: sonnet · thinking: high · elapsed: 0.3s",
-        "steered": "Subagent · Architect 🧭 · completed (turn limit)
-      Background · stack: deep · model: sonnet · thinking: high · duration: 0.3s",
-        "stopped": "Subagent · Architect 🧭 · stopped
-      Background · stack: deep · model: sonnet · thinking: high · duration: 0.3s",
+        "aborted": "Subagent · Architect 🧭 · ✗ aborted (max turns)
+      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
+        "completed": "Subagent · Architect 🧭 · ✓ completed
+      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
+        "error": "Subagent · Architect 🧭 · ✗ failed
+      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
+        "queued": "Subagent · Architect 🧭 · ◦ queued
+      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s elapsed",
+        "running": "Subagent · Architect 🧭 · ▸ running
+      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s elapsed",
+        "steered": "Subagent · Architect 🧭 · ✓ completed (turn limit)
+      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
+        "stopped": "Subagent · Architect 🧭 · ■ stopped
+      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
       }
     `);
   });
@@ -123,7 +123,7 @@ describe("native subagent invocation row", () => {
       maxTurns: 20,
       graceTurns: 2,
       toolUses: 4,
-      tokens: "12.3k token",
+      tokens: "12.3k tokens",
       compactions: 1,
       output: "A compact final answer.",
     });
@@ -134,29 +134,31 @@ describe("native subagent invocation row", () => {
 
     expect({ collapsed, expanded }).toMatchInlineSnapshot(`
       {
-        "collapsed": "Subagent · Architect 🧭 · completed
-      Background · stack: deep · model: sonnet · thinking: high · duration: 0.3s",
-        "expanded": "Subagent · Architect 🧭 · completed
-      Background · stack: deep · model: sonnet · thinking: high · duration: 0.3s
+        "collapsed": "Subagent · Architect 🧭 · ✓ completed
+      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
+        "expanded": "Subagent · Architect 🧭 · ✓ completed
+      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration
 
-      Task: Inspect the child lifecycle exactly.
-      Agent: Architect 🧭 · completed · Background · stack: deep · model: sonnet ·
-      thinking: high
-      Agent ID: agent-restored
-      Child session ID: child-restored
-      Timing: started not available · duration: 0.3s
-      Budgets: turns 7/20 · grace 2
-      Tool uses: 4
-      Tokens/context/compactions: 12.3k token · context unknown · 1 compactions
-      Activity:
-        No child activity yet.
-      Current/final output:
+      Task
+        Inspect the child lifecycle exactly.
+      Run details
+        completed · Background
+        Turns: 7/20 · grace: 2 · tool uses: 4
+        Usage: 12.3k tokens · context unknown · 1 compaction
+        Started: not available · duration: 0.3s
+      Identifiers
+        Agent ID: agent-restored
+        Child session ID: child-restored
+      Activity
+        ⎿ No child activity yet.
+      Current/final output
         A compact final answer.
-      Read-only transcript: /subagents:sessions",
+
+      Read-only transcript · /subagents:sessions",
       }
     `);
-    expect(expanded).toContain("Budgets: turns 7/20 · grace 2");
-    expect(collapsed).not.toContain("Task:");
+    expect(expanded).toContain("Turns: 7/20 · grace: 2 · tool uses: 4");
+    expect(collapsed).not.toContain("\nTask\n");
   });
 
   it("shows unlimited budgets explicitly in the expanded view", () => {
@@ -168,7 +170,7 @@ describe("native subagent invocation row", () => {
     });
     host.setExpanded(true);
 
-    expect(baseline(host, 80)).toContain("Budgets: turns 3/unlimited · grace unlimited");
+    expect(baseline(host, 80)).toContain("Turns: 3/unlimited · grace: unlimited · tool uses: 0");
   });
 
   it("retains the renderer component and invalidates it from one child subscription", () => {
@@ -237,8 +239,8 @@ describe("native subagent invocation row", () => {
     rows.onSubagentSessionCreated(record);
     rows.onSubagentSessionCreated(record);
     expect(firstSession.subscribe).toHaveBeenCalledOnce();
-    expect(text(host)).toContain("Subagent · Architect 🧭 · running");
-    expect(text(host)).toContain("Background · stack: deep · model: sonnet · thinking: high");
+    expect(text(host)).toContain("Subagent · Architect 🧭 · ▸ running");
+    expect(text(host)).toContain("Background · stack deep · model sonnet · thinking high");
 
     const beforeEvent = requestRender.mock.calls.length;
     child.emit({ type: "tool_execution_start", toolName: "read", toolCallId: "read-2" });
@@ -246,13 +248,13 @@ describe("native subagent invocation row", () => {
 
     host.setExpanded(true);
     const expanded = text(host);
-    expect(expanded).toContain("Task: Inspect the child lifecycle exactly.");
+    expect(expanded).toContain("Task\n  Inspect the child lifecycle exactly.");
     expect(expanded).toContain("Agent ID: agent-1");
     expect(expanded).toContain("Child session ID: child-1");
-    expect(expanded).toContain("tool · read");
-    expect(expanded).toContain("Read-only transcript: /subagents:sessions");
+    expect(expanded).toContain("⎿ tool · read");
+    expect(expanded).toContain("Read-only transcript · /subagents:sessions");
     host.setExpanded(false);
-    expect(text(host)).not.toContain("Task:");
+    expect(text(host)).not.toContain("\nTask\n");
 
     const replacement = createMockSession();
     const secondSession = createSubagentSessionStub(replacement, "/tmp/child.jsonl", "child-2");
@@ -345,18 +347,17 @@ describe("native subagent invocation row", () => {
     expect(activity.at(-1)).toBe("tool · tool-44");
   });
 
-  it("limits expanded output to 50 visual rows", () => {
+  it("shows the complete expanded output", () => {
     const output = Array.from({ length: 55 }, (_, index) => `output-${index + 1}`).join("\n");
     const host = standaloneHost({ status: "completed" }, output);
     host.setExpanded(true);
     const expanded = baseline(host);
     const outputRows = expanded.split("\n").filter((line) => /^output-\d+$/.test(line.trim()));
 
-    expect(outputRows).toHaveLength(50);
+    expect(outputRows).toHaveLength(55);
     expect(outputRows[0]?.trim()).toBe("output-1");
-    expect(outputRows.at(-1)?.trim()).toBe("output-50");
-    expect(expanded).toContain("… output truncated to 50 lines");
-    expect(expanded).not.toContain("output-51");
+    expect(outputRows.at(-1)?.trim()).toBe("output-55");
+    expect(expanded).not.toContain("output truncated");
   });
 
   it("sanitizes terminal controls and wraps Unicode expanded output to the host width", () => {
@@ -426,7 +427,7 @@ describe("native subagent invocation row", () => {
       details: details({ agentId: undefined, status }),
       isError: status === "error",
     });
-    expect(text(host).trimStart().startsWith(`Subagent · Architect 🧭 · ${expected}`)).toBe(true);
+    expect(text(host).trimStart().split("\n")[0]?.endsWith(expected)).toBe(true);
   });
 
   it("wraps ANSI and Unicode safely and handles records absent after restoration", () => {
@@ -460,6 +461,11 @@ describe("native subagent invocation row", () => {
     for (const width of [40, 60, 80, 120]) {
       for (const line of host.render(width)) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }
+    expect(baseline(host, 40)).toMatchInlineSnapshot(`
+      "Subagent · Architect 🧭 · ✓ completed
+      ⎿ Background · stack deep · model sonnet
+        thinking high · 0.3s duration"
+    `);
     host.setExpanded(true);
     expect(text(host)).toContain("Agent ID: missing");
     expect(text(host)).toContain("Child session ID: not available");

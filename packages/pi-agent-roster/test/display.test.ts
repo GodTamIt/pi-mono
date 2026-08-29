@@ -5,6 +5,7 @@ import {
   buildInvocationMetadataParts,
   buildInvocationTags,
   formatSessionTokens,
+  formatTokens,
   getDisplayName,
   getPromptModeLabel,
 } from "../src/ui/display.ts";
@@ -123,46 +124,61 @@ describe("buildInvocationTags", () => {
   });
 });
 
+describe("formatTokens", () => {
+  it("pluralizes every count except exactly one", () => {
+    expect(formatTokens(0)).toBe("0 tokens");
+    expect(formatTokens(1)).toBe("1 token");
+    expect(formatTokens(2)).toBe("2 tokens");
+    expect(formatTokens(26_700)).toBe("26.7k tokens");
+  });
+});
+
 describe("formatSessionTokens", () => {
   const theme = { fg: (c: string, s: string) => `<${c}>${s}</${c}>`, bold: (s: string) => s };
 
   it("applies threshold colors (<70 dim, 70–85 warning, ≥85 error)", () => {
-    expect(formatSessionTokens(1234, null, theme)).toBe("1.2k token");
+    expect(formatSessionTokens(1234, null, theme)).toBe("1.2k tokens");
     expect(formatSessionTokens(1234, 50, theme)).toBe(
-      "1.2k token <dim>(</dim><dim>50%</dim><dim>)</dim>",
+      "1.2k tokens <dim>(</dim><dim>50%</dim><dim>)</dim>",
     );
     expect(formatSessionTokens(1234, 70, theme)).toBe(
-      "1.2k token <dim>(</dim><warning>70%</warning><dim>)</dim>",
+      "1.2k tokens <dim>(</dim><warning>70%</warning><dim>)</dim>",
     );
     expect(formatSessionTokens(1234, 84, theme)).toBe(
-      "1.2k token <dim>(</dim><warning>84%</warning><dim>)</dim>",
+      "1.2k tokens <dim>(</dim><warning>84%</warning><dim>)</dim>",
     );
     expect(formatSessionTokens(1234, 85, theme)).toBe(
-      "1.2k token <dim>(</dim><error>85%</error><dim>)</dim>",
+      "1.2k tokens <dim>(</dim><error>85%</error><dim>)</dim>",
     );
     expect(formatSessionTokens(1234, 99, theme)).toBe(
-      "1.2k token <dim>(</dim><error>99%</error><dim>)</dim>",
+      "1.2k tokens <dim>(</dim><error>99%</error><dim>)</dim>",
+    );
+  });
+
+  it("rounds context percentage to the nearest tenth", () => {
+    expect(formatSessionTokens(1234, 5.7134813489, theme)).toBe(
+      "1.2k tokens <dim>(</dim><dim>5.7%</dim><dim>)</dim>",
     );
   });
 
   it("annotates compaction count alongside percent", () => {
     // compactions only (e.g. immediately post-compaction, percent null)
     expect(formatSessionTokens(1234, null, theme, 1)).toBe(
-      "1.2k token <dim>(</dim><dim>⇊1</dim><dim>)</dim>",
+      "1.2k tokens <dim>(</dim><dim>⇊1</dim><dim>)</dim>",
     );
     expect(formatSessionTokens(1234, null, theme, 3)).toBe(
-      "1.2k token <dim>(</dim><dim>⇊3</dim><dim>)</dim>",
+      "1.2k tokens <dim>(</dim><dim>⇊3</dim><dim>)</dim>",
     );
     // percent + compactions, joined with ` · `
     expect(formatSessionTokens(1234, 45, theme, 2)).toBe(
-      "1.2k token <dim>(</dim><dim>45%</dim><dim> · </dim><dim>⇊2</dim><dim>)</dim>",
+      "1.2k tokens <dim>(</dim><dim>45%</dim><dim> · </dim><dim>⇊2</dim><dim>)</dim>",
     );
     expect(formatSessionTokens(1234, 88, theme, 4)).toBe(
-      "1.2k token <dim>(</dim><error>88%</error><dim> · </dim><dim>⇊4</dim><dim>)</dim>",
+      "1.2k tokens <dim>(</dim><error>88%</error><dim> · </dim><dim>⇊4</dim><dim>)</dim>",
     );
     // compactions=0 omitted
     expect(formatSessionTokens(1234, 45, theme, 0)).toBe(
-      "1.2k token <dim>(</dim><dim>45%</dim><dim>)</dim>",
+      "1.2k tokens <dim>(</dim><dim>45%</dim><dim>)</dim>",
     );
   });
 });

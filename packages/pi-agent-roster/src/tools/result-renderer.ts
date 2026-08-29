@@ -86,13 +86,8 @@ export function renderCompleted(
 
   if (expanded) {
     if (resultText) {
-      const lines = resultText.split("\n").slice(0, 50);
-      for (const l of lines) {
+      for (const l of resultText.split("\n")) {
         line += "\n" + theme.fg("dim", `  ${l}`);
-      }
-      if (resultText.split("\n").length > 50) {
-        line +=
-          "\n" + theme.fg("muted", "  ... (use get_subagent_result with verbose for full output)");
       }
     }
   } else {
@@ -126,7 +121,7 @@ export function renderFailed(details: AgentDetails, theme: Theme): string {
 // ---- Shared helper ----
 
 /**
- * Build the stats string: "haiku · thinking: high · ↻5≤30 · 3 tool uses · 33.8k token".
+ * Build the stats string: "haiku · thinking: high · ↻5≤30 · 3 tool uses · 33.8k tokens".
  * Returns an empty string when all fields are absent or zero.
  */
 export function renderStats(details: AgentDetails, theme: Theme): string {

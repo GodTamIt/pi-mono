@@ -251,7 +251,11 @@ describe("AgentWidget — projection reads activity off Subagent records", () =>
     widget.update();
 
     expect(renderFn).toBeDefined();
-    const stubTui = { terminal: { columns: 200 }, requestRender: () => {} };
+    const stubTui = {
+      terminal: { columns: 200 },
+      mode: "regular" as const,
+      requestRender: () => {},
+    };
     const stubTheme = { fg: (_: string, t: string) => t, bold: (t: string) => t };
     const lines = renderFn!(stubTui, stubTheme).render();
     const allText = lines.join("\n");
@@ -355,6 +359,26 @@ describe("AgentWidget — self-drives from lifecycle notifications", () => {
     expect(typeof lastContent()).toBe("function");
   });
 
+  it.each([
+    ["regular", 0],
+    ["fullscreen", 3],
+  ] as const)("requests recurring renders only in %s mode", (mode, expectedRenderCount) => {
+    const { widget, lastContent } = makeWidget([{ id: "a1", status: "running" }]);
+    widget.onSubagentStarted(createTestSubagent({ id: "a1", status: "running" }));
+    const factory = lastContent();
+    if (typeof factory !== "function") throw new Error("widget factory missing");
+    const requestRender = vi.fn();
+    factory(
+      { terminal: { columns: 80 }, mode, requestRender },
+      { fg: (_color: string, text: string) => text, bold: (text: string) => text },
+    );
+
+    vi.advanceTimersByTime(240);
+
+    expect(requestRender).toHaveBeenCalledTimes(expectedRenderCount);
+    widget.dispose();
+  });
+
   it("renders the finished agent on onSubagentCompleted", () => {
     const { widget, lastContent } = makeWidget([
       { id: "a1", status: "completed", completedAt: 5000 },
@@ -403,7 +427,11 @@ describe("AgentWidget — theme changes", () => {
         if (content) factories.push(content);
       },
     };
-    const tui = { terminal: { columns: 80 }, requestRender: vi.fn() };
+    const tui = {
+      terminal: { columns: 80 },
+      mode: "regular" as const,
+      requestRender: vi.fn(),
+    };
     widget.setUICtx(ui);
     widget.update();
 
@@ -449,7 +477,11 @@ describe("AgentWidget — background-only filtering", () => {
     widget.setUICtx(ui);
     const lastContent = () => setWidgetCalls.at(-1);
     const renderLines = () => {
-      const stubTui = { terminal: { columns: 200 }, requestRender: () => {} };
+      const stubTui = {
+        terminal: { columns: 200 },
+        mode: "regular" as const,
+        requestRender: () => {},
+      };
       const stubTheme = { fg: (_: string, t: string) => t, bold: (t: string) => t };
       return renderFn!(stubTui, stubTheme).render();
     };

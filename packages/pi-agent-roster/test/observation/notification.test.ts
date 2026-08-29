@@ -58,12 +58,18 @@ describe("formatTaskNotification", () => {
     expect(xml).toContain("<status>Done</status>");
   });
 
-  it("truncates long results", () => {
+  it("includes long results in full", () => {
     const longResult = "x".repeat(600);
     const record = createTestSubagent({ result: longResult });
     const xml = formatTaskNotification(record, 100);
-    expect(xml).toContain("truncated");
-    expect(xml).not.toContain(longResult);
+    expect(xml).toContain(longResult);
+    expect(xml).not.toContain("truncated");
+  });
+
+  it("rounds context percentage to the nearest tenth", () => {
+    const record = createTestSubagent();
+    record.getContextPercent = () => 5.7134813489;
+    expect(formatTaskNotification(record)).toContain("<context_percent>5.7</context_percent>");
   });
 
   it("shows No output when result is undefined", () => {
@@ -152,17 +158,17 @@ describe("buildNotificationDetails", () => {
     expect(details.maxTurns).toBe(10);
   });
 
-  it("truncates long result previews with ellipsis", () => {
+  it("keeps long result details in full", () => {
+    const result = "x".repeat(600);
     const record = createTestSubagent({
       description: "Test",
-      result: "x".repeat(600),
+      result,
       toolUses: 2,
       completedAt: 3000,
       lifetimeUsage: { input: 100, output: 200, cacheWrite: 0 },
     });
     const details = buildNotificationDetails(record, 100);
-    expect(details.resultPreview).toHaveLength(101); // 100 chars + "…"
-    expect(details.resultPreview.endsWith("…")).toBe(true);
+    expect(details.resultPreview).toBe(result);
   });
 
   it("previews a never-started agent as never started, not as empty output", () => {
