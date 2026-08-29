@@ -94,8 +94,7 @@ export function fileSnapshotSource(
   outputFile: string,
   readFile: (path: string) => string,
 ): TranscriptSource {
-  const entries = parseSessionEntries(readFile(outputFile));
-  const sessionEntries = entries.filter((entry): entry is SessionEntry => entry.type !== "session");
+  const sessionEntries = parseSessionEntries(readFile(outputFile)).filter(isTranscriptEntry);
   const { messages } = buildSessionContext(sessionEntries);
   return {
     getMessages: () => messages,
@@ -115,6 +114,53 @@ export function liveSource(record: NavigableSubagent): TranscriptSource {
         : undefined,
     getToolDefinition: (name) => record.getToolDefinition(name),
   };
+}
+
+/** Keep one corrupt JSON value from hiding the valid path that precedes it. */
+function isTranscriptEntry(value: unknown): value is SessionEntry {
+  if (typeof value !== "object" || value === null) return false;
+  const entry = value as Record<string, unknown>;
+  if (
+    typeof entry.id !== "string" ||
+    (entry.parentId !== null && typeof entry.parentId !== "string") ||
+    typeof entry.timestamp !== "string"
+  ) {
+    return false;
+  }
+  switch (entry.type) {
+    case "message":
+      return (
+        typeof entry.message === "object" &&
+        entry.message !== null &&
+        typeof (entry.message as Record<string, unknown>).role === "string"
+      );
+    case "thinking_level_change":
+      return typeof entry.thinkingLevel === "string";
+    case "model_change":
+      return typeof entry.provider === "string" && typeof entry.modelId === "string";
+    case "compaction":
+      return (
+        typeof entry.summary === "string" &&
+        typeof entry.firstKeptEntryId === "string" &&
+        typeof entry.tokensBefore === "number"
+      );
+    case "branch_summary":
+      return typeof entry.fromId === "string" && typeof entry.summary === "string";
+    case "custom":
+      return typeof entry.customType === "string";
+    case "custom_message":
+      return (
+        typeof entry.customType === "string" &&
+        (typeof entry.content === "string" || Array.isArray(entry.content)) &&
+        typeof entry.display === "boolean"
+      );
+    case "label":
+      return typeof entry.targetId === "string";
+    case "session_info":
+      return entry.name === undefined || typeof entry.name === "string";
+    default:
+      return false;
+  }
 }
 
 function buildIdentity(

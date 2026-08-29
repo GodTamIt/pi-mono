@@ -83,7 +83,7 @@ describe("SubagentEventsObserver", () => {
       expect(emit).toHaveBeenCalledWith("subagents:failed", expect.anything());
     });
 
-    it("calls appendEntry with subagents:record and the eight persisted fields", () => {
+    it("persists the complete terminal record metadata", () => {
       const { observer, appendEntry } = makeObserver();
       const record = createTestSubagent({
         id: "agent-2",
@@ -94,19 +94,44 @@ describe("SubagentEventsObserver", () => {
         error: undefined,
         startedAt: 1000,
         completedAt: 2000,
+        toolCallId: "tool-2",
+        maxTurns: 12,
+        graceTurns: 3,
+        invocation: {
+          stack: "fast",
+          modelName: "provider/model",
+          thinking: "high",
+          runInBackground: false,
+        },
       });
 
       observer.onSubagentCompleted(record);
 
       expect(appendEntry).toHaveBeenCalledExactlyOnceWith("subagents:record", {
         id: "agent-2",
+        parentSessionId: undefined,
+        childSessionId: undefined,
+        toolCallId: "tool-2",
         type: "Explore",
         description: "explore code",
+        task: "do something",
         status: "completed",
         result: "found it",
         error: undefined,
         startedAt: 1000,
         completedAt: 2000,
+        isBackground: false,
+        turnCount: 1,
+        maxTurns: 12,
+        graceTurns: 3,
+        stack: "fast",
+        model: "provider/model",
+        thinking: "high",
+        toolUses: 3,
+        lifetimeUsage: { input: 500, output: 500, cacheWrite: 0 },
+        contextPercent: null,
+        compactionCount: 0,
+        outputFile: undefined,
       });
     });
 
@@ -147,7 +172,7 @@ describe("SubagentEventsObserver", () => {
       expect(emit).toHaveBeenCalledExactlyOnceWith("subagents:resumed", buildEventData(record));
     });
 
-    it("appends subagents:record with the eight persisted fields", () => {
+    it("persists the same complete metadata after resume", () => {
       const { observer, appendEntry } = makeObserver();
       const record = createTestSubagent({
         id: "agent-5",
@@ -162,16 +187,24 @@ describe("SubagentEventsObserver", () => {
 
       observer.onSubagentResumed(record);
 
-      expect(appendEntry).toHaveBeenCalledExactlyOnceWith("subagents:record", {
-        id: "agent-5",
-        type: "Explore",
-        description: "resume explore",
-        status: "completed",
-        result: "resumed it",
-        error: undefined,
-        startedAt: 3000,
-        completedAt: 4000,
-      });
+      expect(appendEntry).toHaveBeenCalledExactlyOnceWith(
+        "subagents:record",
+        expect.objectContaining({
+          id: "agent-5",
+          type: "Explore",
+          description: "resume explore",
+          task: "do something",
+          status: "completed",
+          result: "resumed it",
+          error: undefined,
+          startedAt: 3000,
+          completedAt: 4000,
+          turnCount: 1,
+          toolUses: 3,
+          lifetimeUsage: { input: 500, output: 500, cacheWrite: 0 },
+          compactionCount: 0,
+        }),
+      );
     });
 
     it("calls notifications.sendCompletion unconditionally — the manager decides whether to nudge", () => {

@@ -385,6 +385,53 @@ describe("AgentWidget — self-drives from lifecycle notifications", () => {
   });
 });
 
+describe("AgentWidget — theme changes", () => {
+  it("re-registers its factory after invalidation and renders with the new theme", () => {
+    const record = createTestSubagent({
+      status: "running",
+      completedAt: undefined,
+      invocation: { runInBackground: true },
+    });
+    const widget = new AgentWidget(
+      { listAgents: () => [record] } as unknown as SubagentManager,
+      new AgentTypeRegistry(() => new Map()),
+    );
+    const factories: Array<Exclude<Parameters<UICtx["setWidget"]>[1], undefined>> = [];
+    const ui: UICtx = {
+      setStatus: () => {},
+      setWidget: (_key, content) => {
+        if (content) factories.push(content);
+      },
+    };
+    const tui = { terminal: { columns: 80 }, requestRender: vi.fn() };
+    widget.setUICtx(ui);
+    widget.update();
+
+    const firstFactory = factories[0];
+    expect(typeof firstFactory).toBe("function");
+    if (typeof firstFactory !== "function") throw new Error("widget factory missing");
+    const first = firstFactory(tui, {
+      fg: (_color, text) => `[old]${text}`,
+      bold: (text) => text,
+    });
+    expect(first.render().join("\n")).toContain("[old]");
+
+    first.invalidate();
+    widget.update();
+
+    const secondFactory = factories[1];
+    expect(typeof secondFactory).toBe("function");
+    if (typeof secondFactory !== "function") throw new Error("replacement widget factory missing");
+    const second = secondFactory(tui, {
+      fg: (_color, text) => `[new]${text}`,
+      bold: (text) => text,
+    });
+    expect(second.render().join("\n")).toContain("[new]");
+    expect(factories).toHaveLength(2);
+    widget.dispose();
+  });
+});
+
 describe("AgentWidget — background-only filtering", () => {
   function setup(records: Subagent[]) {
     const manager = { listAgents: () => records } as unknown as SubagentManager;

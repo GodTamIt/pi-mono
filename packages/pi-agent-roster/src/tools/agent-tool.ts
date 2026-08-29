@@ -232,71 +232,74 @@ ${typeListText}
 Guidelines:
 ${guidelines}
 `,
-      parameters: Type.Object({
-        task: Type.String({
-          description:
-            "Required self-contained task. The child sees none of the main conversation, so include every required fact, path, constraint, and expected output.",
-          minLength: 1,
-          pattern: "\\S",
-        }),
-        description: Type.Optional(
-          Type.String({
-            description: "Optional short description for the UI; defaults to the task.",
-          }),
-        ),
-        subagent_type: Type.Optional(
-          Type.String({
-            description: `The type of specialized agent to use. Required for a new child. Available types: ${availableTypesText}. Custom agents from .pi/agents/<name>.md (project) or ${agentDir}/agents/<name>.md (global) are also available.`,
-          }),
-        ),
-        model: Type.Optional(
-          Type.String({
+      parameters: Type.Object(
+        {
+          task: Type.String({
             description:
-              'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.',
-          }),
-        ),
-        thinking: Type.Optional(
-          Type.String({
-            description:
-              "Thinking level: minimal, low, medium, high, xhigh, or max. Overrides agent default.",
-          }),
-        ),
-        stack: Type.Optional(
-          Type.String({
-            description: "Optional named stack selection for this agent.",
+              "Required self-contained task. The child sees none of the main conversation, so include every required fact, path, constraint, and expected output.",
             minLength: 1,
             pattern: "\\S",
           }),
-        ),
-        max_turns: Type.Optional(
-          Type.Integer({
-            description: "Maximum agentic turns. Omit for unlimited.",
-            minimum: 1,
-            maximum: 10000,
-          }),
-        ),
-        grace_turns: Type.Optional(
-          Type.Integer({
-            description: "Additional turns after the soft limit. Omit for unlimited.",
-            minimum: 0,
-            maximum: 1000,
-          }),
-        ),
-        run_in_background: Type.Optional(
-          Type.Boolean({
-            description:
-              "Set to true to run in background. Returns agent ID immediately. You will be notified when it completes.",
-          }),
-        ),
-        resume: Type.Optional(
-          Type.String({
-            description:
-              "Optional child agent ID to resume using only its persisted history and the new task.",
-            minLength: 1,
-            pattern: "\\S",
-          }),
-        ),
-      }),
+          description: Type.Optional(
+            Type.String({
+              description: "Optional short description for the UI; defaults to the task.",
+            }),
+          ),
+          subagent_type: Type.Optional(
+            Type.String({
+              description: `The type of specialized agent to use. Required for a new child. Available types: ${availableTypesText}. Custom agents from .pi/agents/<name>.md (project) or ${agentDir}/agents/<name>.md (global) are also available.`,
+            }),
+          ),
+          model: Type.Optional(
+            Type.String({
+              description:
+                'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.',
+            }),
+          ),
+          thinking: Type.Optional(
+            Type.String({
+              description:
+                "Thinking level: minimal, low, medium, high, xhigh, or max. Overrides agent default.",
+            }),
+          ),
+          stack: Type.Optional(
+            Type.String({
+              description: "Optional named stack selection for this agent.",
+              minLength: 1,
+              pattern: "\\S",
+            }),
+          ),
+          max_turns: Type.Optional(
+            Type.Integer({
+              description: "Maximum agentic turns. Omit for unlimited.",
+              minimum: 1,
+              maximum: 10000,
+            }),
+          ),
+          grace_turns: Type.Optional(
+            Type.Integer({
+              description: "Additional turns after the soft limit. Omit for unlimited.",
+              minimum: 0,
+              maximum: 1000,
+            }),
+          ),
+          run_in_background: Type.Optional(
+            Type.Boolean({
+              description:
+                "Set to true to run in background. Returns agent ID immediately. You will be notified when it completes.",
+            }),
+          ),
+          resume: Type.Optional(
+            Type.String({
+              description:
+                "Optional child agent ID to resume using only its persisted history and the new task.",
+              minLength: 1,
+              pattern: "\\S",
+            }),
+          ),
+        },
+        { additionalProperties: false },
+      ),
 
       // The result renderer owns the complete logical row; the call slot stays empty.
       renderShell: "self",

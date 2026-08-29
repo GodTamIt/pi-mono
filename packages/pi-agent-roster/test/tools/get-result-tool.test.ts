@@ -26,9 +26,10 @@ async function execute(
 }
 
 describe("GetResultTool", () => {
-  it("returns tool definition with correct name", () => {
-    const tool = new GetResultTool(makeManager(), testRegistry);
-    expect(tool.toToolDefinition().name).toBe("get_subagent_result");
+  it("returns a strict result-query schema", () => {
+    const parameters = new GetResultTool(makeManager(), testRegistry).toToolDefinition().parameters;
+    expect(parameters.additionalProperties).toBe(false);
+    expect(Object.keys(parameters.properties).sort()).toEqual(["agent_id", "verbose", "wait"]);
   });
 
   it("includes promptSnippet", () => {

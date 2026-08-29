@@ -191,4 +191,49 @@ describe("fileSnapshotSource", () => {
     const source = fileSnapshotSource("/tasks/empty.jsonl", () => headerOnly);
     expect(source.getMessages()).toEqual([]);
   });
+
+  it("skips malformed lines and schema-invalid values without hiding valid messages", () => {
+    const validFirst = {
+      type: "message",
+      id: "m1",
+      parentId: null,
+      timestamp: "2026-06-23T00:00:01Z",
+      message: { role: "user", content: "still visible" },
+    };
+    const validSecond = {
+      type: "message",
+      id: "m2",
+      parentId: "m1",
+      timestamp: "2026-06-23T00:00:02Z",
+      message: { role: "assistant", content: [{ type: "text", text: "also visible" }] },
+    };
+    const jsonl = [
+      "{not json",
+      JSON.stringify(validFirst),
+      "null",
+      JSON.stringify({ type: "message", id: "bad", parentId: "m1", message: null }),
+      JSON.stringify({ type: "mystery", id: "unknown", parentId: "m1" }),
+      JSON.stringify(validSecond),
+    ].join("\n");
+
+    expect(
+      fileSnapshotSource("/tasks/damaged.jsonl", () => jsonl).getMessages(),
+    ).toMatchInlineSnapshot(`
+        [
+          {
+            "content": "still visible",
+            "role": "user",
+          },
+          {
+            "content": [
+              {
+                "text": "also visible",
+                "type": "text",
+              },
+            ],
+            "role": "assistant",
+          },
+        ]
+      `);
+  });
 });

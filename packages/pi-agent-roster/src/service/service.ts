@@ -89,8 +89,12 @@ export const SUBAGENT_EVENTS = {
 
 const SERVICE_KEY = Symbol.for("pi-agent-roster:service");
 
-export function publishSubagentsService(service: SubagentsService): void {
-  (globalThis as Record<symbol, unknown>)[SERVICE_KEY] = service;
+export function publishSubagentsService(service: SubagentsService): () => void {
+  const services = globalThis as Record<symbol, unknown>;
+  services[SERVICE_KEY] = service;
+  return () => {
+    if (services[SERVICE_KEY] === service) delete services[SERVICE_KEY];
+  };
 }
 
 export function getSubagentsService(): SubagentsService | undefined {

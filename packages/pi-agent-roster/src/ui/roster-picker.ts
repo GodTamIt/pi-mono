@@ -2,10 +2,12 @@ import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-a
 import {
   decodeKittyPrintable,
   matchesKey,
+  stripTerminalSequences,
   truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
+import { sanitizeTerminalText } from "./display.ts";
 
 export interface RosterPickerItem {
   value: string;
@@ -77,16 +79,19 @@ export class RosterPicker {
     const available = Math.max(1, width);
     const contentWidth = Math.max(1, available - 2);
     const lines = [
-      truncateToWidth(` ${this.theme.fg("accent", this.theme.bold(this.title))}`, available),
-      truncateToWidth(
-        ` ${this.theme.fg("dim", "Filter:")} ${this.filter || this.theme.fg("muted", "type to search")}`,
+      clipToWidth(
+        ` ${this.theme.fg("accent", this.theme.bold(sanitizeTerminalText(this.title)))}`,
+        available,
+      ),
+      clipToWidth(
+        ` ${this.theme.fg("dim", "Filter:")} ${sanitizeTerminalText(this.filter) || this.theme.fg("muted", "type to search")}`,
         available,
       ),
       "",
     ];
 
     if (!this.filtered.length) {
-      lines.push(truncateToWidth(` ${this.theme.fg("muted", "No matches")}`, available));
+      lines.push(clipToWidth(` ${this.theme.fg("muted", "No matches")}`, available));
     } else {
       const visible = this.filtered.slice(this.offset, this.offset + this.pageSize);
       for (let index = 0; index < visible.length; index++) {
@@ -95,39 +100,56 @@ export class RosterPicker {
         if (!item) continue;
         const selected = absoluteIndex === this.selected;
         const marker = selected ? this.theme.fg("accent", "›") : " ";
+        const safeLabel = sanitizeTerminalText(item.label);
         const label = selected
-          ? this.theme.fg("accent", this.theme.bold(item.label))
-          : this.theme.fg("text", item.label);
+          ? this.theme.fg("accent", this.theme.bold(safeLabel))
+          : this.theme.fg("text", safeLabel);
 
         if (available >= 80 && item.secondary) {
           const labelWidth = Math.min(Math.max(20, Math.floor(contentWidth * 0.4)), contentWidth);
-          const left = truncateToWidth(`${marker} ${label}`, labelWidth, "…", true);
+          const left = clipToWidth(`${marker} ${label}`, labelWidth, "…", true);
           const rightWidth = Math.max(1, contentWidth - labelWidth);
-          const secondary = wrapTextWithAnsi(this.theme.fg("muted", item.secondary), rightWidth);
-          lines.push(truncateToWidth(` ${left}${secondary[0] ?? ""}`, available));
+          const secondary = wrapTextWithAnsi(
+            this.theme.fg("muted", sanitizeTerminalText(item.secondary)),
+            rightWidth,
+          );
+          lines.push(clipToWidth(` ${left}${secondary[0] ?? ""}`, available));
           for (const line of secondary.slice(1)) {
-            lines.push(truncateToWidth(` ${" ".repeat(labelWidth)}${line}`, available));
+            lines.push(clipToWidth(` ${" ".repeat(labelWidth)}${line}`, available));
           }
         } else {
-          lines.push(truncateToWidth(` ${marker} ${label}`, available));
+          lines.push(clipToWidth(` ${marker} ${label}`, available));
           if (item.secondary)
-            lines.push(...this.wrapSecondary(item.secondary, contentWidth, available));
+            lines.push(
+              ...this.wrapSecondary(sanitizeTerminalText(item.secondary), contentWidth, available),
+            );
         }
         if (item.description)
-          lines.push(...this.wrapSecondary(item.description, contentWidth, available));
+          lines.push(
+            ...this.wrapSecondary(sanitizeTerminalText(item.description), contentWidth, available),
+          );
       }
     }
 
     lines.push("");
-    const position = this.filtered.length ? `${this.selected + 1}/${this.filtered.length} · ` : "";
-    lines.push(
-      truncateToWidth(
-        ` ${this.theme.fg("dim", `${position}↑↓/j k navigate · Enter select · Esc cancel`)}`,
-        available,
-      ),
-    );
+    const position = this.filtered.length
+      ? `${this.selected + 1}/${this.filtered.length}`
+      : undefined;
+    const controls =
+      available < 24
+        ? "↑↓ · Enter · Esc"
+        : available < 50
+          ? "↑↓/jk · Enter · Esc"
+          : "↑↓/j k navigate · Enter select · Esc cancel";
+    const footer = position ? `${position} · ${controls}` : controls;
+    if (visibleWidth(footer) + 1 <= available) {
+      lines.push(clipToWidth(` ${this.theme.fg("dim", footer)}`, available));
+    } else {
+      if (position) lines.push(clipToWidth(` ${this.theme.fg("dim", position)}`, available));
+      lines.push(clipToWidth(` ${this.theme.fg("dim", controls)}`, available));
+    }
     return lines.map((line) =>
-      visibleWidth(line) <= available ? line : truncateToWidth(line, available),
+      visibleWidth(line) <= available ? line : clipToWidth(line, available),
     );
   }
 
@@ -138,7 +160,7 @@ export class RosterPicker {
     return wrapTextWithAnsi(
       this.theme.fg("muted", text),
       Math.max(1, contentWidth - indent.length),
-    ).map((line) => truncateToWidth(` ${indent}${line}`, width));
+    ).map((line) => clipToWidth(` ${indent}${line}`, width));
   }
 
   private setFilter(filter: string): void {
@@ -167,6 +189,11 @@ export class RosterPicker {
       this.offset = this.selected - this.pageSize + 1;
     }
   }
+}
+
+function clipToWidth(text: string, width: number, ellipsis?: string, pad?: boolean): string {
+  const clipped = truncateToWidth(text, width, ellipsis, pad);
+  return text.includes("\u001b") ? clipped : stripTerminalSequences(clipped);
 }
 
 function isPrintable(data: string): boolean {

@@ -1,5 +1,5 @@
 import { getMarkdownTheme, initTheme } from "@earendil-works/pi-coding-agent";
-import { Container, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AgentSessionEvent, SessionMessage } from "../../src/types.ts";
 import type { TranscriptSource } from "../../src/ui/session-navigation.ts";
@@ -42,6 +42,46 @@ function manyMessages(count: number): SessionMessage[] {
 
 describe("TranscriptContent", () => {
   describe("message mapping", () => {
+    it("pins a compact child-only transcript baseline", () => {
+      const messages = [
+        { role: "user", content: "Inspect src/widget.ts and report." },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "I will inspect the child workspace." },
+            { type: "toolCall", id: "tc-read", name: "read", arguments: { path: "src/widget.ts" } },
+          ],
+          stopReason: "toolUse",
+        },
+        {
+          role: "toolResult",
+          toolCallId: "tc-read",
+          toolName: "read",
+          content: [{ type: "text", text: "export const widget = true;" }],
+          isError: false,
+        },
+      ] as unknown as SessionMessage[];
+
+      const baseline = stripTerminalSequences(rendered(contentFrom(messages), 52))
+        .split("\n")
+        .map((line) => line.trimEnd())
+        .join("\n");
+      expect(baseline).toMatchInlineSnapshot(`
+        "
+         Inspect src/widget.ts and report.
+
+
+         I will inspect the child workspace.
+
+
+         read src/widget.ts
+
+         export const widget = true;
+        "
+      `);
+      expect(baseline).not.toContain("parent");
+    });
+
     it("renders a user message", () => {
       expect(rendered(makeContent())).toContain("Hello world");
     });

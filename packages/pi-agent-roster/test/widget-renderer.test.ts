@@ -1,5 +1,5 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentTypeRegistry } from "../src/config/agent-types.ts";
 import type { Theme } from "../src/ui/display.ts";
 import type { WidgetAgent } from "../src/ui/widget-renderer.ts";
@@ -11,6 +11,9 @@ const ansiTheme: Theme = {
   fg: (_color, text) => `\x1b[31m${text}\x1b[0m`,
   bold: (text) => `\x1b[1m${text}\x1b[22m`,
 };
+const NOW = Date.parse("2026-06-23T12:00:00.000Z");
+
+afterEach(() => vi.restoreAllMocks());
 
 function makeAgent(overrides: Partial<WidgetAgent> = {}): WidgetAgent {
   return {
@@ -19,7 +22,7 @@ function makeAgent(overrides: Partial<WidgetAgent> = {}): WidgetAgent {
     status: "running",
     description: "inspect Unicode café 🚀 and report progress",
     toolUses: 0,
-    startedAt: Date.now() - 5000,
+    startedAt: NOW - 5000,
     completedAt: undefined,
     lifetimeUsage: undefined,
     compactionCount: 0,
@@ -48,6 +51,67 @@ function render(agents: WidgetAgent[], width = 120, theme = plainTheme): string[
 }
 
 describe("background widget statuses", () => {
+  it("pins every lifecycle state in monochrome", () => {
+    vi.spyOn(Date, "now").mockReturnValue(NOW);
+    const statuses: WidgetAgent["status"][] = [
+      "queued",
+      "running",
+      "completed",
+      "error",
+      "aborted",
+      "stopped",
+      "steered",
+    ];
+    const baseline = Object.fromEntries(
+      statuses.map((status) => [
+        status,
+        render(
+          [
+            makeAgent({
+              status,
+              completedAt: status === "queued" || status === "running" ? undefined : NOW,
+              error: status === "error" ? "provider unavailable" : undefined,
+            }),
+          ],
+          96,
+        ).join("\n"),
+      ]),
+    );
+
+    expect(baseline).toMatchInlineSnapshot(`
+      {
+        "aborted": "○ Background agents — 1 recent
+      └─ ✗ Agent [Background · aborted] · duration: 5.0s
+         inspect Unicode café 🚀 and report progress",
+        "completed": "○ Background agents — 1 recent
+      └─ ✓ Agent [Background · completed] · duration: 5.0s
+         inspect Unicode café 🚀 and report progress",
+        "error": "○ Background agents — 1 recent
+      └─ ✗ Agent [Background · failed] · duration: 5.0s
+         provider unavailable",
+        "queued": "● Background agents — 1 queued
+      └─ ◦ Agent [Background · queued]
+         stack: deep · model: anthropic/claude-opus · thinking: high · turn 3 · max 10 · grace 2
+         0 tool uses · 0 token · context: unavailable · compactions: 0 · elapsed: 5.0s
+         task: inspect Unicode café 🚀 and report progress
+         activity: waiting for a background slot",
+        "running": "● Background agents — 1 running
+      └─ ⠋ Agent [Background · running]
+         stack: deep · model: anthropic/claude-opus · thinking: high · turn 3 · max 10 · grace 2
+         0 tool uses · 0 token · context: unavailable · compactions: 0 · elapsed: 5.0s
+         task: inspect Unicode café 🚀 and report progress
+         activity: thinking…",
+        "steered": "○ Background agents — 1 recent
+      └─ ✓ Agent [Background · steered (turn limit)] · duration: 5.0s
+         inspect Unicode café 🚀 and report progress",
+        "stopped": "○ Background agents — 1 recent
+      └─ ■ Agent [Background · stopped] · duration: 5.0s
+         inspect Unicode café 🚀 and report progress",
+      }
+    `);
+    expect(Object.values(baseline).every((value) => !value.includes("\u001b"))).toBe(true);
+  });
+
   it("uses textual state labels independent of color and glyphs", () => {
     const statuses: Array<[WidgetAgent["status"], string]> = [
       ["queued", "queued"],
@@ -164,14 +228,15 @@ describe("width and row budgets", () => {
   });
 
   it("never exceeds 12 rows and prioritizes running, queued, errors, then completions", () => {
+    vi.spyOn(Date, "now").mockReturnValue(NOW);
     const agents: WidgetAgent[] = [
       makeAgent({ id: "run", description: "RUN-FIRST" }),
       makeAgent({ id: "queue", status: "queued", description: "QUEUE-SECOND" }),
-      makeAgent({ id: "fail", status: "error", completedAt: Date.now(), error: "FAIL-THIRD" }),
+      makeAgent({ id: "fail", status: "error", completedAt: NOW, error: "FAIL-THIRD" }),
       makeAgent({
         id: "done",
         status: "completed",
-        completedAt: Date.now(),
+        completedAt: NOW,
         description: "DONE-LAST",
       }),
     ];
@@ -183,6 +248,32 @@ describe("width and row budgets", () => {
     expect(text).toMatch(/\d+ queued/);
     expect(text).toMatch(/\d+ failed/);
     expect(text).toMatch(/\d+ completed/);
+    expect(text).toMatchInlineSnapshot(`
+      "● Background agents — 1 running, 1 queued
+      ├─ ⠋ Agent [Background · running]
+      │  stack: deep · model: anthropic/claude-opus
+      │  thinking: high · turn 3 · max 10 · grace 2 · 0 tool uses
+      │  0 token · context: unavailable · compactions: 0
+      │  elapsed: 5.0s
+      │  task: RUN-FIRST
+      │  activity: thinking…
+      └─ hidden: 1 queued · 1 failed · 1 completed"
+    `);
+  });
+
+  it("remains width-safe down to a one-column render surface", () => {
+    vi.spyOn(Date, "now").mockReturnValue(NOW);
+    for (const width of [1, 2, 4, 8, 16, 24]) {
+      const lines = render([makeAgent()], width, ansiTheme);
+      expect(lines.length).toBeLessThanOrEqual(12);
+      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+    }
+    const minimumBaseline = render([makeAgent()], 16).join("\n");
+    expect(minimumBaseline).not.toContain("\u001b");
+    expect(minimumBaseline).toMatchInlineSnapshot(`
+      "● Background ...
+      └─ hidden: 1 ..."
+    `);
   });
 
   it("filters expired terminal agents", () => {

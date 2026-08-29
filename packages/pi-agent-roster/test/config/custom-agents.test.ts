@@ -96,9 +96,22 @@ Just a prompt.`,
 
     expect(agent.name).toBe("bare");
     expect(agent.description).toBe("bare");
+    expect(agent.mode).toBe("subagent");
     expect(agent.toolNames).toEqual(BUILTIN_TOOL_NAMES);
     expect(agent.promptMode).toBe("append");
     expect(agent.systemPrompt).toBe("Just a system prompt, no frontmatter.");
+  });
+
+  it("isolates malformed YAML without changing the default mode of valid files", () => {
+    writeAgent("broken", "---\nstacks: [unterminated\n---\nBroken prompt.");
+    writeAgent("worker", "A valid child prompt.");
+
+    const diagnostics: string[] = [];
+    const result = loadCustomAgents(tmpDir, (diagnostic) => diagnostics.push(diagnostic.message));
+
+    expect(result.has("broken")).toBe(false);
+    expect(result.get("worker")?.mode).toBe("subagent");
+    expect(diagnostics).toHaveLength(1);
   });
 
   it("handles tools: none → empty array", () => {

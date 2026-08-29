@@ -106,6 +106,29 @@ describe("settings persistence", () => {
     expect(loadSettings(globalDir, projectDir)).toEqual({ graceTurns: 10, maxConcurrent: 2 });
   });
 
+  it("falls back independently when a higher-precedence budget is invalid", () => {
+    writeGlobal({ defaultMaxTurns: 40, graceTurns: 7 });
+    writeProject({ defaultMaxTurns: -1, graceTurns: 0 });
+
+    const warnings = captureWarn(() => {
+      expect(loadSettings(globalDir, projectDir)).toEqual({ defaultMaxTurns: 40, graceTurns: 0 });
+    });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("defaultMaxTurns");
+  });
+
+  it("rejects stack profile definitions in either settings layer", () => {
+    writeGlobal({ defaultMaxTurns: 25, stacks: { fast: { model: "provider/fast" } } });
+    writeProject({ graceTurns: 2, profiles: { deep: { model: "provider/deep" } } });
+
+    const warnings = captureWarn(() => {
+      expect(loadSettings(globalDir, projectDir)).toEqual({ defaultMaxTurns: 25, graceTurns: 2 });
+    });
+    expect(warnings).toHaveLength(2);
+    expect(warnings.join("\n")).toContain("unknown field stacks");
+    expect(warnings.join("\n")).toContain("unknown field profiles");
+  });
+
   describe("sanitizer", () => {
     it("drops maxConcurrent < 1", () => {
       writeProject({ maxConcurrent: 0, graceTurns: 5 });

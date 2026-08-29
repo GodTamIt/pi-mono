@@ -88,16 +88,19 @@ export class SteerTool {
       description:
         "Send a steering message to a running agent. The message will interrupt the agent after its current tool execution " +
         "and be injected into its conversation, allowing you to redirect its work mid-run. Only works on running agents.",
-      parameters: Type.Object({
-        agent_id: Type.String({
-          description: "The agent ID to steer (must be currently running).",
-        }),
-        steering: Type.String({
-          description: "Required explicit steering text added to the child's own conversation.",
-          minLength: 1,
-          pattern: "\\S",
-        }),
-      }),
+      parameters: Type.Object(
+        {
+          agent_id: Type.String({
+            description: "The agent ID to steer (must be currently running).",
+          }),
+          steering: Type.String({
+            description: "Required explicit steering text added to the child's own conversation.",
+            minLength: 1,
+            pattern: "\\S",
+          }),
+        },
+        { additionalProperties: false },
+      ),
       execute: (
         toolCallId: string,
         params: { agent_id: string; steering: string },

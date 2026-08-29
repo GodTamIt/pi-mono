@@ -1,6 +1,6 @@
 /** Pure, width-aware rendering for the background-agent widget. */
 
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { stripTerminalSequences, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { AgentConfigLookup } from "../config/agent-types.ts";
 import { isActiveStatus, type SubagentStatus } from "../lifecycle/subagent-state.ts";
 import type { LifetimeUsage } from "../lifecycle/usage.ts";
@@ -12,6 +12,7 @@ import {
   formatTokens,
   getDisplayName,
   getPromptModeLabel,
+  sanitizeTerminalText,
   type Theme,
 } from "./display.ts";
 import { GLYPHS, SPINNER } from "./glyphs.ts";
@@ -71,7 +72,7 @@ function identity(
   theme: Theme,
   icon: string,
 ): string {
-  const name = getDisplayName(agent.type, registry);
+  const name = sanitizeTerminalText(getDisplayName(agent.type, registry));
   const mode = getPromptModeLabel(agent.type, registry);
   const status = statusPresentation(agent.status);
   const modeText = mode ? ` (${mode})` : "";
@@ -82,9 +83,9 @@ function identity(
 function activeMetadata(agent: WidgetAgent, now: number): string[] {
   const tokens = getLifetimeTotal(agent.lifetimeUsage);
   return [
-    `stack: ${agent.stack ?? "unavailable"}`,
-    `model: ${agent.model ?? "unavailable"}`,
-    `thinking: ${agent.thinking ?? "unavailable"}`,
+    `stack: ${sanitizeTerminalText(agent.stack ?? "unavailable")}`,
+    `model: ${sanitizeTerminalText(agent.model ?? "unavailable")}`,
+    `thinking: ${sanitizeTerminalText(agent.thinking ?? "unavailable")}`,
     `turn ${agent.turnCount}`,
     `max ${agent.maxTurns ?? "unlimited"}`,
     `grace ${agent.graceTurns ?? "unlimited"}`,
@@ -102,7 +103,7 @@ function packParts(parts: readonly string[], width: number): string[] {
   const rows: string[] = [];
   let row = "";
   for (const part of parts) {
-    const safePart = visibleWidth(part) <= available ? part : truncateToWidth(part, available);
+    const safePart = visibleWidth(part) <= available ? part : clipToWidth(part, available);
     const candidate = row ? `${row} · ${safePart}` : safePart;
     if (row && visibleWidth(candidate) > available) {
       rows.push(row);
@@ -117,7 +118,7 @@ function packParts(parts: readonly string[], width: number): string[] {
 
 function activeActivity(agent: WidgetAgent): string {
   if (agent.status === "queued") return "waiting for a background slot";
-  return describeActivity(agent.activeTools, agent.responseText);
+  return sanitizeTerminalText(describeActivity(agent.activeTools, agent.responseText));
 }
 
 /** Legacy single-agent formatter retained for focused consumers and tests. */
@@ -127,8 +128,11 @@ export function renderFinishedLine(
   theme: Theme,
 ): string {
   const duration = formatMs((agent.completedAt ?? Date.now()) - agent.startedAt);
-  const error = agent.status === "error" && agent.error ? ` · ${agent.error.slice(0, 60)}` : "";
-  return `${identity(agent, registry, theme, "")} · duration: ${duration} · ${agent.description}${error}`;
+  const error =
+    agent.status === "error" && agent.error
+      ? ` · ${sanitizeTerminalText(agent.error).slice(0, 60)}`
+      : "";
+  return `${identity(agent, registry, theme, "")} · duration: ${duration} · ${sanitizeTerminalText(agent.description)}${error}`;
 }
 
 /** Legacy two-line formatter; the widget itself wraps metadata semantically. */
@@ -139,7 +143,7 @@ export function renderRunningLines(
   theme: Theme,
 ): [header: string, activity: string] {
   const frame = SPINNER[spinnerFrame % SPINNER.length] ?? "";
-  const header = `${identity(agent, registry, theme, frame)} · ${activeMetadata(agent, Date.now()).join(" · ")} · ${theme.fg("muted", agent.description)}`;
+  const header = `${identity(agent, registry, theme, frame)} · ${activeMetadata(agent, Date.now()).join(" · ")} · ${theme.fg("muted", sanitizeTerminalText(agent.description))}`;
   return [header, theme.fg("dim", `${GLYPHS.subLine} activity: ${activeActivity(agent)}`)];
 }
 
@@ -163,8 +167,8 @@ function activeBlock(
   const metadata = packParts(activeMetadata(agent, now), contentWidth).map((line) =>
     theme.fg("dim", line),
   );
-  const description = truncateToWidth(`task: ${agent.description}`, contentWidth);
-  const activity = truncateToWidth(`activity: ${activeActivity(agent)}`, contentWidth);
+  const description = clipToWidth(`task: ${sanitizeTerminalText(agent.description)}`, contentWidth);
+  const activity = clipToWidth(`activity: ${activeActivity(agent)}`, contentWidth);
   return {
     status: agent.status,
     lines: [first, ...metadata, theme.fg("muted", description), theme.fg("dim", activity)],
@@ -180,10 +184,12 @@ function finishedBlock(
   const contentWidth = Math.max(1, width - 4);
   const duration = formatMs((agent.completedAt ?? Date.now()) - agent.startedAt);
   const required = `${identity(agent, registry, theme, "")} · duration: ${duration}`;
-  const detail = agent.status === "error" && agent.error ? agent.error : agent.description;
+  const detail = sanitizeTerminalText(
+    agent.status === "error" && agent.error ? agent.error : agent.description,
+  );
   return {
     status: agent.status,
-    lines: [truncateToWidth(required, contentWidth), truncateToWidth(detail, contentWidth)],
+    lines: [clipToWidth(required, contentWidth), clipToWidth(detail, contentWidth)],
   };
 }
 
@@ -213,7 +219,7 @@ function overflowLines(hidden: readonly RenderBlock[], width: number, theme: The
 function decorateBlock(block: RenderBlock, last: boolean, width: number, theme: Theme): string[] {
   return block.lines.map((line, index) => {
     const prefix = index === 0 ? (last ? "└─ " : "├─ ") : last ? "   " : "│  ";
-    return truncateToWidth(theme.fg("dim", prefix) + line, width);
+    return clipToWidth(theme.fg("dim", prefix) + line, width);
   });
 }
 
@@ -266,7 +272,7 @@ export function renderWidgetLines(params: {
   const headingIcon = activeCount ? GLYPHS.agentsActive : GLYPHS.agentsIdle;
   const headingColor = activeCount ? "accent" : "dim";
   const lines = [
-    truncateToWidth(
+    clipToWidth(
       theme.fg(headingColor, `${headingIcon} Background agents — ${headingState}`),
       width,
     ),
@@ -279,8 +285,13 @@ export function renderWidgetLines(params: {
     const overflow = overflowLines(hidden, width, theme);
     overflow.forEach((line, index) => {
       const prefix = index === 0 ? "└─ " : "   ";
-      lines.push(truncateToWidth(theme.fg("dim", prefix) + line, width));
+      lines.push(clipToWidth(theme.fg("dim", prefix) + line, width));
     });
   }
   return lines.slice(0, MAX_WIDGET_LINES);
+}
+
+function clipToWidth(text: string, width: number): string {
+  const clipped = truncateToWidth(text, width);
+  return text.includes("\u001b") ? clipped : stripTerminalSequences(clipped);
 }

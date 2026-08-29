@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Value } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
 import { AgentTool } from "../../src/tools/agent-tool.ts";
 import { createToolDeps, createToolDepsWithDisabledBuiltInAgents } from "../helpers/make-deps.ts";
@@ -44,6 +45,38 @@ describe("AgentTool", () => {
   it("includes promptSnippet", () => {
     const def = makeTool(createToolDeps()).toToolDefinition();
     expect(def.promptSnippet).toBe("Launch a specialized agent for complex, multi-step tasks.");
+  });
+
+  it("exposes only the documented snake_case invocation schema", () => {
+    const def = makeTool(createToolDeps()).toToolDefinition();
+    expect(Object.keys(def.parameters.properties).sort()).toEqual(
+      [
+        "description",
+        "grace_turns",
+        "max_turns",
+        "model",
+        "resume",
+        "run_in_background",
+        "stack",
+        "subagent_type",
+        "task",
+        "thinking",
+      ].sort(),
+    );
+    expect(def.parameters.properties.task.description).toContain(
+      "child sees none of the main conversation",
+    );
+    expect(Value.Check(def.parameters, { task: "Inspect src/runtime.ts" })).toBe(true);
+    expect(Value.Check(def.parameters, { task: "   " })).toBe(false);
+    expect(
+      Value.Check(def.parameters, {
+        task: "Inspect src/runtime.ts",
+        stack: { model: "provider/model" },
+      }),
+    ).toBe(false);
+    expect(
+      Value.Check(def.parameters, { task: "Inspect src/runtime.ts", inherit_context: true }),
+    ).toBe(false);
   });
 
   it("derives type list from registry — includes default agents in description", () => {

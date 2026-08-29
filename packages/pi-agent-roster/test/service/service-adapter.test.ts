@@ -121,6 +121,9 @@ describe("SubagentsServiceAdapter", () => {
     expect(() =>
       service.spawn({ type: "worker", task: "x", inheritContext: true } as never),
     ).toThrow(/unsupported/);
+    expect(() => service.spawn({ type: "worker", task: "x", model: "p/m" } as never)).toThrow(
+      /unsupported request field/,
+    );
     expect(manager.spawn).not.toHaveBeenCalled();
     expect(() => harness(false).service.spawn({ type: "worker", task: "x" })).toThrow(
       /No active session/,
@@ -178,5 +181,8 @@ describe("SubagentsServiceAdapter", () => {
     expect(await service.steer("child", "change direction")).toBe(true);
     expect(record.steer).toHaveBeenCalledWith("change direction");
     await expect(service.steer("child", " ")).rejects.toThrow(/steering/);
+    await expect(
+      service.resume({ id: "child", task: "new facts", model: "p/m" } as never),
+    ).rejects.toThrow(/unsupported request field/);
   });
 });

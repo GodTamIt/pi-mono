@@ -75,16 +75,29 @@ export class SubagentEventsObserver implements SubagentManagerObserver {
   private persistAndNotify(record: Subagent): void {
     this.appendEntry("subagents:record", {
       id: record.id,
+      parentSessionId: record.parentSessionId,
+      childSessionId: record.childSessionId,
+      toolCallId: record.toolCallId,
       type: record.type,
       description: record.description,
+      task: record.task,
       status: record.status,
       result: record.result,
       error: record.error,
       startedAt: record.startedAt,
       completedAt: record.completedAt,
+      isBackground: record.execution.isBackground,
+      turnCount: record.turnCount,
+      maxTurns: record.maxTurns,
+      graceTurns: record.graceTurns,
       stack: record.invocation?.stack,
       model: record.invocation?.modelName,
       thinking: record.invocation?.thinking,
+      toolUses: record.toolUses,
+      lifetimeUsage: { ...record.lifetimeUsage },
+      contextPercent: record.getContextPercent(),
+      compactionCount: record.compactionCount,
+      outputFile: record.outputFile,
     });
     this.notifications.sendCompletion(record);
   }

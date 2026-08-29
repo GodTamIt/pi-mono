@@ -45,6 +45,19 @@ describe("SubagentsService accessors", () => {
     unpublishSubagentsService();
     expect((globalThis as Record<symbol, unknown>)[SERVICE_KEY]).toBeUndefined();
   });
+
+  it("returns instance-scoped cleanup that cannot unpublish a replacement service", () => {
+    const first = { spawn: () => "first" } as unknown as SubagentsService;
+    const second = { spawn: () => "second" } as unknown as SubagentsService;
+    const disposeFirst = publishSubagentsService(first);
+    const disposeSecond = publishSubagentsService(second);
+
+    disposeFirst();
+    expect(getSubagentsService()).toBe(second);
+
+    disposeSecond();
+    expect(getSubagentsService()).toBeUndefined();
+  });
 });
 
 describe("SUBAGENT_EVENTS", () => {

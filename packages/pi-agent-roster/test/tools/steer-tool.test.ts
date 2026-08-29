@@ -1,3 +1,4 @@
+import { Value } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
 import {
   SteerTool,
@@ -43,6 +44,23 @@ describe("SteerTool", () => {
     expect(tool.toToolDefinition().promptSnippet).toBe(
       "Send a mid-run message to redirect a running background agent.",
     );
+  });
+
+  it("requires explicit non-empty steering and rejects undeclared context fields", () => {
+    const parameters = new SteerTool(makeManager(), makeEvents()).toToolDefinition().parameters;
+    expect(Object.keys(parameters.properties)).toEqual(["agent_id", "steering"]);
+    expect(parameters.properties.steering.description).toContain("child's own conversation");
+    expect(Value.Check(parameters, { agent_id: "agent-1", steering: "Check the parser" })).toBe(
+      true,
+    );
+    expect(Value.Check(parameters, { agent_id: "agent-1", steering: "  " })).toBe(false);
+    expect(
+      Value.Check(parameters, {
+        agent_id: "agent-1",
+        steering: "Check the parser",
+        inherit_context: true,
+      }),
+    ).toBe(false);
   });
 
   it("returns not-found message for unknown agent ID without claiming cleanup", async () => {

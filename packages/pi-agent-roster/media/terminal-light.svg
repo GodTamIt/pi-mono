@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="680" viewBox="0 0 1200 680" role="img" aria-labelledby="title desc">
+  <title id="title">Pi Agent Roster running parallel background agents in a light terminal</title>
+  <desc id="desc">A sanitized terminal view shows a lead profile on the balanced stack, a live subagent summary, and a responsive background-agent tree with two running agents and one queued agent.</desc>
+  <rect width="1200" height="680" fill="#eef2f6"/>
+  <rect x="34" y="28" width="1132" height="624" rx="16" fill="#fbfcfe" stroke="#c7d1df" stroke-width="2"/>
+  <path d="M50 28h1100a16 16 0 0 1 16 16v48H34V44a16 16 0 0 1 16-16Z" fill="#e9eef5"/>
+  <circle cx="66" cy="60" r="6" fill="#087e8b"/>
+  <text x="86" y="67" fill="#172033" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="700">PI / AGENT ROSTER</text>
+  <text x="1134" y="67" text-anchor="end" fill="#607086" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">92 × 30</text>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">
+    <text x="64" y="126" fill="#087e8b">$</text>
+    <text x="86" y="126" fill="#172033">pi --agent lead --stack balanced</text>
+    <text x="64" y="158" fill="#177245">✓ Primary agent set to lead.</text>
+
+    <text x="64" y="206" fill="#6d4cc4">›</text>
+    <text x="86" y="206" fill="#172033">Review the access boundary; use reviewer and tests in parallel.</text>
+
+    <text x="64" y="250" fill="#172033" font-weight="700">Subagent</text>
+    <text x="154" y="250" fill="#8090a4">·</text>
+    <text x="176" y="250" fill="#172033">Reviewer</text>
+    <text x="262" y="250" fill="#8090a4">·</text>
+    <text x="284" y="250" fill="#087e8b">running</text>
+    <text x="64" y="280" fill="#607086">Background · stack: balanced · model: provider/code-large · thinking: high · elapsed: 8.4s</text>
+
+    <text x="64" y="326" fill="#087e8b" font-weight="700">● Background agents — 2 running, 1 queued</text>
+    <text x="64" y="362" fill="#8090a4">├─</text>
+    <text x="98" y="362" fill="#087e8b">⠹</text>
+    <text x="126" y="362" fill="#172033" font-weight="700">Reviewer</text>
+    <text x="218" y="362" fill="#607086">(twin)</text>
+    <text x="286" y="362" fill="#087e8b">[Background · running]</text>
+    <text x="64" y="392" fill="#8090a4">│</text>
+    <text x="98" y="392" fill="#607086">stack: balanced · model: provider/code-large · thinking: high · turn 3</text>
+    <text x="64" y="422" fill="#8090a4">│</text>
+    <text x="98" y="422" fill="#607086">7 tool uses · 18.2k token · context: 31% · compactions: 0 · elapsed: 8.4s</text>
+    <text x="64" y="452" fill="#8090a4">│</text>
+    <text x="98" y="452" fill="#607086">task: review access boundaries and error paths</text>
+    <text x="64" y="482" fill="#8090a4">│</text>
+    <text x="98" y="482" fill="#607086">activity: reading…</text>
+
+    <text x="64" y="522" fill="#8090a4">├─</text>
+    <text x="98" y="522" fill="#087e8b">⠼</text>
+    <text x="126" y="522" fill="#172033" font-weight="700">Tests</text>
+    <text x="190" y="522" fill="#087e8b">[Background · running]</text>
+    <text x="520" y="522" fill="#607086">activity: running command…</text>
+
+    <text x="64" y="562" fill="#8090a4">└─</text>
+    <text x="98" y="562" fill="#607086">◌</text>
+    <text x="126" y="562" fill="#172033" font-weight="700">Docs</text>
+    <text x="180" y="562" fill="#9a5b00">[Background · queued]</text>
+    <text x="510" y="562" fill="#607086">activity: waiting for a background slot</text>
+
+    <text x="64" y="612" fill="#6d4cc4">❯</text>
+    <text x="88" y="612" fill="#8090a4">Ask a follow-up or keep working…</text>
+  </g>
+</svg>

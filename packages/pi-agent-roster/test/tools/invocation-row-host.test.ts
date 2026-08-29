@@ -1,5 +1,6 @@
 import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { KEYBINDINGS } from "../../../../node_modules/@earendil-works/pi-coding-agent/dist/core/keybindings.js";
 import { ToolExecutionComponent } from "../../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js";
 import { initTheme } from "../../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { AgentTool } from "../../src/tools/agent-tool.ts";
@@ -40,7 +41,136 @@ function text(component: ToolExecutionComponent, width = 120): string {
   return stripTerminalSequences(component.render(width).join("\n"));
 }
 
+function baseline(component: ToolExecutionComponent, width = 120): string {
+  return component
+    .render(width)
+    .map((line) => stripTerminalSequences(line).trimEnd())
+    .filter((line, index) => index !== 0 || line !== "")
+    .join("\n");
+}
+
+function standaloneHost(overrides: Partial<AgentDetails> = {}, output = "child output") {
+  const deps = createToolDeps();
+  deps.manager.getRecord = vi.fn().mockReturnValue(undefined);
+  const definition = new AgentTool(
+    deps.manager,
+    deps.runtime,
+    deps.settings,
+    deps.registry,
+    deps.agentDir,
+  ).toToolDefinition();
+  const host = new ToolExecutionComponent(
+    "subagent",
+    "tc-baseline",
+    { task: "Inspect the child lifecycle exactly.", subagent_type: "Architect" },
+    {},
+    definition,
+    { requestRender: vi.fn() } as never,
+    process.cwd(),
+  );
+  const resultDetails = details({ agentId: undefined, ...overrides });
+  host.updateResult({
+    content: [{ type: "text", text: output }],
+    details: resultDetails,
+    isError: resultDetails.status === "error",
+  });
+  return host;
+}
+
 describe("native subagent invocation row", () => {
+  it("pins collapsed lifecycle rows", () => {
+    const statuses: AgentDetails["status"][] = [
+      "queued",
+      "running",
+      "completed",
+      "steered",
+      "aborted",
+      "stopped",
+      "error",
+    ];
+    const rows = Object.fromEntries(
+      statuses.map((status) => [status, baseline(standaloneHost({ status }))]),
+    );
+
+    expect(rows).toMatchInlineSnapshot(`
+      {
+        "aborted": "Subagent · Architect 🧭 · aborted (max turns)
+      Background · stack: deep · model: sonnet · thinking: high · duration: 0.3s",
+        "completed": "Subagent · Architect 🧭 · completed
+      Background · stack: deep · model: sonnet · thinking: high · duration: 0.3s",
+        "error": "Subagent · Architect 🧭 · failed
+      Background · stack: deep · model: sonnet · thinking: high · duration: 0.3s",
+        "queued": "Subagent · Architect 🧭 · queued
+      Background · stack: deep · model: sonnet · thinking: high · elapsed: 0.3s",
+        "running": "Subagent · Architect 🧭 · running
+      Background · stack: deep · model: sonnet · thinking: high · elapsed: 0.3s",
+        "steered": "Subagent · Architect 🧭 · completed (turn limit)
+      Background · stack: deep · model: sonnet · thinking: high · duration: 0.3s",
+        "stopped": "Subagent · Architect 🧭 · stopped
+      Background · stack: deep · model: sonnet · thinking: high · duration: 0.3s",
+      }
+    `);
+  });
+
+  it("uses the host-owned Ctrl+O expansion state for the native detail view", () => {
+    expect(KEYBINDINGS["app.tools.expand"].defaultKeys).toBe("ctrl+o");
+    const host = standaloneHost({
+      status: "completed",
+      agentId: "agent-restored",
+      task: "Inspect the child lifecycle exactly.",
+      childSessionId: "child-restored",
+      turnCount: 7,
+      maxTurns: 20,
+      graceTurns: 2,
+      toolUses: 4,
+      tokens: "12.3k token",
+      compactions: 1,
+      output: "A compact final answer.",
+    });
+
+    const collapsed = baseline(host, 76);
+    host.setExpanded(true);
+    const expanded = baseline(host, 76);
+
+    expect({ collapsed, expanded }).toMatchInlineSnapshot(`
+      {
+        "collapsed": "Subagent · Architect 🧭 · completed
+      Background · stack: deep · model: sonnet · thinking: high · duration: 0.3s",
+        "expanded": "Subagent · Architect 🧭 · completed
+      Background · stack: deep · model: sonnet · thinking: high · duration: 0.3s
+
+      Task: Inspect the child lifecycle exactly.
+      Agent: Architect 🧭 · completed · Background · stack: deep · model: sonnet ·
+      thinking: high
+      Agent ID: agent-restored
+      Child session ID: child-restored
+      Timing: started not available · duration: 0.3s
+      Budgets: turns 7/20 · grace 2
+      Tool uses: 4
+      Tokens/context/compactions: 12.3k token · context unknown · 1 compactions
+      Activity:
+        No child activity yet.
+      Current/final output:
+        A compact final answer.
+      Read-only transcript: /subagents:sessions",
+      }
+    `);
+    expect(expanded).toContain("Budgets: turns 7/20 · grace 2");
+    expect(collapsed).not.toContain("Task:");
+  });
+
+  it("shows unlimited budgets explicitly in the expanded view", () => {
+    const host = standaloneHost({
+      status: "running",
+      turnCount: 3,
+      maxTurns: undefined,
+      graceTurns: undefined,
+    });
+    host.setExpanded(true);
+
+    expect(baseline(host, 80)).toContain("Budgets: turns 3/unlimited · grace unlimited");
+  });
+
   it("retains the renderer component and invalidates it from one child subscription", () => {
     const child = createMockSession({
       messages: [
@@ -129,11 +259,14 @@ describe("native subagent invocation row", () => {
     record.subagentSession = toSubagentSession(secondSession);
     rows.onSubagentSessionCreated(record);
     expect(secondSession.subscribe).toHaveBeenCalledOnce();
+    host.setExpanded(true);
+    expect(text(host)).not.toContain("tool · read");
     const afterReplacement = requestRender.mock.calls.length;
     child.emit({ type: "tool_execution_start", toolName: "bash", toolCallId: "old" });
     expect(requestRender).toHaveBeenCalledTimes(afterReplacement);
     replacement.emit({ type: "tool_execution_start", toolName: "bash", toolCallId: "new" });
     expect(requestRender.mock.calls.length).toBeGreaterThan(afterReplacement);
+    expect(text(host)).toContain("tool · bash");
 
     record.markCompleted("final output", Date.now());
     rows.onSubagentCompleted(record);
@@ -145,6 +278,102 @@ describe("native subagent invocation row", () => {
     rows.dispose();
     replacement.emit({ type: "tool_execution_start", toolName: "write", toolCallId: "shutdown" });
     expect(requestRender).toHaveBeenCalledTimes(afterCompletion);
+  });
+
+  it("caps retained bindings at 128 and evicts the oldest row", () => {
+    const invalidates = Array.from({ length: 129 }, () => vi.fn());
+    const rows = new InvocationRowRegistry(() => undefined);
+    for (let index = 0; index < invalidates.length; index++) {
+      const invalidate = invalidates[index];
+      if (!invalidate) throw new Error("missing invalidation fixture");
+      rows.bind(`tc-${index}`, `agent-${index}`, invalidate);
+    }
+
+    rows.onSubagentCreated(
+      createTestSubagent({ id: "agent-0", status: "queued", toolCallId: "tc-0" }),
+    );
+    rows.onSubagentCreated(
+      createTestSubagent({ id: "agent-1", status: "queued", toolCallId: "tc-1" }),
+    );
+    rows.onSubagentCreated(
+      createTestSubagent({ id: "agent-128", status: "queued", toolCallId: "tc-128" }),
+    );
+
+    expect(invalidates[0]).not.toHaveBeenCalled();
+    expect(invalidates[1]).toHaveBeenCalledOnce();
+    expect(invalidates[128]).toHaveBeenCalledOnce();
+
+    const settledRows = new InvocationRowRegistry(() => undefined);
+    for (let index = 0; index < 129; index++) {
+      const record = createTestSubagent({
+        id: `settled-${index}`,
+        status: "queued",
+        toolCallId: `settled-tc-${index}`,
+        description: `task ${index}`,
+      });
+      settledRows.bind(`settled-tc-${index}`, record.id, vi.fn());
+      settledRows.onSubagentCreated(record);
+      record.markCompleted(`result ${index}`);
+      settledRows.onSubagentCompleted(record);
+    }
+    expect(settledRows.getActivity("settled-tc-0", "settled-0")).toEqual([]);
+    expect(settledRows.getActivity("settled-tc-1", "settled-1")).toEqual([
+      "queued · task 1",
+      "completed",
+    ]);
+  });
+
+  it("retains only the latest 40 child-activity rows", () => {
+    const child = createMockSession();
+    const session = createSubagentSessionStub(child, "/tmp/child.jsonl", "child-activity");
+    const record = createTestSubagent({ status: "running", toolCallId: "tc-activity" });
+    record.subagentSession = toSubagentSession(session);
+    const rows = new InvocationRowRegistry((id) => (id === record.id ? record : undefined));
+    rows.bind("tc-activity", record.id, vi.fn());
+
+    for (let index = 0; index < 45; index++) {
+      child.emit({
+        type: "tool_execution_start",
+        toolName: `tool-${index}`,
+        toolCallId: `child-tool-${index}`,
+      });
+    }
+
+    const activity = rows.getActivity("tc-activity", record.id);
+    expect(activity).toHaveLength(40);
+    expect(activity[0]).toBe("tool · tool-5");
+    expect(activity.at(-1)).toBe("tool · tool-44");
+  });
+
+  it("limits expanded output to 50 visual rows", () => {
+    const output = Array.from({ length: 55 }, (_, index) => `output-${index + 1}`).join("\n");
+    const host = standaloneHost({ status: "completed" }, output);
+    host.setExpanded(true);
+    const expanded = baseline(host);
+    const outputRows = expanded.split("\n").filter((line) => /^output-\d+$/.test(line.trim()));
+
+    expect(outputRows).toHaveLength(50);
+    expect(outputRows[0]?.trim()).toBe("output-1");
+    expect(outputRows.at(-1)?.trim()).toBe("output-50");
+    expect(expanded).toContain("… output truncated to 50 lines");
+    expect(expanded).not.toContain("output-51");
+  });
+
+  it("sanitizes terminal controls and wraps Unicode expanded output to the host width", () => {
+    const host = standaloneHost(
+      { status: "completed" },
+      `\x1b[31mred\x1b[0m\bX\r\n${"界🚀".repeat(20)}\t`,
+    );
+    host.setExpanded(true);
+    const lines = host.render(24);
+    const expanded = baseline(host, 24);
+
+    expect(lines.every((line) => visibleWidth(line) <= 24)).toBe(true);
+    expect(expanded).toContain("redX");
+    expect(expanded).not.toContain("\b");
+    expect(expanded).not.toContain("\r");
+    expect(expanded).not.toContain("\t");
+    expect(expanded).not.toContain("\u001b");
   });
 
   it("releases a foreground row subscription when its final result settles", () => {

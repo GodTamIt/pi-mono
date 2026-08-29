@@ -181,13 +181,75 @@ describe("TranscriptOverlay", () => {
     },
   );
 
-  it("renders monochrome chrome without introducing ANSI sequences", () => {
+  it("pins compact monochrome chrome", () => {
     const output = makeOverlay({
+      tui: mockTui(12, 40),
       source: fakeSource({ getMessages: () => [] }),
     })
-      .render(60)
+      .render(40)
       .join("\n");
+
+    expect(output).toMatchInlineSnapshot(`
+      "╭──────────────────────────────────────╮
+      │ Agent · running                      │
+      │ ID child-1 · live session            │
+      │ Unicode task 設計 🚀                 │
+      │ ──────────────────────────────────── │
+      │                                      │
+      │                                      │
+      │                                      │
+      │ ──────────────────────────────────── │
+      │ 0 lines · 100%                       │
+      │ ↑↓/jk scroll · q close               │
+      ╰──────────────────────────────────────╯"
+    `);
     expect(output).not.toContain("\u001b");
+  });
+
+  it("bounds chrome at the minimum render width and keeps a three-row viewport", () => {
+    const overlay = makeOverlay({
+      tui: mockTui(8, 6),
+      source: fakeSource({ getMessages: () => [] }),
+    });
+
+    expect(overlay.render(5)).toEqual([]);
+    const lines = overlay.render(6);
+    expect(lines.every((line) => visibleWidth(line) <= 6)).toBe(true);
+    expect(lines.every((line) => !line.includes("\u001b"))).toBe(true);
+    expect(lines.length).toBeLessThanOrEqual(13);
+    const dividers = lines
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => line.startsWith("│ ") && line.includes("──"));
+    expect(dividers).toHaveLength(2);
+    const [beforeViewport, afterViewport] = dividers;
+    if (!beforeViewport || !afterViewport) throw new Error("viewport dividers missing");
+    expect(afterViewport.index - beforeViewport.index - 1).toBe(3);
+  });
+
+  it("caps a long narrow header instead of allowing it to consume the viewport", () => {
+    const overlay = new TranscriptOverlay({
+      tui: mockTui(10, 24),
+      theme: ansiTheme(),
+      source: fakeSource({ getMessages: () => [] }),
+      session: {
+        key: "live:long",
+        id: "child-with-a-very-long-id",
+        name: "Long-running architecture specialist",
+        description: "界🚀".repeat(100),
+        status: "running",
+        duration: "2.0s",
+        toolUses: 1,
+        sourceLabel: "live session",
+      },
+      done: vi.fn(),
+      cwd: "/test/cwd",
+      markdownTheme: getMarkdownTheme(),
+    });
+
+    const lines = overlay.render(24);
+    expect(lines).toHaveLength(13);
+    expect(lines.every((line) => visibleWidth(line) <= 24)).toBe(true);
+    expect(lines.join("\n")).toContain("…");
   });
 
   it("refreshes its content when the source changes", () => {

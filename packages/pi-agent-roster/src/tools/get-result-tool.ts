@@ -83,23 +83,26 @@ export class GetResultTool {
       promptSnippet: "Check status and retrieve results from a background agent.",
       description:
         "Check status and retrieve results from a background agent. Use the agent ID returned by Agent with run_in_background.",
-      parameters: Type.Object({
-        agent_id: Type.String({
-          description: "The agent ID to check.",
-        }),
-        wait: Type.Optional(
-          Type.Boolean({
-            description:
-              "If true, wait for the agent to complete before returning. Default: false.",
+      parameters: Type.Object(
+        {
+          agent_id: Type.String({
+            description: "The agent ID to check.",
           }),
-        ),
-        verbose: Type.Optional(
-          Type.Boolean({
-            description:
-              "If true, include the agent's full conversation (messages + tool calls). Default: false.",
-          }),
-        ),
-      }),
+          wait: Type.Optional(
+            Type.Boolean({
+              description:
+                "If true, wait for the agent to complete before returning. Default: false.",
+            }),
+          ),
+          verbose: Type.Optional(
+            Type.Boolean({
+              description:
+                "If true, include the agent's full conversation (messages + tool calls). Default: false.",
+            }),
+          ),
+        },
+        { additionalProperties: false },
+      ),
       execute: (
         toolCallId: string,
         params: { agent_id: string; wait?: boolean | undefined; verbose?: boolean | undefined },

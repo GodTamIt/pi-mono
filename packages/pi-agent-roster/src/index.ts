@@ -38,7 +38,7 @@ import { SubagentEventsObserver } from "./observation/subagent-events-observer.t
 import { PRIMARY_AGENT_FLAG, PRIMARY_STACK_FLAG, PrimaryController } from "./primary/controller.ts";
 import { ROSTER_NAME_FLAG, ROSTER_NOOP_TOOL, ROSTER_STATUS_COMMAND } from "./public.ts";
 import { createSubagentRuntime } from "./runtime.ts";
-import { publishSubagentsService, unpublishSubagentsService } from "./service/service.ts";
+import { publishSubagentsService } from "./service/service.ts";
 import { SubagentsServiceAdapter } from "./service/service-adapter.ts";
 import { detectEnv } from "./session/env.ts";
 import { createExcludedPackagesStorage } from "./session/package-exclusions.ts";
@@ -204,7 +204,7 @@ export default function (pi: ExtensionAPI) {
     authorizeTarget: (type) => primary.authorizeTarget(type),
     notify: (message) => primary.notify(message),
   });
-  publishSubagentsService(service);
+  const unpublishService = publishSubagentsService(service);
 
   let widget: AgentWidget | undefined;
   const lifecycle = new SessionLifecycleHandler(
@@ -215,7 +215,7 @@ export default function (pi: ExtensionAPI) {
       invocationRows.dispose();
       widget?.dispose();
     },
-    unpublishSubagentsService,
+    unpublishService,
   );
 
   pi.on("session_start", async (event, ctx) => {
@@ -336,9 +336,12 @@ function registerRosterBaseline(pi: ExtensionAPI): void {
     name: ROSTER_NOOP_TOOL,
     label: "Roster No-op",
     description: "Confirm that the agent roster tool runtime is available without changing state",
-    parameters: Type.Object({
-      note: Type.Optional(Type.String({ description: "Optional note returned unchanged" })),
-    }),
+    parameters: Type.Object(
+      {
+        note: Type.Optional(Type.String({ description: "Optional note returned unchanged" })),
+      },
+      { additionalProperties: false },
+    ),
     async execute(_toolCallId, params) {
       return {
         content: [{ type: "text", text: params.note ?? "pi-agent-roster is ready" }],

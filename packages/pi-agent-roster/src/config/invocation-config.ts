@@ -21,7 +21,10 @@ export function resolveAgentInvocationConfig(
   graceTurns?: number | undefined;
   runInBackground: boolean;
 } {
-  const stack = typeof params.stack === "string" ? params.stack.trim() : undefined;
+  if (params.stack !== undefined && typeof params.stack !== "string") {
+    throw new TypeError("stack must be a string");
+  }
+  const stack = params.stack?.trim();
   return {
     modelInput: params.model ?? agentConfig?.model,
     modelFromParams: params.model != null,

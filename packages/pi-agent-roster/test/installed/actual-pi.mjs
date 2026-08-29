@@ -1,5 +1,6 @@
 import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join, sep } from "node:path";
+import { createJiti } from "jiti";
 import {
   createAgentSession,
   createEventBus,
@@ -15,17 +16,40 @@ import {
   fauxToolCall,
 } from "@earendil-works/pi-ai";
 
-const [agentDir, workDir, childWorkDir, parentSessionDir] = process.argv.slice(2);
-if (!agentDir || !workDir || !childWorkDir || !parentSessionDir) {
+const [agentDir, workDir, childWorkDir, parentSessionDir, installedPackage] = process.argv.slice(2);
+if (!agentDir || !workDir || !childWorkDir || !parentSessionDir || !installedPackage) {
   throw new Error(
-    "usage: actual-pi.mjs <agent-dir> <work-dir> <child-work-dir> <parent-session-dir>",
+    "usage: actual-pi.mjs <agent-dir> <work-dir> <child-work-dir> <parent-session-dir> <installed-package>",
   );
 }
 process.chdir(workDir);
 
+const jiti = createJiti(import.meta.url, { moduleCache: false });
+const { AgentTypeRegistry } = await jiti.import(
+  join(installedPackage, "src", "config", "agent-types.ts"),
+);
+const { discoverCustomAgents } = await jiti.import(
+  join(installedPackage, "src", "config", "custom-agents.ts"),
+);
+const discovery = discoverCustomAgents(workDir);
+const registry = new AgentTypeRegistry(() => discovery.agents);
+const snapshot = registry.snapshot();
+if (
+  registry.resolveAgentConfig("actual-pi").source !== "project" ||
+  !registry.resolveAgentConfig("actual-pi").systemPrompt.includes("PROJECT_AGENT_PROMPT_594a") ||
+  !snapshot.all.includes("actual-pi") ||
+  !snapshot.all.includes("layered") ||
+  !snapshot.primary.includes("primary-only") ||
+  snapshot.subagent.includes("primary-only") ||
+  !snapshot.subagent.includes("global-worker")
+) {
+  throw new Error(`Installed layered agent classification failed: ${JSON.stringify(snapshot)}`);
+}
+
 const sentinels = {
   prompt: "PARENT_SYSTEM_d82f18",
   message: "PARENT_MESSAGE_13ea62",
+  backgroundMessage: "PARENT_BACKGROUND_MESSAGE_a8e093",
   thinking: "PARENT_THINKING_62cd41",
   summary: "PARENT_SUMMARY_55af09",
   event: "PARENT_EVENT_713ceb",
@@ -33,6 +57,7 @@ const sentinels = {
 };
 const tasks = {
   tool: "TOOL_TASK_59fd read marker.txt and report it",
+  backgroundTool: "TOOL_BACKGROUND_TASK_a930 read marker.txt and report it",
   foreground: "SERVICE_FOREGROUND_TASK_a921 report foreground",
   background: "SERVICE_BACKGROUND_TASK_4d81 wait for steering",
   queued: "SERVICE_QUEUED_TASK_f388 report queued",
@@ -80,9 +105,26 @@ function responseFor(context) {
   requests.push(snapshot);
   const text = contextText(context);
 
-  if (text.includes(sentinels.message)) {
+  for (const invocation of [
+    {
+      sentinel: sentinels.backgroundMessage,
+      task: tasks.backgroundTool,
+      background: true,
+      toolCallId: "parent-background-tool-call",
+    },
+    {
+      sentinel: sentinels.message,
+      task: tasks.tool,
+      background: false,
+      toolCallId: "parent-tool-call",
+    },
+  ]) {
+    if (!text.includes(invocation.sentinel)) continue;
     const hasToolResult = context.messages.some(
-      (message) => message.role === "toolResult" && message.toolName === "subagent",
+      (message) =>
+        message.role === "toolResult" &&
+        message.toolName === "subagent" &&
+        message.toolCallId === invocation.toolCallId,
     );
     if (!hasToolResult) {
       return fauxAssistantMessage(
@@ -91,21 +133,23 @@ function responseFor(context) {
           fauxToolCall(
             "subagent",
             {
-              task: tasks.tool,
+              task: invocation.task,
               subagent_type: "actual-pi",
-              run_in_background: false,
+              run_in_background: invocation.background,
             },
-            { id: "parent-tool-call" },
+            { id: invocation.toolCallId },
           ),
         ],
         { stopReason: "toolUse" },
       );
     }
-    return fauxAssistantMessage("parent received child result");
+    return fauxAssistantMessage(
+      invocation.background ? "parent launched background child" : "parent received child result",
+    );
   }
 
   if (text.includes(tasks.resume)) return fauxAssistantMessage("resumed from child history only");
-  if (text.includes(tasks.tool)) {
+  if (text.includes(tasks.tool) || text.includes(tasks.backgroundTool)) {
     if (!text.includes(workspaceMarker)) {
       return fauxAssistantMessage(
         fauxToolCall("read", { path: "marker.txt" }, { id: "child-read" }),
@@ -134,6 +178,7 @@ const faux = fauxProvider({
   provider: "roster-faux",
   models: [
     { id: "roster-faux-model", name: "Roster Faux", contextWindow: 32_000, maxTokens: 2_000 },
+    { id: "roster-faux-deep", name: "Roster Faux Deep", contextWindow: 32_000, maxTokens: 2_000 },
   ],
   tokensPerSecond: 200,
   tokenSize: { min: 8, max: 8 },
@@ -259,6 +304,19 @@ try {
     "Foreground tool did not use the child workspace",
   );
 
+  await session.prompt(`${sentinels.backgroundMessage}: launch the background child now`);
+  const backgroundToolRecord = await waitFor(
+    () =>
+      service
+        .listAgents()
+        .find((record) => record.task === tasks.backgroundTool && record.status === "completed"),
+    "background tool child",
+  );
+  assert(
+    backgroundToolRecord.result.includes(workspaceMarker),
+    "Background tool did not use the child workspace",
+  );
+
   const nativeNow = Date.now;
   Date.now = () => nativeNow() + 61_000;
   try {
@@ -279,14 +337,21 @@ try {
     type: "actual-pi",
     task: tasks.foreground,
     description: "service foreground",
+    stack: "deep",
     foreground: true,
   });
   await waitFor(() => service.inspect(foregroundId)?.status === "completed", "service foreground");
+  assert(
+    service.inspect(foregroundId)?.stack === "deep" &&
+      service.inspect(foregroundId)?.model === "roster-faux/roster-faux-deep",
+    "Foreground service run lost its explicit deep stack/model",
+  );
 
   const backgroundId = service.spawn({
     type: "actual-pi",
     task: tasks.background,
     description: "service background",
+    stack: "fast",
   });
   await backgroundObserved;
   const queuedId = service.spawn({
@@ -306,6 +371,11 @@ try {
     "Background child did not complete",
   );
   assert(
+    service.inspect(backgroundId)?.stack === "fast" &&
+      service.inspect(backgroundId)?.model === "roster-faux/roster-faux-model",
+    "Background service run lost its explicit fast stack/model",
+  );
+  assert(
     service.inspect(queuedId)?.status === "completed",
     "Queued child was not admitted after the slot settled",
   );
@@ -317,10 +387,80 @@ try {
   );
 
   const records = service.listAgents();
+  const internalManager = service.manager;
+  assert(internalManager?.getRecord, "Installed service did not retain its Pi record manager");
   const transcripts = records.map((record) => {
     assert(record.transcriptPath, `Missing transcript for ${record.id}`);
-    return { record, jsonl: readFileSync(record.transcriptPath, "utf8") };
+    const jsonl = readFileSync(record.transcriptPath, "utf8");
+    const header = JSON.parse(jsonl.split("\n").find(Boolean));
+    const internalRecord = internalManager.getRecord(record.id);
+    const sessionId = internalRecord?.childSessionId;
+    assert(sessionId, `Internal record omitted child session identity for ${record.id}`);
+    assert(header.id === sessionId, `JSONL and record session identities differ for ${record.id}`);
+    assert(
+      lifecycle.some(
+        (entry) =>
+          entry.channel === "subagents:child:session-created" && entry.data.sessionId === sessionId,
+      ),
+      `Session registry entry omitted canonical identity ${sessionId}`,
+    );
+    return { record, internalRecord, sessionId, jsonl };
   });
+
+  const { InvocationRowComponent } = await jiti.import(
+    join(installedPackage, "src", "tools", "invocation-row.ts"),
+  );
+  const identitySample = transcripts.find(({ record }) => record.id === foregroundId);
+  assert(identitySample, "Missing foreground identity sample");
+  const plainTheme = { fg: (_style, text) => text, bold: (text) => text };
+  const rowDetails = {
+    displayName: "actual-pi",
+    description: identitySample.record.description,
+    task: identitySample.record.task,
+    subagentType: "actual-pi",
+    isBackground: false,
+    stack: identitySample.record.stack,
+    modelName: identitySample.record.model,
+    thinking: identitySample.record.thinking,
+    maxTurns: undefined,
+    graceTurns: undefined,
+    toolUses: identitySample.record.toolUses,
+    tokens: "",
+    durationMs: 1,
+    status: identitySample.record.status,
+    agentId: identitySample.record.id,
+    childSessionId: identitySample.sessionId,
+  };
+  const row = new InvocationRowComponent(
+    "installed-headless-row",
+    rowDetails,
+    identitySample.record.result ?? "",
+    plainTheme,
+    undefined,
+    (id) => (id === identitySample.record.id ? identitySample.internalRecord : undefined),
+  );
+  row.update(rowDetails, identitySample.record.result ?? "", true, plainTheme);
+  const expandedRow = row.render(160).join("\n");
+  assert(
+    expandedRow.includes(`Child session ID: ${identitySample.sessionId}`),
+    "Expanded invocation row lost the canonical child session ID",
+  );
+  assert(
+    expandedRow.includes("Task: SERVICE_FOREGROUND_TASK_a921"),
+    "Expanded invocation row omitted task semantics",
+  );
+  assert(
+    expandedRow.includes("Agent: actual-pi") &&
+      expandedRow.includes("Foreground") &&
+      expandedRow.includes("stack: deep") &&
+      expandedRow.includes("model: roster-faux/roster-faux-deep") &&
+      expandedRow.includes("thinking: —"),
+    `Expanded invocation row omitted invocation semantics: ${expandedRow}`,
+  );
+  assert(
+    expandedRow.includes("Read-only transcript: /subagents:sessions"),
+    "Expanded invocation row omitted transcript ownership hint",
+  );
   const workspacePrepares = workspaceCalls.filter((call) => "agentId" in call);
   const workspaceDisposals = workspaceCalls.filter((call) => "disposed" in call);
   const resumeCount = 2;
@@ -444,9 +584,21 @@ try {
     ),
     "Recursive managed tools were active in a child session",
   );
+  const childHookEntries = observedSessions.filter(
+    (entry) => entry.type === "before" && entry.cwd.startsWith(childWorkspacePrefix),
+  );
+  assert(
+    childHookEntries.length >= records.length,
+    "Child before_agent_start hooks were not observable",
+  );
+  assertNoParentSentinels(childHookEntries, "child extension hook callback");
+  assert(
+    childStarts.every((entry) => entry.prompt.includes("PROJECT_AGENT_PROMPT_594a")),
+    "Child session hook did not observe the project-layer prompt override",
+  );
 
   console.log(
-    "Actual Pi lifecycle, isolation, queue, workspace, steering, resume, persistence, and shutdown checks passed.",
+    "Actual Pi layering, classifications, lifecycle, isolation, stacks, invocation-row, identity, steering, resume, persistence, and shutdown checks passed.",
   );
 } finally {
   session.dispose();

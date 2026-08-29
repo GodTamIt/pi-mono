@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="780" viewBox="0 0 520 780" role="img" aria-labelledby="title desc">
+  <title id="title">Pi Agent Roster in a narrow dark terminal</title>
+  <desc id="desc">A sanitized narrow terminal demonstrates deliberate wrapping for agent stack, model, activity, task, and queue details without clipping.</desc>
+  <rect width="520" height="780" fill="#0b1020"/>
+  <rect x="20" y="18" width="480" height="744" rx="14" fill="#101827" stroke="#334155" stroke-width="2"/>
+  <path d="M34 18h452a14 14 0 0 1 14 14v46H20V32a14 14 0 0 1 14-14Z" fill="#182235"/>
+  <circle cx="46" cy="48" r="5" fill="#67e8f9"/>
+  <text x="64" y="54" fill="#e7ecf3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" font-weight="700">PI / AGENT ROSTER</text>
+  <text x="474" y="54" text-anchor="end" fill="#9aa8b8" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">46 × 34</text>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">
+    <text x="42" y="106" fill="#67e8f9">$</text>
+    <text x="62" y="106" fill="#e7ecf3">pi --agent lead --stack balanced</text>
+    <text x="42" y="136" fill="#7ee787">✓ Primary agent set to lead.</text>
+
+    <text x="42" y="182" fill="#c4b5fd">›</text>
+    <text x="62" y="182" fill="#e7ecf3">Review access boundaries with a</text>
+    <text x="62" y="208" fill="#e7ecf3">background reviewer.</text>
+
+    <text x="42" y="254" fill="#e7ecf3" font-weight="700">Subagent · Reviewer ·</text>
+    <text x="252" y="254" fill="#67e8f9">running</text>
+    <text x="42" y="282" fill="#9aa8b8">Background · stack: balanced</text>
+    <text x="42" y="308" fill="#9aa8b8">model: provider/code-large</text>
+    <text x="42" y="334" fill="#9aa8b8">thinking: high · elapsed: 8.4s</text>
+
+    <text x="42" y="384" fill="#67e8f9" font-weight="700">● Background agents — 1 running</text>
+    <text x="42" y="420" fill="#718096">└─</text>
+    <text x="74" y="420" fill="#67e8f9">⠹</text>
+    <text x="100" y="420" fill="#e7ecf3" font-weight="700">Reviewer</text>
+    <text x="42" y="450" fill="#9aa8b8">   [Background · running]</text>
+    <text x="42" y="484" fill="#9aa8b8">   stack: balanced</text>
+    <text x="42" y="510" fill="#9aa8b8">   model: provider/code-large</text>
+    <text x="42" y="536" fill="#9aa8b8">   thinking: high · turn 3</text>
+    <text x="42" y="570" fill="#9aa8b8">   7 tool uses · 18.2k token</text>
+    <text x="42" y="596" fill="#9aa8b8">   context: 31% · compactions: 0</text>
+    <text x="42" y="630" fill="#9aa8b8">   task: review access boundaries</text>
+    <text x="42" y="656" fill="#9aa8b8">   and error paths</text>
+    <text x="42" y="690" fill="#9aa8b8">   activity: reading…</text>
+
+    <text x="42" y="732" fill="#c4b5fd">❯</text>
+    <text x="64" y="732" fill="#718096">Keep working…</text>
+  </g>
+</svg>

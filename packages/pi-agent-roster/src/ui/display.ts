@@ -5,6 +5,7 @@
  * Consumed by the widget, the menu, tool modules, and the notification renderer.
  */
 
+import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import type { AgentConfigLookup } from "../config/agent-types.ts";
 import type { AgentInvocation, SubagentType, ThinkingLevel } from "../types.ts";
 import { GLYPHS } from "./glyphs.ts";
@@ -15,6 +16,18 @@ export type Theme = {
   fg(color: string, text: string): string;
   bold(text: string): string;
 };
+
+/** Remove terminal controls from untrusted text before adding theme sequences. */
+export function sanitizeTerminalText(text: string, preserveNewlines = false): string {
+  return [...stripTerminalSequences(text)]
+    .map((character) => {
+      const code = character.charCodeAt(0);
+      if (character === "\n") return preserveNewlines ? character : " ";
+      if (character === "\t") return " ";
+      return code >= 32 && code !== 127 && (code < 128 || code > 159) ? character : "";
+    })
+    .join("");
+}
 
 /** Metadata attached to Agent tool results for custom rendering. */
 export interface AgentDetails {
@@ -190,7 +203,7 @@ function truncateLine(text: string, len = 60): string {
       .find((l) => l.trim())
       ?.trim() ?? "";
   if (line.length <= len) return line;
-  return line.slice(0, len) + "…";
+  return `${line.slice(0, len)}…`;
 }
 
 /** Build a human-readable activity string from currently-running tools or response text. */
@@ -213,7 +226,7 @@ export function describeActivity(
         parts.push(action);
       }
     }
-    return parts.join(", ") + "…";
+    return `${parts.join(", ")}…`;
   }
 
   // No tools active — show truncated response text if available

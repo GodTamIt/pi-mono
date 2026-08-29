@@ -11,6 +11,7 @@ import {
   type Component,
   type MarkdownTheme,
   matchesKey,
+  stripTerminalSequences,
   type TUI,
   truncateToWidth,
   visibleWidth,
@@ -26,6 +27,7 @@ import {
   type NavigationIdentity,
   type TranscriptSource,
 } from "./session-navigation.ts";
+import { sanitizeTerminalText } from "./display.ts";
 import { TranscriptContent } from "./transcript-content.ts";
 
 const MIN_VIEWPORT = 3;
@@ -192,7 +194,7 @@ export class TranscriptOverlay implements Component {
     const finalFooter = this.footer(innerWidth, totalLines, visibleStart);
 
     const row = (content: string): string => {
-      const clipped = truncateToWidth(content, innerWidth);
+      const clipped = clipToWidth(content, innerWidth);
       const padding = " ".repeat(Math.max(0, innerWidth - visibleWidth(clipped)));
       return `${this.theme.fg("border", "│")} ${clipped}${padding} ${this.theme.fg("border", "│")}`;
     };
@@ -227,13 +229,23 @@ export class TranscriptOverlay implements Component {
   }
 
   private header(width: number): string[] {
-    const title =
-      `${this.session.name} · ${this.session.status} · ` +
-      `ID ${this.session.id} · ${this.session.sourceLabel}`;
-    const lines = wrapTextWithAnsi(this.theme.bold(title), Math.max(1, width));
-    if (this.session.description) {
+    const available = Math.max(1, width);
+    const identity = `${sanitizeTerminalText(this.session.name)} · ${this.session.status}`;
+    const metadata = `ID ${sanitizeTerminalText(this.session.id)} · ${sanitizeTerminalText(this.session.sourceLabel)}`;
+    const lines =
+      available >= 20 && available < 60
+        ? [
+            ...boundedWrap(this.theme.bold(identity), available, 1),
+            ...boundedWrap(this.theme.fg("dim", metadata), available, 1),
+          ]
+        : boundedWrap(this.theme.bold(`${identity} · ${metadata}`), available, 2);
+    if (this.session.description && available >= 20) {
       lines.push(
-        ...wrapTextWithAnsi(this.theme.fg("dim", this.session.description), Math.max(1, width)),
+        ...boundedWrap(
+          this.theme.fg("dim", sanitizeTerminalText(this.session.description)),
+          available,
+          2,
+        ),
       );
     }
     return lines;
@@ -271,4 +283,17 @@ export class TranscriptOverlay implements Component {
     const chromeLines = 4 + headerLines + footerLines;
     return Math.max(MIN_VIEWPORT, maxRows - chromeLines);
   }
+}
+
+function boundedWrap(text: string, width: number, maxLines: number): string[] {
+  const lines = wrapTextWithAnsi(text, width);
+  if (lines.length <= maxLines) return lines;
+  const visible = lines.slice(0, maxLines);
+  visible[maxLines - 1] = clipToWidth(`${visible[maxLines - 1] ?? ""}…`, width, "…");
+  return visible;
+}
+
+function clipToWidth(text: string, width: number, ellipsis?: string): string {
+  const clipped = truncateToWidth(text, width, ellipsis);
+  return text.includes("\u001b") ? clipped : stripTerminalSequences(clipped);
 }

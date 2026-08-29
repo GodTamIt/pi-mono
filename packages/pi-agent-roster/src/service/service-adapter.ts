@@ -2,7 +2,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import type { AgentTypeRegistry } from "../config/agent-types.ts";
 import type { ChildRuntimeBaseline } from "../lifecycle/child-runtime-baseline.ts";
 import type { WorkspaceProvider } from "../lifecycle/workspace.ts";
-import { AgentStackOverrides } from "../stacks/stack-resolver.ts";
+import type { AgentStackOverrides } from "../stacks/stack-resolver.ts";
 import type { AgentInvocation, SessionContext, Subagent } from "../types.ts";
 import {
   type ModelInfo,
@@ -55,7 +55,16 @@ export class SubagentsServiceAdapter implements SubagentsService {
   ) {}
 
   spawn(request: SpawnRequest): string {
-    rejectInheritedContext(request);
+    assertRequestShape(request, [
+      "type",
+      "task",
+      "description",
+      "stack",
+      "maxTurns",
+      "graceTurns",
+      "foreground",
+      "bypassQueue",
+    ]);
     if (!this.runtime.currentCtx) throw new Error("No active session — cannot spawn a child.");
     const type = requireText(request.type, "type");
     const task = requireText(request.task, "task");
@@ -107,7 +116,7 @@ export class SubagentsServiceAdapter implements SubagentsService {
   }
 
   async resume(request: ResumeRequest): Promise<SubagentRecord | undefined> {
-    rejectInheritedContext(request);
+    assertRequestShape(request, ["id", "task", "stack", "maxTurns", "graceTurns", "signal"]);
     const id = requireText(request.id, "id");
     const task = requireText(request.task, "task");
     const stack = optionalText(request.stack, "stack");
@@ -236,13 +245,18 @@ function optionalText(value: unknown, name: string): string | undefined {
   return requireText(value, name);
 }
 
-function rejectInheritedContext(request: object): void {
+function assertRequestShape(request: unknown, allowed: readonly string[]): void {
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    throw new Error("request must be an object");
+  }
   const raw = request as Record<string, unknown>;
   if (Object.hasOwn(raw, "inheritContext") || Object.hasOwn(raw, "inherit_context")) {
     throw new Error(
       "inheritContext is unsupported. Children receive no parent conversation; include all required context in task.",
     );
   }
+  const unexpected = Object.keys(raw).find((key) => !allowed.includes(key));
+  if (unexpected) throw new Error(`unsupported request field ${JSON.stringify(unexpected)}`);
 }
 
 function validateBudget(value: unknown, name: string, minimum: number, maximum: number): void {

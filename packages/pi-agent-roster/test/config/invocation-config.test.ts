@@ -69,4 +69,12 @@ describe("resolveAgentInvocationConfig", () => {
     expect(resolved.runInBackground).toBe(false);
     expect(resolved).not.toHaveProperty("stack");
   });
+
+  it("rejects a non-string stack instead of silently dropping it", () => {
+    expect(() =>
+      resolveAgentInvocationConfig(undefined, {
+        stack: { model: "provider/model" },
+      } as never),
+    ).toThrow("stack must be a string");
+  });
 });

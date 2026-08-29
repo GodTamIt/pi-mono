@@ -1,9 +1,9 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
-import { stripTerminalSequences, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { SubagentManagerObserver } from "../lifecycle/subagent-manager.ts";
 import type { CompactionInfo, SessionMessage, Subagent } from "../types.ts";
-import { type AgentDetails, formatMs, type Theme } from "../ui/display.ts";
+import { sanitizeTerminalText, type AgentDetails, formatMs, type Theme } from "../ui/display.ts";
 import { formatLifetimeTokens } from "./helpers.ts";
 
 const MAX_BINDINGS = 128;
@@ -174,12 +174,13 @@ export class InvocationRowRegistry implements SubagentManagerObserver {
   private rebuild(binding: Binding, record: Subagent): void {
     const rebuilt: string[] = [];
     for (const message of record.agentMessages) appendMessageActivity(rebuilt, message);
-    binding.activity = rebuilt.slice(-MAX_ACTIVITY);
+    binding.activity = rebuilt.slice(-MAX_ACTIVITY).map((item) => sanitizeTerminalText(item));
   }
 
   private push(binding: Binding, item: string): void {
-    if (binding.activity.at(-1) === item) return;
-    binding.activity.push(item);
+    const safeItem = sanitizeTerminalText(item);
+    if (binding.activity.at(-1) === safeItem) return;
+    binding.activity.push(safeItem);
     if (binding.activity.length > MAX_ACTIVITY) binding.activity.shift();
   }
 
@@ -261,15 +262,15 @@ export function renderInvocationRow(
 
 function collapsedLines(details: AgentDetails, theme: Theme): string[] {
   const status = statusText(details.status);
-  const first = ["Subagent", details.displayName, status]
+  const first = ["Subagent", sanitizeTerminalText(details.displayName), status]
     .map((part, index) => (index === 0 ? theme.fg("toolTitle", theme.bold(part)) : part))
     .join(theme.fg("dim", " · "));
   const timing = `${isActive(details.status) ? "elapsed" : "duration"}: ${formatMs(details.durationMs)}`;
   const metadata = [
     details.isBackground ? "Background" : "Foreground",
-    `stack: ${details.stack ?? "—"}`,
-    `model: ${details.modelName ?? "—"}`,
-    `thinking: ${details.thinking ?? "—"}`,
+    `stack: ${sanitizeTerminalText(details.stack ?? "—")}`,
+    `model: ${sanitizeTerminalText(details.modelName ?? "—")}`,
+    `thinking: ${sanitizeTerminalText(details.thinking ?? "—")}`,
     timing,
   ].join(" · ");
   return [first, theme.fg("dim", metadata)];
@@ -285,10 +286,10 @@ function expandedLines(
 ): string[] {
   const lines = [
     "",
-    `Task: ${details.task ?? record?.task ?? details.description}`,
-    `Agent: ${details.displayName} · ${statusText(details.status)} · ${details.isBackground ? "Background" : "Foreground"} · stack: ${details.stack ?? "—"} · model: ${details.modelName ?? "—"} · thinking: ${details.thinking ?? "—"}`,
-    `Agent ID: ${details.agentId ?? "unknown"}`,
-    `Child session ID: ${record?.childSessionId ?? details.childSessionId ?? "not available"}`,
+    `Task: ${sanitizeTerminalText(details.task ?? record?.task ?? details.description)}`,
+    `Agent: ${sanitizeTerminalText(details.displayName)} · ${statusText(details.status)} · ${details.isBackground ? "Background" : "Foreground"} · stack: ${sanitizeTerminalText(details.stack ?? "—")} · model: ${sanitizeTerminalText(details.modelName ?? "—")} · thinking: ${sanitizeTerminalText(details.thinking ?? "—")}`,
+    `Agent ID: ${sanitizeTerminalText(details.agentId ?? "unknown")}`,
+    `Child session ID: ${sanitizeTerminalText(record?.childSessionId ?? details.childSessionId ?? "not available")}`,
     `Timing: started ${record ? new Date(record.startedAt).toISOString() : "not available"} · ${isActive(details.status) ? "elapsed" : "duration"}: ${formatMs(details.durationMs)}`,
     `Budgets: turns ${details.turnCount ?? 0}/${details.maxTurns ?? "unlimited"} · grace ${details.graceTurns ?? "unlimited"}`,
     `Tool uses: ${details.toolUses}`,
@@ -308,7 +309,7 @@ function expandedLines(
   const output =
     record?.result ?? record?.error ?? record?.responseText ?? details.output ?? resultText;
   const outputLines = wrapTextWithAnsi(
-    stripTerminalSequences(output || "No output."),
+    sanitizeOutput(output || "No output."),
     Math.max(1, width - 2),
   );
   lines.push(...outputLines.slice(0, MAX_OUTPUT_LINES).map((line) => `  ${line}`));
@@ -351,6 +352,10 @@ function appendMessageActivity(into: string[], message: SessionMessage): void {
   } else if (message.role === "compactionSummary") {
     into.push("context compacted");
   }
+}
+
+function sanitizeOutput(output: string): string {
+  return sanitizeTerminalText(output, true);
 }
 
 function statusText(status: string): string {
