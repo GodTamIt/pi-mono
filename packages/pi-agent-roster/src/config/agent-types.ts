@@ -6,6 +6,17 @@
  */
 import type { AgentConfig } from "../types.ts";
 
+const normalizeAgentId = (name: string): string => name.trim().toLocaleLowerCase("en-US");
+
+export interface AgentRegistrySnapshot {
+  readonly revision: number;
+  readonly agents: ReadonlyMap<string, AgentConfig>;
+  readonly primary: readonly string[];
+  readonly subagent: readonly string[];
+  readonly all: readonly string[];
+  readonly disabled: readonly string[];
+}
+
 // ── AgentConfigLookup interface ──────────────────────────────────────────────
 
 /**
@@ -28,6 +39,7 @@ export interface AgentConfigLookup {
  */
 export class AgentTypeRegistry implements AgentConfigLookup {
   private agents = new Map<string, AgentConfig>();
+  private revision = 0;
 
   /** Kept for API compatibility; this package does not provide built-in agents. */
   static readonly DEFAULT_AGENT_NAMES = [] as const;
@@ -40,15 +52,69 @@ export class AgentTypeRegistry implements AgentConfigLookup {
    * Re-scan user agents and rebuild the registry.
    */
   reload(): void {
-    this.agents.clear();
+    const next = new Map<string, AgentConfig>();
+    const keysById = new Map<string, string>();
     for (const [name, config] of this.loadUserAgents()) {
-      this.agents.set(name, config);
+      const id = config.id ?? normalizeAgentId(name);
+      const previousKey = keysById.get(id);
+      if (previousKey) next.delete(previousKey);
+      const key = previousKey ?? name;
+      keysById.set(id, key);
+      next.set(key, { ...config, id });
     }
+    this.agents = next;
+    this.revision++;
+  }
+
+  /** Refresh discovery and return an immutable point-in-time view. */
+  refresh(): AgentRegistrySnapshot {
+    this.reload();
+    return this.snapshot();
+  }
+
+  snapshot(): AgentRegistrySnapshot {
+    const agents = new Map(
+      [...this.agents].map(([name, config]) => [
+        name,
+        { ...config, stacks: config.stacks ? new Map(config.stacks) : undefined },
+      ]),
+    );
+    const enabled = [...agents].filter(([_, config]) => config.enabled !== false);
+    return Object.freeze({
+      revision: this.revision,
+      agents,
+      primary: Object.freeze(
+        enabled
+          .filter(([_, config]) => config.mode === "primary" || config.mode === "all")
+          .map(([name]) => name),
+      ),
+      subagent: Object.freeze(
+        enabled
+          .filter(
+            ([_, config]) => (config.mode ?? "subagent") === "subagent" || config.mode === "all",
+          )
+          .map(([name]) => name),
+      ),
+      all: Object.freeze(
+        enabled.filter(([_, config]) => config.mode === "all").map(([name]) => name),
+      ),
+      disabled: Object.freeze(
+        [...agents].filter(([_, config]) => config.enabled === false).map(([name]) => name),
+      ),
+    });
   }
 
   /** Resolve a type name case-insensitively. Returns the canonical key or undefined. */
   resolveType(name: string): string | undefined {
     return this.resolveKey(name);
+  }
+
+  getPrimaryTypes(): string[] {
+    return [...this.snapshot().primary];
+  }
+
+  getSubagentTypes(): string[] {
+    return [...this.snapshot().subagent];
   }
 
   /** Get all enabled type names (for spawning and tool descriptions). */
@@ -84,40 +150,31 @@ export class AgentTypeRegistry implements AgentConfigLookup {
     return this.agents.get(key)?.enabled !== false;
   }
 
-  /** Get built-in tool names for a type (case-insensitive). */
+  /** Get tool names for an enabled type (case-insensitive). Unknown and disabled types are unavailable. */
   getToolNamesForType(type: string): string[] {
-    const key = this.resolveKey(type);
-    const raw = key ? this.agents.get(key) : undefined;
-    const config = raw?.enabled !== false ? raw : undefined;
-    const names = config?.toolNames?.length ? config.toolNames : [...BUILTIN_TOOL_NAMES];
-    return names;
+    const config = this.findAgentConfig(type);
+    if (!config || config.enabled === false) return [];
+    return config.toolNames ?? [...BUILTIN_TOOL_NAMES];
   }
 
-  /** Resolve agent config with guaranteed non-null return. Falls back: unknown → general-purpose → absolute fallback. */
-  resolveAgentConfig(type: string): AgentConfig {
+  /** Resolve a known config without substituting another agent. Disabled definitions remain inspectable. */
+  findAgentConfig(type: string): AgentConfig | undefined {
     const key = this.resolveKey(type);
-    const config = key ? this.agents.get(key) : undefined;
+    return key ? this.agents.get(key) : undefined;
+  }
+
+  /** Resolve an existing definition. Unknown names never borrow another agent's config. */
+  resolveAgentConfig(type: string): AgentConfig {
+    const config = this.findAgentConfig(type);
     if (config) return config;
-
-    const gp = this.agents.get("general-purpose");
-    if (gp) return gp;
-
-    // Absolute fallback (should never happen in practice)
-    return {
-      name: type,
-      displayName: "Agent",
-      description: "General-purpose agent for complex, multi-step tasks",
-      toolNames: BUILTIN_TOOL_NAMES,
-      systemPrompt: "",
-      promptMode: "append",
-    };
+    throw new Error(`Unknown agent type: ${JSON.stringify(type)}`);
   }
 
   private resolveKey(name: string): string | undefined {
     if (this.agents.has(name)) return name;
-    const lower = name.toLowerCase();
-    for (const key of this.agents.keys()) {
-      if (key.toLowerCase() === lower) return key;
+    const id = normalizeAgentId(name);
+    for (const [key, config] of this.agents) {
+      if ((config.id ?? normalizeAgentId(key)) === id) return key;
     }
     return undefined;
   }

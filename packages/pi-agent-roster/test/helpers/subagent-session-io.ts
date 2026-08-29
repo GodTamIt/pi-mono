@@ -32,7 +32,10 @@ export function createSubagentSessionIO() {
   return {
     detectEnv: vi.fn().mockResolvedValue({ isGitRepo: false, branch: "", platform: "linux" }),
     getAgentDir: vi.fn().mockReturnValue("/mock/agent-dir"),
-    createResourceLoader: vi.fn().mockReturnValue({ reload: vi.fn().mockResolvedValue(undefined) }),
+    createResourceLoader: vi.fn().mockReturnValue({
+      reload: vi.fn().mockResolvedValue(undefined),
+      getExtensions: vi.fn().mockReturnValue({ extensions: [] }),
+    }),
     deriveSessionDir: vi.fn().mockReturnValue("/mock/session-dir/tasks"),
     createSessionManager: vi.fn().mockReturnValue({
       newSession: vi.fn(),

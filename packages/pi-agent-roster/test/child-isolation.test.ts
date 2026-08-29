@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { AgentTypeRegistry } from "../src/config/agent-types.ts";
 import { ConcurrencyLimiter } from "../src/lifecycle/concurrency-limiter.ts";
 import {
   type CreateSubagentSessionParams,
@@ -231,12 +232,31 @@ describe("child isolation boundary", () => {
         cwd: ctx.cwd,
         model: { provider: harness.model.provider, id: harness.model.id },
       }),
+      getModelInfo: () => ({
+        parentModel: harness.model,
+        modelRegistry: harness.modelRegistry,
+      }),
       getSessionInfo: () => ({
         parentSessionFile: ctx.sessionManager.getSessionFile() ?? "",
         parentSessionId: ctx.sessionManager.getSessionId(),
       }),
     };
-    const service = new SubagentsServiceAdapter(harness.manager, runtime);
+    const registry = new AgentTypeRegistry(
+      () =>
+        new Map([
+          [
+            "worker",
+            {
+              name: "worker",
+              description: "worker",
+              systemPrompt: "STATIC_CHILD_INSTRUCTIONS",
+              promptMode: "replace" as const,
+              mode: "subagent" as const,
+            },
+          ],
+        ]),
+    );
+    const service = new SubagentsServiceAdapter(harness.manager, runtime, { registry });
     const id = service.spawn({ type: "worker", task: CHILD_TASK });
     const record = harness.manager.getRecord(id)!;
     await record.promise;
@@ -246,7 +266,9 @@ describe("child isolation boundary", () => {
       agentType: "worker",
       baseCwd: "/repo",
       invocation: {
-        stack: undefined,
+        stack: "default",
+        modelName: "test-provider/test-model",
+        thinking: undefined,
         maxTurns: undefined,
         graceTurns: undefined,
         runInBackground: true,

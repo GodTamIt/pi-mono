@@ -15,11 +15,18 @@
 import { dirname } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
 import type { AgentSession, SettingsManager } from "@earendil-works/pi-coding-agent";
-import type { AgentConfigLookup } from "../config/agent-types.ts";
+import { BUILTIN_TOOL_NAMES, type AgentConfigLookup } from "../config/agent-types.ts";
 import type { EnvInfo } from "../session/env.ts";
 import type { ModelRegistry } from "../session/model-resolver.ts";
 import { type AssemblerIO, assembleSessionConfig } from "../session/session-config.ts";
-import type { ParentSessionInfo, ShellExec, SubagentType, ThinkingLevel } from "../types.ts";
+import type {
+  AgentConfig,
+  AgentInvocation,
+  ParentSessionInfo,
+  ShellExec,
+  SubagentType,
+  ThinkingLevel,
+} from "../types.ts";
 import type { ChildLifecyclePublisher } from "./child-lifecycle.ts";
 import type { ChildRuntimeBaseline } from "./child-runtime-baseline.ts";
 import { SubagentSession } from "./subagent-session.ts";
@@ -38,6 +45,9 @@ const EXCLUDED_TOOL_NAMES = ["subagent", "get_subagent_result", "steer_subagent"
 /** Minimal resource-loader contract used by the factory. */
 export interface ResourceLoaderLike {
   reload(): Promise<void>;
+  getExtensions(): {
+    extensions: Array<{ tools: ReadonlyMap<string, unknown> }>;
+  };
 }
 
 /** Minimal session-manager contract used by the factory. */
@@ -143,6 +153,7 @@ export interface CreateSubagentSessionParams {
   parentSession?: ParentSessionInfo | undefined;
   model?: Model<any> | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
+  invocation?: AgentInvocation | undefined;
   /** Existing child transcript to reconstruct; never a parent transcript. */
   resumeTranscriptPath?: string | undefined;
 }
@@ -157,7 +168,13 @@ export async function createSubagentSession(
 ): Promise<SubagentSession> {
   const { baseline, type } = params;
   const parentSessionId = params.parentSession?.parentSessionId;
-  deps.lifecycle.spawning({ agentName: type, parentSessionId });
+  deps.lifecycle.spawning({
+    agentName: type,
+    parentSessionId,
+    ...(params.invocation?.stack ? { stack: params.invocation.stack } : {}),
+    ...(params.invocation?.modelName ? { model: params.invocation.modelName } : {}),
+    ...(params.invocation?.thinking ? { thinking: params.invocation.thinking } : {}),
+  });
 
   // Resolve working directory upfront - needed for detectEnv before assembly.
   const effectiveCwd = params.cwd ?? baseline.cwd;
@@ -198,6 +215,7 @@ export async function createSubagentSession(
     appendSystemPromptOverride: () => [],
   });
   await loader.reload();
+  validateConfiguredTools(type, cfg.toolNames, loader, deps.registry.resolveAgentConfig(type));
 
   // Create a persisted SessionManager so transcripts are written in Pi's
   // official JSONL format. Falls back to a temp directory when the parent
@@ -238,6 +256,7 @@ export async function createSubagentSession(
     agentMaxTurns: cfg.agentMaxTurns,
     agentGraceTurns: cfg.agentGraceTurns,
     lifecycle: deps.lifecycle,
+    invocation: params.invocation,
   });
 
   // Publish session-created before bindExtensions() so observers (e.g. the
@@ -245,7 +264,18 @@ export async function createSubagentSession(
   // entry in place for the first permission check during child extension
   // initialization. The event bus dispatches synchronously, so a synchronous
   // subscriber completes before this returns.
-  deps.lifecycle.sessionCreated({ sessionId, parentSessionId });
+  deps.lifecycle.sessionCreated({
+    sessionId,
+    parentSessionId,
+    ...(params.invocation
+      ? {
+          agentName: type,
+          ...(params.invocation.stack ? { stack: params.invocation.stack } : {}),
+          ...(params.invocation.modelName ? { model: params.invocation.modelName } : {}),
+          ...(params.invocation.thinking ? { thinking: params.invocation.thinking } : {}),
+        }
+      : {}),
+  });
 
   try {
     // Bind extensions so that session_start fires and extensions can initialize.
@@ -259,4 +289,24 @@ export async function createSubagentSession(
   }
 
   return subagentSession;
+}
+
+function validateConfiguredTools(
+  type: SubagentType,
+  configured: string[],
+  loader: ResourceLoaderLike,
+  agent: AgentConfig,
+): void {
+  const available = new Set<string>(BUILTIN_TOOL_NAMES);
+  for (const extension of loader.getExtensions().extensions) {
+    for (const name of extension.tools.keys()) available.add(name);
+  }
+  const unknown = configured.filter((name) => !available.has(name));
+  if (!unknown.length) return;
+  const location = agent.source
+    ? `${agent.source}:${agent.name}.md:tools`
+    : `agent ${JSON.stringify(type)} tools`;
+  throw new Error(
+    `${location} references unknown child tools: ${unknown.join(", ")}. Install or enable the child extension that registers them, or remove them from tools.`,
+  );
 }

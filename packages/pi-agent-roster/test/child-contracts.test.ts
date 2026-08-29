@@ -124,6 +124,9 @@ describe("isolated child contracts", () => {
     });
     expect(resolveResumeConfig({ task: "resume", max_turns: 2, grace_turns: 0 })).toEqual({
       task: "resume",
+      stack: undefined,
+      model: undefined,
+      thinking: undefined,
       maxTurns: 2,
       graceTurns: 0,
     });
@@ -152,6 +155,13 @@ describe("isolated child contracts", () => {
       "resume with explicit facts",
       expect.any(AbortSignal),
       { maxTurns: 2, graceTurns: 0 },
+      expect.objectContaining({
+        snapshot: expect.objectContaining({
+          stack: "default",
+          maxTurns: 2,
+          graceTurns: 0,
+        }),
+      }),
     );
   });
 

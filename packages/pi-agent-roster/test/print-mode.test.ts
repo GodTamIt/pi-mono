@@ -28,6 +28,7 @@ vi.mock("../src/lifecycle/create-subagent-session.ts", async () => {
 
 import subagentsExtension from "../src/index.ts";
 import { createSubagentSession } from "../src/lifecycle/create-subagent-session.ts";
+import { makeModel } from "./helpers/make-model.ts";
 import {
   createMockSession,
   createSubagentSessionStub,
@@ -46,6 +47,13 @@ function makePi() {
         tools.set(tool.name, tool);
       }),
       registerCommand: vi.fn(),
+      getFlag: vi.fn(),
+      getThinkingLevel: vi.fn(() => "off"),
+      setThinkingLevel: vi.fn(),
+      getActiveTools: vi.fn(() => [...tools.keys()]),
+      getAllTools: vi.fn(() => [...tools.values()]),
+      setActiveTools: vi.fn(),
+      setModel: vi.fn(async () => true),
       on: vi.fn((event: string, handler: any) => {
         handlers.set(event, handler);
       }),
@@ -67,17 +75,21 @@ function makePi() {
 }
 
 function makeHeadlessCtx() {
+  const model = makeModel({ provider: "test", id: "headless" });
   return {
     hasUI: false,
     ui: {
       setStatus: vi.fn(),
       setWidget: vi.fn(),
+      notify: vi.fn(),
     },
     cwd: "/tmp",
-    model: undefined,
+    model,
     modelRegistry: {
-      find: vi.fn(),
-      getAvailable: vi.fn(() => []),
+      find: vi.fn((provider: string, id: string) =>
+        provider === model.provider && id === model.id ? model : undefined,
+      ),
+      getAvailable: vi.fn(() => [model]),
     },
     sessionManager: {
       getSessionId: vi.fn(() => "session-1"),

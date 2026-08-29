@@ -318,12 +318,13 @@ export class SubagentManager {
     task: string,
     signal?: AbortSignal | undefined,
     budgets?: { maxTurns?: number | undefined; graceTurns?: number | undefined },
+    invocation?: { model: Model<any> | undefined; snapshot: AgentInvocation },
   ): Promise<Subagent | undefined> {
     const agent = this.agents.get(id);
     if (!agent || agent.isActive() || (!agent.isSessionReady() && !agent.sessionReleased)) {
       return undefined;
     }
-    await agent.resume(task, signal, budgets);
+    await agent.resume(task, signal, budgets, invocation);
     return agent;
   }
 

@@ -28,22 +28,29 @@ export const SUBAGENT_CHILD_COMPLETED = "subagents:child:completed";
 /** Emitted in the run's `finally` — always fires, on success and error. */
 export const SUBAGENT_CHILD_DISPOSED = "subagents:child:disposed";
 
+interface ResolvedInvocationEvent {
+  stack?: string | undefined;
+  model?: string | undefined;
+  thinking?: import("../types.ts").ThinkingLevel | undefined;
+}
+
 /** Payload for `subagents:child:spawning`. */
-export interface ChildSpawningEvent {
+export interface ChildSpawningEvent extends ResolvedInvocationEvent {
   agentName: string;
   parentSessionId?: string | undefined;
 }
 
 /** Payload for `subagents:child:session-created`. */
-export interface ChildSessionCreatedEvent {
+export interface ChildSessionCreatedEvent extends ResolvedInvocationEvent {
   /** Child session id — the registry key. Unique per child; concurrent
    * siblings of the same parent occupy distinct keys. */
   sessionId: string;
   parentSessionId?: string | undefined;
+  agentName?: string | undefined;
 }
 
 /** Payload for `subagents:child:completed`. */
-export interface ChildCompletedEvent {
+export interface ChildCompletedEvent extends ResolvedInvocationEvent {
   sessionDir: string;
   agentName: string;
   /** True if the run was hard-aborted (max turns + grace exceeded). */

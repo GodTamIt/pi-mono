@@ -136,14 +136,61 @@ describe("renderBackground", () => {
 
   it("includes agent ID in output", () => {
     const details = makeDetails({ status: "background", agentId: "agent-42" });
-    expect(renderBackground(details, theme)).toContain("agent-42");
+    expect(renderBackground(details, "", false, theme)).toContain("agent-42");
   });
 
-  it("wraps entire message in dim styling with agent ID", () => {
+  it("wraps the compact status message in dim styling with agent ID", () => {
     const details = makeDetails({ status: "background", agentId: "agent-42" });
-    expect(renderBackground(details, theme)).toBe(
-      "[dim:  \u23BF  Running in background (ID: agent-42)]",
+    expect(renderBackground(details, "", false, theme)).toBe(
+      "[dim:  \u23BF  Background \u00B7 ID: agent-42]",
     );
+  });
+
+  it("keeps the collapsed invocation auditable without unrelated launch tags", () => {
+    const details = makeDetails({
+      status: "background",
+      agentId: "agent-42",
+      modelName: "anthropic/claude-opus-4-6",
+      tags: [
+        "stack: deep",
+        "thinking: high",
+        "background",
+        "max turns: unlimited",
+        "grace turns: unlimited",
+      ],
+    });
+    const result = renderBackground(details, "raw launch text", false, theme);
+
+    expect(result.split("\n")).toEqual([
+      "[dim:  \u23BF  Background \u00B7 ID: agent-42]",
+      "[dim:  stack: deep \u00B7 thinking: high]",
+      "[dim:  model: anthropic/claude-opus-4-6]",
+    ]);
+    expect(result).not.toContain("raw launch text");
+    expect(result).not.toContain("max turns");
+    expect(result).not.toContain("grace turns");
+  });
+
+  it("shows raw launch details when expanded", () => {
+    const details = makeDetails({
+      status: "background",
+      agentId: "agent-42",
+      modelName: "anthropic/claude-opus-4-6",
+      tags: ["stack: deep", "thinking: high"],
+    });
+    const launchText = [
+      "Agent started in background.",
+      "Stack: deep",
+      "Model: anthropic/claude-opus-4-6",
+      "Thinking: high",
+    ].join("\n");
+    const result = renderBackground(details, launchText, true, theme);
+
+    expect(result).toContain("\n[dim:  Agent started in background.]");
+    expect(result).toContain("\n[dim:  Stack: deep]");
+    expect(result).toContain("\n[dim:  Model: anthropic/claude-opus-4-6]");
+    expect(result).toContain("\n[dim:  Thinking: high]");
+    expect(result).not.toContain("[dim:  stack: deep");
   });
 });
 
@@ -263,8 +310,22 @@ describe("renderAgentResult", () => {
   it("dispatches to renderBackground for background status", () => {
     const details = makeDetails({ status: "background", agentId: "agent-99" });
     const result = renderAgentResult(details, "", false, false, theme);
-    expect(result).toContain("Running in background");
+    expect(result).toContain("Background");
     expect(result).toContain("agent-99");
+  });
+
+  it("passes expanded background launch text to renderBackground", () => {
+    const details = makeDetails({ status: "background", agentId: "agent-99" });
+    const result = renderAgentResult(
+      details,
+      "Stack: deep\nModel: anthropic/claude-opus-4-6\nThinking: high",
+      true,
+      false,
+      theme,
+    );
+    expect(result).toContain("[dim:  Stack: deep]");
+    expect(result).toContain("[dim:  Model: anthropic/claude-opus-4-6]");
+    expect(result).toContain("[dim:  Thinking: high]");
   });
 
   it("dispatches to renderCompleted for completed status", () => {

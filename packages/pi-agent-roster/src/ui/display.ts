@@ -126,8 +126,12 @@ export function formatDuration(startedAt: number, completedAt?: number): string 
 
 /** Get display name for any agent type (built-in or custom). */
 export function getDisplayName(type: SubagentType, registry: AgentConfigLookup): string {
-  const config = registry.resolveAgentConfig(type);
-  return config.displayName ?? config.name;
+  try {
+    const config = registry.resolveAgentConfig(type);
+    return config.displayName ?? config.name;
+  } catch {
+    return type === "general-purpose" ? "Agent" : type;
+  }
 }
 
 /** Short label for prompt mode: "twin" for append, nothing for replace (the default). */
@@ -135,8 +139,24 @@ export function getPromptModeLabel(
   type: SubagentType,
   registry: AgentConfigLookup,
 ): string | undefined {
-  const config = registry.resolveAgentConfig(type);
-  return config.promptMode === "append" ? "twin" : undefined;
+  try {
+    return registry.resolveAgentConfig(type).promptMode === "append" ? "twin" : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Explicit labels keep stack resolution readable when values are shown outside their config context. */
+export function buildInvocationMetadataParts(metadata: {
+  stack?: string | undefined;
+  model?: string | undefined;
+  thinking?: string | undefined;
+}): string[] {
+  const parts: string[] = [];
+  if (metadata.stack) parts.push(`stack: ${metadata.stack}`);
+  if (metadata.model) parts.push(`model: ${metadata.model}`);
+  if (metadata.thinking) parts.push(`thinking: ${metadata.thinking}`);
+  return parts;
 }
 
 /** Mode label is not included — callers add it where they want it. */

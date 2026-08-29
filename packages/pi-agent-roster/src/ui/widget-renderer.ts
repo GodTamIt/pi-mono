@@ -12,6 +12,7 @@ import type { LifetimeUsage } from "../lifecycle/usage.ts";
 import { getLifetimeTotal } from "../lifecycle/usage.ts";
 import type { SubagentType } from "../types.ts";
 import {
+  buildInvocationMetadataParts,
   describeActivity,
   formatMs,
   formatSessionTokens,
@@ -40,6 +41,9 @@ export interface WidgetAgent {
   readonly turnCount: number;
   readonly maxTurns?: number | undefined;
   readonly graceTurns?: number | undefined;
+  readonly stack?: string | undefined;
+  readonly model?: string | undefined;
+  readonly thinking?: string | undefined;
   readonly activeTools: ReadonlyMap<string, string>;
   readonly responseText: string;
   /** Context-window utilisation (0–100), or null when unavailable. */
@@ -80,13 +84,13 @@ export function renderFinishedLine(
   }
 
   const parts: string[] = [];
-  parts.push(...formatTurnBudget(agent));
+  parts.push(...formatInvocation(agent), ...formatTurnBudget(agent));
   if (agent.toolUses > 0)
     parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
   parts.push(duration);
 
   const modeTag = modeLabel ? ` ${theme.fg("dim", `(${modeLabel})`)}` : "";
-  return `${icon} ${theme.fg("dim", name)}${modeTag}  ${theme.fg("dim", agent.description)} ${theme.fg("dim", "·")} ${theme.fg("dim", parts.join(" · "))}${statusText}`;
+  return `${icon} ${theme.fg("dim", name)}${modeTag}${statusText}  ${theme.fg("dim", agent.description)} ${theme.fg("dim", "·")} ${theme.fg("dim", parts.join(" · "))}`;
 }
 
 /** Render a single running agent as header + activity line pair (no tree connector prefix). */
@@ -108,7 +112,7 @@ export function renderRunningLines(
       : "";
 
   const parts: string[] = [];
-  parts.push(...formatTurnBudget(agent));
+  parts.push(...formatInvocation(agent), ...formatTurnBudget(agent));
   if (agent.toolUses > 0)
     parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
   if (tokenText) parts.push(tokenText);
@@ -122,6 +126,10 @@ export function renderRunningLines(
   const activityLine = theme.fg("dim", `  ${GLYPHS.subLine}  ${activityText}`);
 
   return [header, activityLine];
+}
+
+function formatInvocation(agent: WidgetAgent): string[] {
+  return buildInvocationMetadataParts(agent);
 }
 
 function formatTurnBudget(agent: WidgetAgent): string[] {

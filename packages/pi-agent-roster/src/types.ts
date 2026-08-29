@@ -33,6 +33,19 @@ export interface SubscribableSession {
 /** Agent type: any string name (built-in defaults or user-defined). */
 export type SubagentType = string;
 
+export type AgentMode = "primary" | "subagent" | "all";
+
+export interface AgentStackProfile {
+  model: string;
+  thinking?: ThinkingLevel | undefined;
+}
+
+export interface AgentDiagnostic {
+  path: string;
+  message: string;
+  source: "project" | "global";
+}
+
 /** UI display and agent listing — name, display name, description, prompt mode. */
 export interface AgentIdentity {
   name: string;
@@ -50,6 +63,13 @@ export interface AgentPromptConfig {
 
 /** Unified agent configuration — used for both default and user-defined agents. */
 export interface AgentConfig extends AgentIdentity, AgentPromptConfig {
+  /** Stable, case-insensitive identity derived from the Markdown filename. */
+  id?: string | undefined;
+  mode?: AgentMode | undefined;
+  /** Agent identities this primary may delegate to. Omission means unrestricted. */
+  allowedAgents?: string[] | undefined;
+  stacks?: ReadonlyMap<string, AgentStackProfile> | undefined;
+  defaultStack?: string | undefined;
   /** The agent's tool allowlist. Entries name built-in or extension-registered tools; omitted means every built-in. */
   toolNames?: string[] | undefined;
   model?: string | undefined;

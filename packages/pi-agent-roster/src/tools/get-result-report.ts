@@ -22,6 +22,9 @@ export interface AgentReport {
   /** Pre-formatted duration string. */
   duration: string;
   description: string;
+  stack?: string | undefined;
+  model?: string | undefined;
+  thinking?: string | undefined;
   result: string | undefined;
   error: string | undefined;
   /** Whether the agent was stopped before the limiter ever admitted it. */
@@ -54,9 +57,15 @@ export function renderReportBody(report: AgentReport): string {
 
 /** Assemble the full get_subagent_result report text. */
 export function formatAgentReport(report: AgentReport): string {
+  const invocation = [
+    report.stack ? `stack ${report.stack}` : undefined,
+    report.model ? `model ${report.model}` : undefined,
+    report.thinking ? `thinking ${report.thinking}` : undefined,
+  ].filter(Boolean);
   let output =
     `Agent: ${report.id}\n` +
     `Type: ${report.displayName} | Status: ${report.status} | ${renderStatsParts(report).join(" | ")}\n` +
+    (invocation.length ? `Invocation: ${invocation.join(" | ")}\n` : "") +
     `Description: ${report.description}\n\n`;
   output += renderReportBody(report);
   if (report.conversation) {

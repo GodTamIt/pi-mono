@@ -220,7 +220,7 @@ describe("assembleWidgetState", () => {
 });
 
 describe("AgentWidget — projection reads activity off Subagent records", () => {
-  it("surfaces turnCount, activeTools, and responseText from the record via renderWidget", () => {
+  it("surfaces activity and resolved invocation metadata via renderWidget", () => {
     const record = createTestSubagent({
       status: "running",
       completedAt: undefined,
@@ -229,7 +229,12 @@ describe("AgentWidget — projection reads activity off Subagent records", () =>
       activeTools: ["read"],
       maxTurns: 6,
       graceTurns: 0,
-      invocation: { runInBackground: true },
+      invocation: {
+        runInBackground: true,
+        stack: "deep",
+        modelName: "anthropic/claude-opus",
+        thinking: "high",
+      },
     });
     const manager = { listAgents: () => [record] } as unknown as SubagentManager;
     const registry = new AgentTypeRegistry(() => new Map());
@@ -254,6 +259,9 @@ describe("AgentWidget — projection reads activity off Subagent records", () =>
     expect(allText).toContain("↻3");
     expect(allText).toContain("max 6");
     expect(allText).toContain("grace 0");
+    expect(allText).toContain("stack: deep");
+    expect(allText).toContain("model: anthropic/claude-opus");
+    expect(allText).toContain("thinking: high");
     // Active tool "read" → "reading…"
     expect(allText).toContain("reading");
   });

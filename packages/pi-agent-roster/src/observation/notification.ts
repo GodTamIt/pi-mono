@@ -7,6 +7,9 @@ import type { Subagent } from "../types.ts";
 export interface NotificationDetails {
   id: string;
   description: string;
+  stack?: string | undefined;
+  model?: string | undefined;
+  thinking?: string | undefined;
   status: SubagentStatus;
   toolUses: number;
   turnCount: number;
@@ -82,6 +85,13 @@ export function formatTaskNotification(record: Subagent, resultMaxLen: number): 
     outputFile ? `<output-file>${escapeXml(outputFile)}</output-file>` : null,
     `<status>${escapeXml(status)}</status>`,
     `<summary>Subagent "${escapeXml(record.description)}" ${record.status}</summary>`,
+    record.invocation?.stack ? `<stack>${escapeXml(record.invocation.stack)}</stack>` : null,
+    record.invocation?.modelName
+      ? `<model>${escapeXml(record.invocation.modelName)}</model>`
+      : null,
+    record.invocation?.thinking
+      ? `<thinking>${escapeXml(record.invocation.thinking)}</thinking>`
+      : null,
     `<result>${escapeXml(resultPreview)}</result>`,
     `<usage><total_tokens>${totalTokens}</total_tokens><tool_uses>${record.toolUses}</tool_uses>${ctxXml}${compactXml}<duration_ms>${durationMs}</duration_ms></usage>`,
     "</task-notification>",
@@ -120,6 +130,9 @@ export function buildNotificationDetails(
   return {
     id: record.id,
     description: record.description,
+    stack: record.invocation?.stack,
+    model: record.invocation?.modelName,
+    thinking: record.invocation?.thinking,
     status: record.status,
     toolUses: record.toolUses,
     turnCount: record.turnCount,
@@ -153,6 +166,9 @@ export function buildEventData(record: Subagent) {
     id: record.id,
     type: record.type,
     description: record.description,
+    stack: record.invocation?.stack,
+    model: record.invocation?.modelName,
+    thinking: record.invocation?.thinking,
     result: record.result,
     error: record.error,
     status: record.status,

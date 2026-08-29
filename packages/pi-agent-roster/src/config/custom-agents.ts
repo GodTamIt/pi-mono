@@ -1,133 +1,310 @@
 /**
- * custom-agents.ts — Load user-defined agents from project (.pi/agents/) and global ($PI_CODING_AGENT_DIR/agents/, default ~/.pi/agent/agents/) locations.
+ * Layered discovery and validation for Markdown agent definitions.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { debugLog } from "../debug.ts";
-import type { AgentConfig, ThinkingLevel } from "../types.ts";
+import type {
+  AgentConfig,
+  AgentDiagnostic,
+  AgentMode,
+  AgentStackProfile,
+  ThinkingLevel,
+} from "../types.ts";
 import { BUILTIN_TOOL_NAMES } from "./agent-types.ts";
 
-/**
- * Scan for custom agent .md files from multiple locations.
- * Discovery hierarchy (higher priority wins):
- *   1. Project: <cwd>/.pi/agents/*.md
- *   2. Global:  $PI_CODING_AGENT_DIR/agents/*.md (default: ~/.pi/agent/agents/*.md)
- *
- * Project-level agents override global ones with the same name.
- * Any name is allowed — names matching defaults (e.g. "Explore") override them.
- */
-export function loadCustomAgents(cwd: string): Map<string, AgentConfig> {
-  const globalDir = join(getAgentDir(), "agents");
-  const projectDir = join(cwd, ".pi", "agents");
+const THINKING_LEVELS = new Set<ThinkingLevel>([
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
+const MODES = new Set<AgentMode>(["primary", "subagent", "all"]);
+const MODEL_PATTERN = /^[^/\s]+\/[^/\s]+$/;
 
-  const agents = new Map<string, AgentConfig>();
-  loadFromDir(globalDir, agents, "global"); // lower priority
-  loadFromDir(projectDir, agents, "project"); // higher priority (overwrites)
-  return agents;
+export interface CustomAgentDiscovery {
+  agents: Map<string, AgentConfig>;
+  diagnostics: AgentDiagnostic[];
 }
 
-/** Load agent configs from a directory into the map. */
+/** Discover project definitions over global definitions without allowing one bad file to stop the scan. */
+export function discoverCustomAgents(cwd: string): CustomAgentDiscovery {
+  const diagnostics: AgentDiagnostic[] = [];
+  const byId = new Map<string, AgentConfig>();
+  loadFromDir(join(getAgentDir(), "agents"), byId, diagnostics, "global");
+  loadFromDir(join(cwd, ".pi", "agents"), byId, diagnostics, "project");
+
+  const known = new Set(byId.keys());
+  for (const config of byId.values()) {
+    for (const allowed of config.allowedAgents ?? []) {
+      if (!known.has(normalizeAgentId(allowed))) {
+        diagnostics.push({
+          path: `${config.source ?? "global"}:${config.name}.md:allowed_agents`,
+          message: `unknown agent ${JSON.stringify(allowed)}`,
+          source: config.source === "project" ? "project" : "global",
+        });
+      }
+    }
+  }
+
+  return { agents: byId, diagnostics };
+}
+
+/** Compatibility entrypoint. Diagnostics are emitted unless a callback consumes them. */
+export function loadCustomAgents(
+  cwd: string,
+  onDiagnostic?: ((diagnostic: AgentDiagnostic) => void) | undefined,
+): Map<string, AgentConfig> {
+  const result = discoverCustomAgents(cwd);
+  for (const diagnostic of result.diagnostics) {
+    if (onDiagnostic) onDiagnostic(diagnostic);
+    else console.warn(`[pi-agent-roster] ${diagnostic.path}: ${diagnostic.message}`);
+  }
+  return result.agents;
+}
+
+export function normalizeAgentId(name: string): string {
+  return name.trim().toLocaleLowerCase("en-US");
+}
+
 function loadFromDir(
   dir: string,
   agents: Map<string, AgentConfig>,
+  diagnostics: AgentDiagnostic[],
   source: "project" | "global",
 ): void {
   if (!existsSync(dir)) return;
 
   let files: string[];
   try {
-    files = readdirSync(dir).filter((f) => f.endsWith(".md"));
-  } catch (err) {
-    debugLog("readdirSync agents dir", err);
+    files = readdirSync(dir)
+      .filter((file) => file.toLocaleLowerCase("en-US").endsWith(".md"))
+      .sort((a, b) => a.localeCompare(b));
+  } catch (error) {
+    debugLog("readdirSync agents dir", error);
+    diagnostics.push({ path: dir, message: errorMessage(error), source });
     return;
   }
 
   for (const file of files) {
-    const name = basename(file, ".md");
+    const path = join(dir, file);
+    const name = basename(file, file.slice(-3));
+    const id = normalizeAgentId(name);
+    if (!id) {
+      diagnostics.push({ path, message: "filename must contain an agent name", source });
+      continue;
+    }
 
-    let content: string;
+    const existing = agents.get(id);
+    if (existing?.source === source) {
+      agents.delete(id);
+      diagnostics.push({
+        path,
+        message: `filename collides case-insensitively with ${JSON.stringify(existing.name)}`,
+        source,
+      });
+      continue;
+    }
+    // A project definition owns the identity even when its contents are invalid.
+    if (source === "project") agents.delete(id);
+
     try {
-      content = readFileSync(join(dir, file), "utf-8");
-    } catch (err) {
-      debugLog("readFileSync agent file", err);
-      continue;
+      const content = readFileSync(path, "utf-8");
+      const { frontmatter, body } = parseFrontmatter(content);
+      const config = parseAgent(path, name, id, frontmatter, body, source);
+      agents.set(id, config);
+    } catch (error) {
+      debugLog("load agent file", error);
+      diagnostics.push({ path, message: errorMessage(error), source });
     }
-
-    const { frontmatter: fm, body } = parseFrontmatter(content);
-    if (Object.hasOwn(fm, "inherit_context")) {
-      console.warn(
-        `[pi-agent-roster] Ignoring agent ${join(dir, file)}: inherit_context is unsupported; put all context in the explicit task`,
-      );
-      continue;
-    }
-
-    agents.set(name, {
-      name,
-      displayName: str(fm.display_name),
-      description: str(fm.description) ?? name,
-      toolNames: listField(fm.tools, BUILTIN_TOOL_NAMES),
-      model: str(fm.model),
-      thinking: str(fm.thinking) as ThinkingLevel | undefined,
-      maxTurns: legacyMaxTurns(fm.max_turns),
-      graceTurns: boundedInt(fm.grace_turns, 0, 1_000),
-      systemPrompt: body.trim(),
-      promptMode: fm.prompt_mode === "replace" ? "replace" : "append",
-      runInBackground: fm.run_in_background != null ? fm.run_in_background === true : undefined,
-      enabled: fm.enabled !== false, // default true; explicitly false disables
-      source,
-    });
   }
 }
 
-// ---- Field parsers ----
-// All follow the same convention: omitted → default, "none"/empty → nothing, value → exact.
+function parseAgent(
+  path: string,
+  name: string,
+  id: string,
+  raw: unknown,
+  body: string,
+  source: "project" | "global",
+): AgentConfig {
+  if (!isRecord(raw)) throw new Error("frontmatter must be a mapping");
+  const fm = raw;
+  rejectUnsupported(path, fm, "inherit_context");
+  rejectUnsupported(path, fm, "model_stacks");
 
-/** Extract a string or undefined. */
-function str(val: unknown): string | undefined {
-  return typeof val === "string" ? val : undefined;
+  const mode = optionalString(fm.mode, `${path}:mode`) ?? "subagent";
+  if (!MODES.has(mode as AgentMode)) {
+    throw new Error(`${path}:mode must be primary, subagent, or all`);
+  }
+  const thinking = parseThinking(fm.thinking, `${path}:thinking`);
+  const stacks = parseStacks(fm.stacks, path);
+  const defaultStack = parseDefaultStack(fm.default_stack, stacks, path);
+
+  return {
+    id,
+    name,
+    displayName: optionalString(fm.display_name, `${path}:display_name`),
+    description: optionalString(fm.description, `${path}:description`) ?? name,
+    mode: mode as AgentMode,
+    allowedAgents: parseList(fm.allowed_agents, `${path}:allowed_agents`, false),
+    stacks,
+    defaultStack,
+    toolNames: parseTools(fm.tools, `${path}:tools`),
+    model: optionalString(fm.model, `${path}:model`),
+    thinking,
+    maxTurns: parseMaxTurns(fm.max_turns, `${path}:max_turns`),
+    graceTurns: parseBoundedInt(fm.grace_turns, 0, 1_000, `${path}:grace_turns`),
+    systemPrompt: body.trim(),
+    promptMode: parsePromptMode(fm.prompt_mode, `${path}:prompt_mode`),
+    runInBackground: optionalBoolean(fm.run_in_background, `${path}:run_in_background`),
+    enabled: optionalBoolean(fm.enabled, `${path}:enabled`) ?? true,
+    source,
+  };
 }
 
-/** Parse the persisted max-turn convention where zero means unlimited. */
-function legacyMaxTurns(val: unknown): number | undefined {
-  if (val === 0) return undefined;
-  return boundedInt(val, 1, 10_000);
+function parseStacks(value: unknown, path: string): ReadonlyMap<string, AgentStackProfile> {
+  const result = new Map<string, AgentStackProfile>();
+  if (value == null) return result;
+  if (!isRecord(value) || Array.isArray(value)) throw new Error(`${path}:stacks must be a mapping`);
+
+  const normalized = new Set<string>();
+  for (const [rawName, profileValue] of Object.entries(value)) {
+    const name = rawName.trim();
+    const id = normalizeAgentId(name);
+    const profilePath = `${path}:stacks.${rawName}`;
+    if (!name) throw new Error(`${profilePath} name must not be empty`);
+    if (id === "default") throw new Error(`${profilePath} uses reserved name "default"`);
+    if (normalized.has(id))
+      throw new Error(`${profilePath} collides case-insensitively with another stack`);
+    normalized.add(id);
+    if (!isRecord(profileValue) || Array.isArray(profileValue))
+      throw new Error(`${profilePath} must be a mapping`);
+    const unknown = Object.keys(profileValue).filter(
+      (key) => key !== "model" && key !== "thinking",
+    );
+    if (unknown.length) throw new Error(`${profilePath}.${unknown[0]} is not supported`);
+    const model = requiredString(profileValue.model, `${profilePath}.model`);
+    if (!MODEL_PATTERN.test(model))
+      throw new Error(`${profilePath}.model must use provider/model format`);
+    const thinking = parseThinking(profileValue.thinking, `${profilePath}.thinking`);
+    result.set(name, { model, ...(thinking ? { thinking } : {}) });
+  }
+  return result;
 }
 
-function boundedInt(val: unknown, minimum: number, maximum: number): number | undefined {
-  return Number.isInteger(val) && (val as number) >= minimum && (val as number) <= maximum
-    ? (val as number)
-    : undefined;
+function parseDefaultStack(
+  value: unknown,
+  stacks: ReadonlyMap<string, AgentStackProfile>,
+  path: string,
+): string | undefined {
+  const raw = optionalString(value, `${path}:default_stack`);
+  if (raw == null) return undefined;
+  const selected = raw.trim();
+  if (!selected) throw new Error(`${path}:default_stack must be a non-empty stack name`);
+  if (normalizeAgentId(selected) === "default") return "default";
+  const canonical = findCaseInsensitive(stacks.keys(), selected);
+  if (!canonical)
+    throw new Error(`${path}:default_stack references unknown stack ${JSON.stringify(selected)}`);
+  return canonical;
 }
 
-/**
- * Parse a raw list field into items, or undefined if absent/empty/"none".
- *
- * Frontmatter is YAML, so a list field is written either as a comma-separated
- * scalar (`tools: read, grep`) or as a sequence (`tools: [read, grep]`). Both
- * are supported: a sequence keeps its entries intact, while a scalar is split
- * on commas.
- */
-function parseListField(val: unknown): string[] | undefined {
-  if (val === undefined || val === null) return undefined;
-  const items = Array.isArray(val)
-    ? val.map((entry) => String(entry).trim()).filter(Boolean)
-    : // eslint-disable-next-line @typescript-eslint/no-base-to-string -- val is already narrowed past null/undefined; String() is the intended coercion here
-      String(val)
-        .trim()
-        .split(",")
-        .map((entry) => entry.trim())
-        .filter(Boolean);
-  if (items.length === 0) return undefined;
-  return items.length === 1 && items[0] === "none" ? undefined : items;
+function parseTools(value: unknown, path: string): string[] {
+  if (value == null) return [...BUILTIN_TOOL_NAMES];
+  return parseList(value, path, true) ?? [];
 }
 
-/**
- * Parse a list field with defaults.
- * omitted → defaults; "none"/empty → []; otherwise → listed items.
- */
-function listField(val: unknown, defaults: string[]): string[] {
-  if (val === undefined || val === null) return defaults;
-  return parseListField(val) ?? [];
+function parseList(value: unknown, path: string, allowNone: boolean): string[] | undefined {
+  if (value == null) return undefined;
+  let values: unknown[];
+  if (Array.isArray(value)) values = value;
+  else if (typeof value === "string") values = value.split(",");
+  else throw new Error(`${path} must be a string or sequence`);
+
+  const items = values
+    .map((item) => {
+      if (typeof item !== "string") throw new Error(`${path} entries must be strings`);
+      return item.trim();
+    })
+    .filter(Boolean);
+  if (allowNone && items.length === 1 && items[0]?.toLocaleLowerCase("en-US") === "none") return [];
+  if (!allowNone && items.some((item) => item.toLocaleLowerCase("en-US") === "none")) {
+    throw new Error(`${path} does not support "none"`);
+  }
+  return items;
+}
+
+function parseThinking(value: unknown, path: string): ThinkingLevel | undefined {
+  const thinking = optionalString(value, path);
+  if (thinking == null) return undefined;
+  if (!THINKING_LEVELS.has(thinking as ThinkingLevel)) {
+    throw new Error(`${path} must be a supported thinking level`);
+  }
+  return thinking as ThinkingLevel;
+}
+
+function parseMaxTurns(value: unknown, path: string): number | undefined {
+  if (value === 0) return undefined;
+  return parseBoundedInt(value, 1, 10_000, path);
+}
+
+function parseBoundedInt(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  path: string,
+): number | undefined {
+  if (value == null) return undefined;
+  if (!Number.isInteger(value) || (value as number) < minimum || (value as number) > maximum) {
+    throw new Error(`${path} must be an integer from ${minimum} through ${maximum}`);
+  }
+  return value as number;
+}
+
+function parsePromptMode(value: unknown, path: string): "replace" | "append" {
+  if (value == null) return "append";
+  if (value !== "replace" && value !== "append")
+    throw new Error(`${path} must be replace or append`);
+  return value;
+}
+
+function optionalBoolean(value: unknown, path: string): boolean | undefined {
+  if (value == null) return undefined;
+  if (typeof value !== "boolean") throw new Error(`${path} must be a boolean`);
+  return value;
+}
+
+function optionalString(value: unknown, path: string): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value !== "string") throw new Error(`${path} must be a string`);
+  return value;
+}
+
+function requiredString(value: unknown, path: string): string {
+  const result = optionalString(value, path)?.trim();
+  if (!result) throw new Error(`${path} must be a non-empty string`);
+  return result;
+}
+
+function rejectUnsupported(path: string, fm: Record<string, unknown>, field: string): void {
+  if (Object.hasOwn(fm, field)) {
+    throw new Error(`${path}:${field} is unsupported; remove it from the agent definition`);
+  }
+}
+
+function findCaseInsensitive(values: Iterable<string>, wanted: string): string | undefined {
+  const normalized = normalizeAgentId(wanted);
+  return [...values].find((value) => normalizeAgentId(value) === normalized);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

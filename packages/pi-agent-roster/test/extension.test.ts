@@ -2,7 +2,13 @@ import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-age
 import { Value } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
 import extension from "../src/index.ts";
-import { ROSTER_NAME_FLAG, ROSTER_NOOP_TOOL, ROSTER_STATUS_COMMAND } from "../src/public.ts";
+import {
+  PRIMARY_AGENT_FLAG,
+  PRIMARY_STACK_FLAG,
+  ROSTER_NAME_FLAG,
+  ROSTER_NOOP_TOOL,
+  ROSTER_STATUS_COMMAND,
+} from "../src/public.ts";
 
 function loadExtension() {
   let tool: ToolDefinition | undefined;
@@ -32,6 +38,14 @@ describe("pi-agent-roster extension", () => {
       description: expect.any(String),
       type: "string",
       default: "default",
+    });
+    expect(pi.registerFlag).toHaveBeenCalledWith(PRIMARY_AGENT_FLAG, {
+      description: expect.any(String),
+      type: "string",
+    });
+    expect(pi.registerFlag).toHaveBeenCalledWith(PRIMARY_STACK_FLAG, {
+      description: expect.any(String),
+      type: "string",
     });
     expect(pi.registerCommand).toHaveBeenCalledWith(
       ROSTER_STATUS_COMMAND,

@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import { AgentTypeRegistry } from "../../src/config/agent-types.ts";
 import { SubagentsServiceAdapter, toSubagentRecord } from "../../src/service/service-adapter.ts";
+import { makeModel } from "../helpers/make-model.ts";
 import { createTestSubagent } from "../helpers/make-subagent.ts";
 
 function harness(active = true) {
-  const record = createTestSubagent({ id: "child", result: "done" });
+  const record = createTestSubagent({ id: "child", type: "worker", result: "done" });
   const manager = {
     spawn: vi.fn(() => "child"),
     resume: vi.fn().mockResolvedValue(record),
@@ -15,15 +17,44 @@ function harness(active = true) {
     registerWorkspaceProvider: vi.fn(() => vi.fn()),
   };
   const baseline = { cwd: "/child", model: { provider: "p", id: "m" } };
+  const model = makeModel({ provider: "p", id: "m" });
+  const modelRegistry = {
+    find: (provider: string, id: string) =>
+      provider === model.provider && id === model.id ? model : undefined,
+    getAll: () => [model],
+    getAvailable: () => [model],
+  };
   const runtime = {
     currentCtx: active ? ({} as never) : undefined,
     buildChildBaseline: vi.fn(() => baseline),
+    getModelInfo: vi.fn(() => ({ parentModel: model, modelRegistry })),
     getSessionInfo: vi.fn(() => ({
       parentSessionFile: "/sessions/parent.jsonl",
       parentSessionId: "parent",
     })),
   };
-  return { service: new SubagentsServiceAdapter(manager, runtime), manager, record, baseline };
+  const registry = new AgentTypeRegistry(
+    () =>
+      new Map([
+        [
+          "worker",
+          {
+            name: "worker",
+            description: "worker",
+            systemPrompt: "work",
+            promptMode: "replace" as const,
+            mode: "subagent" as const,
+            stacks: new Map([["fast", { model: "p/m" }]]),
+          },
+        ],
+      ]),
+  );
+  return {
+    service: new SubagentsServiceAdapter(manager, runtime, { registry }),
+    manager,
+    record,
+    baseline,
+  };
 }
 
 describe("toSubagentRecord", () => {
@@ -50,23 +81,26 @@ describe("SubagentsServiceAdapter", () => {
     expect(service.spawn({ type: " worker ", task: " inspect auth ", stack: " fast " })).toBe(
       "child",
     );
-    expect(manager.spawn).toHaveBeenLastCalledWith(baseline, "worker", "inspect auth", {
-      description: "inspect auth",
-      maxTurns: undefined,
-      graceTurns: undefined,
-      bypassQueue: undefined,
-      isBackground: true,
-      parentSession: {
-        parentSessionFile: "/sessions/parent.jsonl",
-        parentSessionId: "parent",
-      },
-      invocation: {
-        stack: "fast",
-        maxTurns: undefined,
-        graceTurns: undefined,
-        runInBackground: true,
-      },
-    });
+    expect(manager.spawn).toHaveBeenLastCalledWith(
+      baseline,
+      "worker",
+      "inspect auth",
+      expect.objectContaining({
+        description: "inspect auth",
+        model: expect.objectContaining({ provider: "p", id: "m" }),
+        thinkingLevel: undefined,
+        isBackground: true,
+        parentSession: {
+          parentSessionFile: "/sessions/parent.jsonl",
+          parentSessionId: "parent",
+        },
+        invocation: expect.objectContaining({
+          stack: "fast",
+          modelName: "p/m",
+          runInBackground: true,
+        }),
+      }),
+    );
 
     service.spawn({ type: "worker", task: "foreground", foreground: true });
     expect(manager.spawn).toHaveBeenLastCalledWith(
@@ -113,13 +147,34 @@ describe("SubagentsServiceAdapter", () => {
     expect((await service.resume({ id: "child", task: "new facts", graceTurns: 0 }))?.id).toBe(
       "child",
     );
-    expect(manager.resume).toHaveBeenCalledWith("child", "new facts", undefined, {
-      maxTurns: undefined,
-      graceTurns: 0,
-    });
-    await expect(service.resume({ id: "child", task: "new facts", stack: "fast" })).rejects.toThrow(
-      /stack selection is unavailable/,
+    expect(manager.resume).toHaveBeenCalledWith(
+      "child",
+      "new facts",
+      undefined,
+      { maxTurns: undefined, graceTurns: 0 },
+      expect.objectContaining({
+        model: expect.objectContaining({ provider: "p", id: "m" }),
+        snapshot: expect.objectContaining({ stack: "default", modelName: "p/m", graceTurns: 0 }),
+      }),
     );
+    await expect(
+      service.resume({ id: "child", task: "new facts", stack: "fast" }),
+    ).resolves.toMatchObject({ id: "child" });
+    expect(manager.resume).toHaveBeenLastCalledWith(
+      "child",
+      "new facts",
+      undefined,
+      { maxTurns: undefined, graceTurns: undefined },
+      expect.objectContaining({
+        model: expect.objectContaining({ provider: "p", id: "m" }),
+        snapshot: expect.objectContaining({ stack: "fast", modelName: "p/m" }),
+      }),
+    );
+    const resumeCalls = manager.resume.mock.calls.length;
+    await expect(
+      service.resume({ id: "child", task: "new facts", stack: "missing" }),
+    ).rejects.toThrow(/Unknown explicit stack/);
+    expect(manager.resume).toHaveBeenCalledTimes(resumeCalls);
     expect(await service.steer("child", "change direction")).toBe(true);
     expect(record.steer).toHaveBeenCalledWith("change direction");
     await expect(service.steer("child", " ")).rejects.toThrow(/steering/);

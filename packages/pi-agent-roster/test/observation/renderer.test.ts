@@ -219,6 +219,26 @@ describe("createNotificationRenderer", () => {
     expect(text).toContain("error");
   });
 
+  it("shows stack resolution on a dedicated line only when expanded", () => {
+    const renderer = createNotificationRenderer();
+    const details = makeDetails({
+      stack: "deep",
+      model: "anthropic/opus",
+      thinking: "high",
+    });
+
+    const expanded = renderText(renderer({ details }, { expanded: true }, stubTheme()));
+    const metadataLine = expanded.split("\n").find((line) => line.includes("stack: deep"));
+    expect(metadataLine).toContain("model: anthropic/opus");
+    expect(metadataLine).toContain("thinking: high");
+    expect(metadataLine).not.toContain("tool use");
+
+    const collapsed = renderText(renderer({ details }, { expanded: false }, stubTheme()));
+    expect(collapsed).not.toContain("stack: deep");
+    expect(collapsed).not.toContain("model: anthropic/opus");
+    expect(collapsed).not.toContain("thinking: high");
+  });
+
   it("shows full result lines when expanded", () => {
     const renderer = createNotificationRenderer();
     const result = renderer(

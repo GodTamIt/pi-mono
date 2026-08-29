@@ -49,6 +49,11 @@ export function spawnBackground(manager: BackgroundManagerDeps, params: Backgrou
       `Agent ID: ${id}\n` +
       `Type: ${identity.displayName}\n` +
       `Description: ${execution.description}\n` +
+      `Stack: ${execution.stack}\n` +
+      (execution.agentInvocation.modelName
+        ? `Model: ${execution.agentInvocation.modelName}\n`
+        : "") +
+      (execution.thinking ? `Thinking: ${execution.thinking}\n` : "") +
       (record?.outputFile ? `Output file: ${record.outputFile}\n` : "") +
       (isQueued ? `Position: queued (max ${params.settings.maxConcurrent} concurrent)\n` : "") +
       `\nYou will be notified when this agent completes.\n` +

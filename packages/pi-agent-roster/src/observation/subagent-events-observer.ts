@@ -39,6 +39,9 @@ export class SubagentEventsObserver implements SubagentManagerObserver {
       id: record.id,
       type: record.type,
       description: record.description,
+      stack: record.invocation?.stack,
+      model: record.invocation?.modelName,
+      thinking: record.invocation?.thinking,
     });
   }
 
@@ -79,6 +82,9 @@ export class SubagentEventsObserver implements SubagentManagerObserver {
       error: record.error,
       startedAt: record.startedAt,
       completedAt: record.completedAt,
+      stack: record.invocation?.stack,
+      model: record.invocation?.modelName,
+      thinking: record.invocation?.thinking,
     });
     this.notifications.sendCompletion(record);
   }
@@ -92,6 +98,9 @@ export class SubagentEventsObserver implements SubagentManagerObserver {
       reason: info.reason,
       tokensBefore: info.tokensBefore,
       compactionCount: record.compactionCount,
+      stack: record.invocation?.stack,
+      model: record.invocation?.modelName,
+      thinking: record.invocation?.thinking,
     });
   }
 
@@ -102,6 +111,9 @@ export class SubagentEventsObserver implements SubagentManagerObserver {
       type: record.type,
       description: record.description,
       isBackground: true,
+      stack: record.invocation?.stack,
+      model: record.invocation?.modelName,
+      thinking: record.invocation?.thinking,
     });
   }
 }

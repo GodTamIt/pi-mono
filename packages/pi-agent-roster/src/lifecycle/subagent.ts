@@ -65,10 +65,10 @@ export interface SubagentExecution {
   readonly baseline: ChildRuntimeBaseline;
   readonly task: string;
   readonly baseCwd: string;
-  readonly model?: ChildModelIdentity | undefined;
+  model?: ChildModelIdentity | undefined;
   maxTurns?: number | undefined;
   graceTurns?: number | undefined;
-  readonly thinkingLevel?: ThinkingLevel | undefined;
+  thinkingLevel?: ThinkingLevel | undefined;
   readonly parentSession?: ParentSessionInfo | undefined;
   readonly isBackground: boolean;
 }
@@ -104,7 +104,7 @@ export class Subagent {
   readonly id: string;
   readonly type: SubagentType;
   readonly description: string;
-  readonly invocation?: AgentInvocation | undefined;
+  invocation?: AgentInvocation | undefined;
 
   // Lifecycle status and metrics — owned by a private value object; getters and
   // mutation methods below delegate to it one line.
@@ -357,6 +357,7 @@ export class Subagent {
         parentSession: this.execution.parentSession,
         model: runtime.model,
         thinkingLevel: this.execution.thinkingLevel,
+        invocation: this.invocation,
       });
     } catch (err) {
       // The factory disposed its own session on a post-creation failure.
@@ -442,6 +443,7 @@ export class Subagent {
     task: string,
     signal?: AbortSignal,
     budgets?: { maxTurns?: number | undefined; graceTurns?: number | undefined },
+    invocation?: { model: Model<any> | undefined; snapshot: AgentInvocation },
   ): Promise<void> {
     const session = this.subagentSession;
     const transcriptPath = session?.outputFile ?? this._releasedOutputFile;
@@ -451,18 +453,32 @@ export class Subagent {
     if (this.isActive()) return Promise.reject(new Error(`Subagent ${this.id} is already running`));
 
     const runtime = this.admitted();
-    if (runtime.workspaceProvider && !transcriptPath) {
+    if ((runtime.workspaceProvider || invocation) && !transcriptPath) {
       return Promise.reject(
-        new Error("Subagent not configured for workspace resume — missing child transcript"),
+        new Error("Subagent not configured for reconstructed resume — missing child transcript"),
       );
     }
 
     this._task = task;
+    if (budgets?.maxTurns !== undefined || budgets?.graceTurns !== undefined) {
+      this.invocation = {
+        ...this.invocation,
+        maxTurns: budgets.maxTurns ?? this.invocation?.maxTurns,
+        graceTurns: budgets.graceTurns ?? this.invocation?.graceTurns,
+      };
+    }
+    if (invocation) {
+      this.invocation = { ...invocation.snapshot };
+      this.execution.model = invocation.model
+        ? { provider: invocation.model.provider, id: invocation.model.id }
+        : undefined;
+      this.execution.thinkingLevel = invocation.snapshot.thinking;
+    }
     if (budgets?.maxTurns !== undefined) this.execution.maxTurns = budgets.maxTurns;
     if (budgets?.graceTurns !== undefined) this.execution.graceTurns = budgets.graceTurns;
     this.abortController = new AbortController();
 
-    if (session && !runtime.workspaceProvider) {
+    if (session && !runtime.workspaceProvider && !invocation) {
       this._promise = this.runResume(session, task, signal, budgets);
       return this._promise;
     }
@@ -503,8 +519,11 @@ export class Subagent {
         type: this.type,
         cwd,
         parentSession: this.execution.parentSession,
-        model: runtime.model,
+        model: this.execution.model
+          ? runtime.modelRegistry.find(this.execution.model.provider, this.execution.model.id)
+          : runtime.model,
         thinkingLevel: this.execution.thinkingLevel,
+        invocation: this.invocation,
         resumeTranscriptPath: transcriptPath,
       });
       if (!this.isRunning()) {

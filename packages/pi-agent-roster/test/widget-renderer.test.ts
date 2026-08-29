@@ -1,3 +1,4 @@
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import { AgentTypeRegistry } from "../src/config/agent-types.ts";
 import type { Theme } from "../src/ui/display.ts";
@@ -64,6 +65,23 @@ describe("renderFinishedLine", () => {
     expect(line).not.toContain("error");
     expect(line).not.toContain("aborted");
     expect(line).not.toContain("stopped");
+  });
+
+  it("labels stack metadata so the resolved invocation can be audited", () => {
+    const agent = makeAgent({
+      stack: "deep",
+      model: "anthropic/claude-opus",
+      thinking: "high",
+    });
+    const line = renderFinishedLine(agent, testRegistry, theme);
+
+    expect(line).toContain("stack: deep");
+    expect(line).toContain("model: anthropic/claude-opus");
+    expect(line).toContain("thinking: high");
+    expect(line.indexOf("stack: deep")).toBeLessThan(line.indexOf("model: anthropic/claude-opus"));
+    expect(line.indexOf("model: anthropic/claude-opus")).toBeLessThan(
+      line.indexOf("thinking: high"),
+    );
   });
 
   it("renders singular tool use", () => {
@@ -177,6 +195,21 @@ describe("renderRunningLines", () => {
 
     // Activity line shows what the agent is doing
     expect(activityLine).toContain("reading");
+  });
+
+  it("shows labeled stack metadata in the running row", () => {
+    const agent = makeAgent({
+      status: "running",
+      completedAt: undefined,
+      stack: "fast",
+      model: "anthropic/claude-haiku",
+      thinking: "low",
+    });
+    const [header] = renderRunningLines(agent, testRegistry, 0, theme);
+
+    expect(header).toContain("stack: fast");
+    expect(header).toContain("model: anthropic/claude-haiku");
+    expect(header).toContain("thinking: low");
   });
 
   it("shows thinking when activeTools is empty and responseText is blank", () => {
@@ -359,6 +392,33 @@ describe("renderWidgetLines", () => {
     });
 
     expect(lines).toEqual([]);
+  });
+
+  it("keeps textual failure status visible when a metadata-rich row is truncated", () => {
+    const agent = makeAgent({
+      status: "error",
+      error: "provider rejected the request",
+      description: "a deliberately long task description",
+      stack: "deep",
+      model: "anthropic/a-very-long-model-name",
+      thinking: "high",
+    });
+    const plainTheme: Theme = {
+      fg: (_color, text) => text,
+      bold: (text) => text,
+    };
+
+    const lines = renderWidgetLines({
+      agents: [agent],
+      registry: testRegistry,
+      spinnerFrame: 0,
+      terminalWidth: 36,
+      theme: plainTheme,
+      shouldShowFinished: () => true,
+    });
+
+    expect(lines[1]).toContain("error");
+    expect(lines.every((line) => visibleWidth(line) <= 36)).toBe(true);
   });
 
   it("uses dim heading when only finished agents are visible", () => {

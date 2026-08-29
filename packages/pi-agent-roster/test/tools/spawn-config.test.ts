@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AgentTypeRegistry } from "../../src/config/agent-types.ts";
+import { AgentStackOverrides } from "../../src/stacks/stack-resolver.ts";
 import { resolveSpawnConfig } from "../../src/tools/spawn-config.ts";
 import type { AgentConfig } from "../../src/types.ts";
 import { makeModel } from "../helpers/make-model.ts";
@@ -58,17 +59,28 @@ describe("resolveSpawnConfig — type resolution", () => {
     expect(result.identity.fellBack).toBe(false);
   });
 
-  it("falls back to general-purpose for unknown agent type", () => {
+  it("rejects an unknown agent type without a general-purpose fallback", () => {
     const result = resolveSpawnConfig(
       { subagent_type: "unknown-type", task: "test", description: "d" },
       testRegistry,
       makeModelInfo(),
       defaultSettings,
     );
-    expect("error" in result && result.error).toBeFalsy();
-    if ("error" in result) return;
-    expect(result.identity.subagentType).toBe("general-purpose");
-    expect(result.identity.fellBack).toBe(true);
+    expect(result).toEqual({ error: 'Unknown agent type: "unknown-type"' });
+  });
+
+  it("rejects a primary-only agent", () => {
+    const registry = new AgentTypeRegistry(
+      () => new Map([["primary", makeAgentConfig({ name: "primary", mode: "primary" })]]),
+    );
+    expect(
+      resolveSpawnConfig(
+        { subagent_type: "primary", task: "test" },
+        registry,
+        makeModelInfo(),
+        defaultSettings,
+      ),
+    ).toEqual({ error: 'Agent type "primary" is not available as a subagent' });
   });
 
   it("sets displayName from registry", () => {
@@ -123,7 +135,40 @@ describe("resolveSpawnConfig — type resolution", () => {
   });
 });
 
-describe("resolveSpawnConfig — model resolution", () => {
+describe("resolveSpawnConfig — stack/model resolution", () => {
+  it("uses an injected session override and records the canonical stack/model", () => {
+    const model = makeModel({ provider: "anthropic", id: "fast" });
+    const config = makeAgentConfig({
+      id: "worker",
+      name: "worker",
+      stacks: new Map([["Fast", { model: "anthropic/fast" }]]),
+    });
+    const registry = new AgentTypeRegistry(() => new Map([["worker", config]]));
+    const overrides = new AgentStackOverrides();
+    overrides.set(config, "fast");
+    const result = resolveSpawnConfig(
+      { subagent_type: "worker", task: "test" },
+      registry,
+      {
+        parentModel: undefined,
+        modelRegistry: {
+          find: (provider, id) =>
+            provider === model.provider && id === model.id ? model : undefined,
+          getAll: () => [model],
+          getAvailable: () => [model],
+        },
+      },
+      defaultSettings,
+      { stackOverrides: overrides },
+    );
+    if ("error" in result) throw new Error(result.error);
+    expect(result.execution.agentInvocation).toMatchObject({
+      stack: "Fast",
+      modelName: "anthropic/fast",
+    });
+    expect(result.execution.model).toBe(model);
+  });
+
   it("inherits parent model when no model specified", () => {
     const parentModel = makeModel({ id: "claude-sonnet", name: "Claude Sonnet" });
     const result = resolveSpawnConfig(
@@ -134,8 +179,7 @@ describe("resolveSpawnConfig — model resolution", () => {
     );
     if ("error" in result) return;
     expect(result.execution.model).toBe(parentModel);
-    // modelName is undefined when same as parent
-    expect(result.presentation.modelName).toBeUndefined();
+    expect(result.presentation.modelName).toBe("anthropic/claude-sonnet");
   });
 
   it("returns error when user-specified model cannot be resolved", () => {
@@ -208,7 +252,7 @@ describe("resolveSpawnConfig — invocation fields", () => {
     expect(result.execution.runInBackground).toBe(true);
   });
 
-  it("builds agentInvocation snapshot", () => {
+  it("builds a canonical invocation snapshot and clamps unsupported thinking", () => {
     const result = resolveSpawnConfig(
       { subagent_type: "general-purpose", task: "test", description: "d", thinking: "high" },
       testRegistry,
@@ -217,9 +261,9 @@ describe("resolveSpawnConfig — invocation fields", () => {
     );
     if ("error" in result) return;
     expect(result.execution.agentInvocation).toEqual({
-      modelName: undefined,
-      thinking: "high",
-      stack: undefined,
+      modelName: "anthropic/claude-sonnet",
+      thinking: undefined,
+      stack: "default",
       maxTurns: undefined,
       graceTurns: undefined,
       runInBackground: false,
@@ -241,11 +285,19 @@ describe("resolveSpawnConfig — detailBase and tags", () => {
     expect(result.presentation.detailBase.displayName).toBe("Agent");
   });
 
-  it("includes thinking tag when thinking is set", () => {
+  it("includes thinking tag when thinking is supported", () => {
+    const model = makeModel({ id: "claude-sonnet", name: "Claude Sonnet", reasoning: true });
     const result = resolveSpawnConfig(
       { subagent_type: "general-purpose", task: "test", description: "d", thinking: "high" },
       testRegistry,
-      makeModelInfo(),
+      makeModelInfo({
+        parentModel: model,
+        modelRegistry: {
+          find: () => model,
+          getAll: () => [model],
+          getAvailable: () => [model],
+        },
+      }),
       defaultSettings,
     );
     if ("error" in result) return;

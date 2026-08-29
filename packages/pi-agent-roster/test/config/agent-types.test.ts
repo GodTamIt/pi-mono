@@ -65,6 +65,36 @@ describe("AgentTypeRegistry", () => {
     });
   });
 
+  describe("snapshots", () => {
+    it("classifies enabled modes and disabled definitions", () => {
+      const registry = new AgentTypeRegistry(
+        () =>
+          new Map([
+            ["Primary", makeAgentConfig({ name: "Primary", mode: "primary" })],
+            ["Worker", makeAgentConfig({ name: "Worker", mode: "subagent" })],
+            ["Both", makeAgentConfig({ name: "Both", mode: "all" })],
+            ["Off", makeAgentConfig({ name: "Off", mode: "all", enabled: false })],
+          ]),
+      );
+      const snapshot = registry.snapshot();
+      expect(snapshot.primary).toEqual(["Primary", "Both"]);
+      expect(snapshot.subagent).toEqual(["Worker", "Both"]);
+      expect(snapshot.all).toEqual(["Both"]);
+      expect(snapshot.disabled).toEqual(["Off"]);
+    });
+
+    it("refresh replaces the snapshot and increments its revision", () => {
+      let agents = new Map([["one", makeAgentConfig({ name: "one" })]]);
+      const registry = new AgentTypeRegistry(() => agents);
+      const before = registry.snapshot();
+      agents = new Map([["two", makeAgentConfig({ name: "two" })]]);
+      const after = registry.refresh();
+      expect(after.revision).toBe(before.revision + 1);
+      expect([...before.agents.keys()]).toEqual(["one"]);
+      expect([...after.agents.keys()]).toEqual(["two"]);
+    });
+  });
+
   describe("resolveType", () => {
     it("returns canonical key for exact match", () => {
       const registry = makeRegistry();
@@ -98,10 +128,9 @@ describe("AgentTypeRegistry", () => {
       expect(config.name).toBe("Explore");
     });
 
-    it("falls back to general-purpose for unknown type", () => {
+    it("does not fall back for an unknown type", () => {
       const registry = makeRegistry();
-      const config = registry.resolveAgentConfig("nonexistent");
-      expect(config.name).toBe("general-purpose");
+      expect(() => registry.resolveAgentConfig("nonexistent")).toThrow("Unknown agent type");
     });
 
     it("returns config for disabled type (no fallback for existing disabled)", () => {
@@ -233,10 +262,16 @@ describe("AgentTypeRegistry", () => {
       expect(registry.getToolNamesForType("auditor")).toEqual(["read", "grep"]);
     });
 
-    it("returns BUILTIN_TOOL_NAMES for unknown type", () => {
+    it("returns no tools for an unknown type", () => {
       const registry = makeRegistry();
-      const names = registry.getToolNamesForType("nonexistent");
-      expect(names).toEqual(BUILTIN_TOOL_NAMES);
+      expect(registry.getToolNamesForType("nonexistent")).toEqual([]);
+    });
+
+    it("preserves an explicit empty tool allowlist", () => {
+      const registry = makeRegistry(
+        new Map([["notool", makeAgentConfig({ name: "notool", toolNames: [] })]]),
+      );
+      expect(registry.getToolNamesForType("notool")).toEqual([]);
     });
   });
 

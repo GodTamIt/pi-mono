@@ -161,6 +161,45 @@ describe("createSubagentSession — assembly", () => {
   });
 });
 
+describe("createSubagentSession — configured tools", () => {
+  it("rejects an unknown child tool before creating the session", async () => {
+    const registry = createAgentLookup({
+      name: "Custom",
+      source: "project",
+      toolNames: ["read", "missing_tool"],
+    });
+
+    await expect(
+      createSubagentSession(
+        { baseline: STUB_SNAPSHOT, modelRegistry: MODEL_REGISTRY, type: "Custom" },
+        createSubagentSessionDeps({ io, exec, registry }),
+      ),
+    ).rejects.toThrow("project:Custom.md:tools references unknown child tools: missing_tool");
+    expect(io.createSession).not.toHaveBeenCalled();
+  });
+
+  it("accepts a tool registered by a loaded child extension", async () => {
+    const session = arrangeFactory();
+    io.createResourceLoader.mockReturnValue({
+      reload: vi.fn().mockResolvedValue(undefined),
+      getExtensions: vi.fn().mockReturnValue({
+        extensions: [{ tools: new Map([["custom_tool", {}]]) }],
+      }),
+    });
+    const registry = createAgentLookup({ toolNames: ["read", "custom_tool"] });
+
+    const sub = await createSubagentSession(
+      { baseline: STUB_SNAPSHOT, modelRegistry: MODEL_REGISTRY, type: "Explore" },
+      createSubagentSessionDeps({ io, exec, registry }),
+    );
+
+    expect(sub.session).toBe(session);
+    expect(io.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ tools: ["read", "custom_tool"] }),
+    );
+  });
+});
+
 describe("createSubagentSession — lifecycle ordering", () => {
   let session: ReturnType<typeof createFactorySession>;
   let lifecycle: ReturnType<typeof createChildLifecycleMock>;

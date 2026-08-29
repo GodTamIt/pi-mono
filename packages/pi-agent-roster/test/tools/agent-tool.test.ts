@@ -146,7 +146,70 @@ describe("AgentTool — resume path", () => {
       "continue",
       expect.any(AbortSignal),
       { maxTurns: undefined, graceTurns: undefined },
+      expect.objectContaining({
+        snapshot: expect.objectContaining({ stack: "default" }),
+      }),
     );
+  });
+
+  it("applies legacy model and thinking as one-off overrides for the existing agent", async () => {
+    const deps = createToolDeps();
+    const resumeRecord = createTestSubagent({ type: "general-purpose" });
+    resumeRecord.subagentSession = toSubagentSession(
+      createSubagentSessionStub(createMockSession()),
+    );
+    deps.manager.getRecord = vi.fn().mockReturnValue(resumeRecord);
+    const parentModel = deps.runtime.getModelInfo().parentModel!;
+    const model = { ...parentModel, reasoning: true };
+    deps.runtime.getModelInfo = vi.fn(() => ({
+      parentModel: model,
+      modelRegistry: {
+        find: (provider: string, id: string) =>
+          provider === model.provider && id === model.id ? model : undefined,
+        getAll: () => [model],
+        getAvailable: () => [model],
+      },
+    }));
+
+    await execute(deps, {
+      task: "continue",
+      resume: "agent-1",
+      model: `${model.provider}/${model.id}`,
+      thinking: "high",
+    });
+
+    expect(deps.manager.resume).toHaveBeenCalledWith(
+      "agent-1",
+      "continue",
+      expect.any(AbortSignal),
+      { maxTurns: undefined, graceTurns: undefined },
+      expect.objectContaining({
+        model,
+        snapshot: expect.objectContaining({
+          modelName: `${model.provider}/${model.id}`,
+          thinking: "high",
+        }),
+      }),
+    );
+  });
+
+  it("rejects invalid legacy overrides atomically before resume", async () => {
+    const deps = createToolDeps();
+    const resumeRecord = createTestSubagent();
+    resumeRecord.subagentSession = toSubagentSession(
+      createSubagentSessionStub(createMockSession()),
+    );
+    deps.manager.getRecord = vi.fn().mockReturnValue(resumeRecord);
+
+    const result = await execute(deps, {
+      task: "continue",
+      resume: "agent-1",
+      model: "valid-looking-model",
+      thinking: "turbo",
+    });
+
+    expect(result.content[0]!.text).toContain("thinking must be one of");
+    expect(deps.manager.resume).not.toHaveBeenCalled();
   });
 
   it("returns result text on successful resume", async () => {

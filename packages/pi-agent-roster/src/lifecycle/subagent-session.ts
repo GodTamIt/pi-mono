@@ -17,7 +17,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { extractText } from "../session/context.ts";
 import { getAgentConversation } from "../session/conversation.ts";
-import type { SessionMessage } from "../types.ts";
+import type { AgentInvocation, SessionMessage } from "../types.ts";
 import type { ChildLifecyclePublisher } from "./child-lifecycle.ts";
 import { emitChildSessionShutdown } from "./child-shutdown.ts";
 import { normalizeMaxTurns } from "./turn-limits.ts";
@@ -57,6 +57,7 @@ export interface SubagentSessionMeta {
   /** Per-agent grace-turns from the resolved agent config. */
   agentGraceTurns: number | undefined;
   lifecycle: ChildLifecyclePublisher;
+  invocation?: AgentInvocation | undefined;
 }
 
 /**
@@ -130,6 +131,9 @@ export class SubagentSession {
         agentName: this.meta.agentName,
         aborted,
         steered: softLimitReached,
+        stack: this.meta.invocation?.stack,
+        model: this.meta.invocation?.modelName,
+        thinking: this.meta.invocation?.thinking,
       });
     } finally {
       unsubTurns();

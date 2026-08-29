@@ -35,6 +35,7 @@ import { CompositeSubagentObserver } from "./observation/composite-subagent-obse
 import { type NotificationDetails, NotificationManager } from "./observation/notification.ts";
 import { createNotificationRenderer } from "./observation/renderer.ts";
 import { SubagentEventsObserver } from "./observation/subagent-events-observer.ts";
+import { PRIMARY_AGENT_FLAG, PRIMARY_STACK_FLAG, PrimaryController } from "./primary/controller.ts";
 import { ROSTER_NAME_FLAG, ROSTER_NOOP_TOOL, ROSTER_STATUS_COMMAND } from "./public.ts";
 import { createSubagentRuntime } from "./runtime.ts";
 import { publishSubagentsService, unpublishSubagentsService } from "./service/service.ts";
@@ -183,9 +184,22 @@ export default function (pi: ExtensionAPI) {
     getRetentionPolicy: () => settings,
   });
 
+  const primary = new PrimaryController({
+    pi,
+    registry,
+    stackOverrides: runtime.stackOverrides,
+  });
+
   // Typed service published via Symbol.for() for cross-extension access.
   // Consumers: const { getSubagentsService } = await import("pi-agent-roster");
-  const service = new SubagentsServiceAdapter(manager, runtime);
+  const service = new SubagentsServiceAdapter(manager, runtime, {
+    registry,
+    stackOverrides: runtime.stackOverrides,
+    settings,
+    refreshRegistry: () => primary.reconcileBeforeDelegation(),
+    authorizeTarget: (type) => primary.authorizeTarget(type),
+    notify: (message) => primary.notify(message),
+  });
   publishSubagentsService(service);
 
   let widget: AgentWidget | undefined;
@@ -199,9 +213,13 @@ export default function (pi: ExtensionAPI) {
     unpublishSubagentsService,
   );
 
-  pi.on("session_start", (event, ctx) => lifecycle.handleSessionStart(event, ctx));
+  pi.on("session_start", async (event, ctx) => {
+    await lifecycle.handleSessionStart(event, ctx);
+    await primary.handleSessionStart(ctx);
+  });
   pi.on("session_before_switch", () => lifecycle.handleSessionBeforeSwitch());
   pi.on("session_shutdown", () => lifecycle.handleSessionShutdown());
+  pi.on("before_agent_start", (event) => primary.beforeAgentStart(event));
 
   // Live widget: constructed after the manager (it polls listAgents()) and
   // registered as a lifecycle observer so it self-drives its update timer.
@@ -220,7 +238,11 @@ export default function (pi: ExtensionAPI) {
   // ---- Agent tool ----
 
   pi.registerTool(
-    new AgentTool(manager, runtime, settings, registry, getAgentDir()).toToolDefinition(),
+    new AgentTool(manager, runtime, settings, registry, getAgentDir(), {
+      stackOverrides: runtime.stackOverrides,
+      refreshRegistry: () => primary.reconcileBeforeDelegation(),
+      authorizeTarget: (type) => primary.authorizeTarget(type),
+    }).toToolDefinition(),
   );
 
   // ---- get_subagent_result tool ----
@@ -230,6 +252,21 @@ export default function (pi: ExtensionAPI) {
   // ---- steer_subagent tool ----
 
   pi.registerTool(new SteerTool(manager, pi.events).toToolDefinition());
+
+  pi.registerCommand("agent", {
+    description: "Select a primary agent profile",
+    handler: (args, ctx) => primary.handleAgentCommand(args, ctx),
+  });
+
+  pi.registerCommand("stack", {
+    description: "Select a session-local agent stack",
+    handler: (args, ctx) => primary.handleStackCommand(args, ctx),
+  });
+
+  pi.registerCommand("agents:reload", {
+    description: "Reload agent definitions",
+    handler: (_args, ctx) => primary.reload(ctx),
+  });
 
   // ---- /subagents:settings command ----
 
@@ -265,6 +302,14 @@ function registerRosterBaseline(pi: ExtensionAPI): void {
     description: "Name this roster instance",
     type: "string",
     default: "default",
+  });
+  pi.registerFlag(PRIMARY_AGENT_FLAG, {
+    description: "Select an enabled primary agent profile",
+    type: "string",
+  });
+  pi.registerFlag(PRIMARY_STACK_FLAG, {
+    description: "Select a named stack for --agent",
+    type: "string",
   });
 
   pi.registerTool({

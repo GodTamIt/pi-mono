@@ -1,0 +1,399 @@
+import type {
+  BeforeAgentStartEvent,
+  BeforeAgentStartEventResult,
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import type { Model, ThinkingLevel } from "@earendil-works/pi-ai";
+import type { AgentTypeRegistry } from "../config/agent-types.ts";
+import { normalizeAgentId } from "../config/custom-agents.ts";
+import type { AgentStackOverrides } from "../stacks/stack-resolver.ts";
+import { resolveAgentStack } from "../stacks/stack-resolver.ts";
+import type { AgentConfig } from "../types.ts";
+
+export const PRIMARY_AGENT_FLAG = "agent";
+export const PRIMARY_STACK_FLAG = "stack";
+export const MANAGED_SUBAGENT_TOOLS = [
+  "subagent",
+  "get_subagent_result",
+  "steer_subagent",
+] as const;
+
+type PiThinkingLevel = ReturnType<ExtensionAPI["getThinkingLevel"]>;
+
+interface BaselineState {
+  model: Model<any> | undefined;
+  thinking: PiThinkingLevel;
+  systemPrompt: string;
+  tools: string[];
+}
+
+interface Selection {
+  name: string;
+  agent: AgentConfig;
+  model: Model<any>;
+  thinking: ThinkingLevel | undefined;
+  tools: string[];
+  stack: string;
+}
+
+export interface PrimaryControllerOptions {
+  pi: ExtensionAPI;
+  registry: AgentTypeRegistry;
+  stackOverrides: AgentStackOverrides;
+}
+
+export class PrimaryController {
+  private baseline: BaselineState | undefined;
+  private selected: Selection | undefined;
+  private delegationDenied: string | undefined;
+  private ctx: ExtensionContext | undefined;
+
+  constructor(private readonly options: PrimaryControllerOptions) {}
+
+  async handleSessionStart(ctx: ExtensionContext): Promise<void> {
+    this.options.registry.reload();
+    this.ctx = ctx;
+    this.selected = undefined;
+    this.delegationDenied = undefined;
+    this.options.stackOverrides.reset();
+    this.baseline = {
+      model: ctx.model,
+      thinking: this.options.pi.getThinkingLevel(),
+      systemPrompt: ctx.getSystemPrompt(),
+      tools: this.options.pi.getActiveTools(),
+    };
+
+    const requestedAgent = clean(this.options.pi.getFlag(PRIMARY_AGENT_FLAG));
+    const requestedStack = clean(this.options.pi.getFlag(PRIMARY_STACK_FLAG));
+    if (requestedStack && !requestedAgent) {
+      ctx.ui.notify(
+        `--${PRIMARY_STACK_FLAG} requires --${PRIMARY_AGENT_FLAG} naming an enabled primary agent.`,
+        "error",
+      );
+      this.reconcileToolVisibility();
+      return;
+    }
+    if (!requestedAgent) {
+      this.reconcileToolVisibility();
+      return;
+    }
+    if (normalizeAgentId(requestedAgent) === "default" && requestedStack) {
+      ctx.ui.notify(
+        `--${PRIMARY_STACK_FLAG} requires an enabled primary agent with a frontmatter stack.`,
+        "error",
+      );
+      this.reconcileToolVisibility();
+      return;
+    }
+
+    const resolved = this.resolveSelection(requestedAgent, requestedStack);
+    if (typeof resolved === "string") {
+      ctx.ui.notify(`Unable to apply startup agent: ${resolved}`, "error");
+      this.reconcileToolVisibility();
+      return;
+    }
+    const error = await this.applySelection(resolved, ctx);
+    if (error) {
+      ctx.ui.notify(`Unable to apply startup agent: ${error}`, "error");
+      this.reconcileToolVisibility();
+    }
+  }
+
+  beforeAgentStart(_event: BeforeAgentStartEvent): BeforeAgentStartEventResult | void {
+    const baseline = this.baseline?.systemPrompt;
+    if (baseline === undefined) return;
+    const prompt = this.selected?.agent.systemPrompt.trim();
+    return {
+      systemPrompt:
+        prompt && this.selected?.agent.promptMode === "replace"
+          ? prompt
+          : prompt
+            ? `${baseline}\n\n${prompt}`
+            : baseline,
+    };
+  }
+
+  async handleAgentCommand(args: string, ctx: ExtensionCommandContext): Promise<void> {
+    const name = args.trim();
+    if (!name) {
+      ctx.ui.notify("Usage: /agent <name|default>", "warning");
+      return;
+    }
+    await ctx.waitForIdle();
+    this.options.registry.reload();
+    const resolved = this.resolveSelection(name);
+    if (typeof resolved === "string") {
+      ctx.ui.notify(resolved, "error");
+      return;
+    }
+    const error = await this.applySelection(resolved, ctx);
+    ctx.ui.notify(
+      error ?? `Primary agent set to ${resolved?.name ?? "default"}.`,
+      error ? "error" : "info",
+    );
+  }
+
+  async handleStackCommand(args: string, ctx: ExtensionCommandContext): Promise<void> {
+    const [rawAgent, rawStack, ...extra] = args.trim().split(/\s+/);
+    if (!rawAgent || !rawStack || extra.length) {
+      ctx.ui.notify("Usage: /stack <agent> <stack|default|auto>", "warning");
+      return;
+    }
+    await ctx.waitForIdle();
+    this.options.registry.reload();
+    const canonical = this.options.registry.resolveType(rawAgent);
+    if (!canonical) {
+      ctx.ui.notify(`Unknown agent ${JSON.stringify(rawAgent)}.`, "error");
+      return;
+    }
+    const agent = this.options.registry.resolveAgentConfig(canonical);
+    if (agent.enabled === false) {
+      ctx.ui.notify(`Agent ${JSON.stringify(canonical)} is disabled.`, "error");
+      return;
+    }
+
+    const previousOverride = this.options.stackOverrides.get(agent);
+    if (normalizeAgentId(rawStack) === "auto") {
+      this.options.stackOverrides.clear(agent);
+    } else {
+      const resolution = this.resolveStack(agent, rawStack);
+      if (typeof resolution === "string") {
+        ctx.ui.notify(resolution, "error");
+        return;
+      }
+      this.options.stackOverrides.set(agent, resolution.stack);
+    }
+
+    if (this.selected && sameAgent(this.selected.agent, agent)) {
+      const next = this.resolveSelection(canonical);
+      if (typeof next === "string") {
+        restoreOverride(this.options.stackOverrides, agent, previousOverride);
+        ctx.ui.notify(next, "error");
+        return;
+      }
+      const error = await this.applySelection(next, ctx);
+      if (error) {
+        restoreOverride(this.options.stackOverrides, agent, previousOverride);
+        ctx.ui.notify(error, "error");
+        return;
+      }
+    } else {
+      this.reconcileToolVisibility();
+    }
+    ctx.ui.notify(
+      normalizeAgentId(rawStack) === "auto"
+        ? `Stack override cleared for ${canonical}.`
+        : `Stack ${JSON.stringify(rawStack)} selected for ${canonical}.`,
+      "info",
+    );
+  }
+
+  async reload(ctx: ExtensionCommandContext): Promise<void> {
+    await ctx.waitForIdle();
+    this.options.registry.reload();
+    if (this.selected) {
+      const canonical = this.options.registry.resolveType(this.selected.name);
+      const next = canonical
+        ? this.resolveSelection(canonical)
+        : `Selected primary ${JSON.stringify(this.selected.name)} no longer exists.`;
+      if (typeof next === "string") {
+        const error = await this.applySelection(undefined, ctx);
+        ctx.ui.notify(`${next} Restored default.${error ? ` ${error}` : ""}`, "warning");
+      } else {
+        const error = await this.applySelection(next, ctx);
+        if (error) ctx.ui.notify(`Reload could not reapply ${canonical}: ${error}`, "error");
+      }
+    } else {
+      this.delegationDenied = undefined;
+      this.reconcileToolVisibility();
+    }
+    ctx.ui.notify("Agent definitions reloaded.", "info");
+  }
+
+  reconcileBeforeDelegation(): void {
+    this.options.registry.reload();
+    if (this.selected) {
+      const name = this.selected.name;
+      const next = this.resolveSelection(name);
+      if (typeof next === "string" || !next) {
+        this.delegationDenied =
+          typeof next === "string"
+            ? `Selected primary ${JSON.stringify(name)} is no longer eligible: ${next}`
+            : `Selected primary ${JSON.stringify(name)} is no longer available.`;
+      } else {
+        this.selected = next;
+        this.delegationDenied = undefined;
+      }
+    }
+    this.reconcileToolVisibility();
+  }
+
+  notify(message: string): void {
+    this.ctx?.ui.notify(message, "warning");
+  }
+
+  authorizeTarget(type: string): string | undefined {
+    if (this.delegationDenied) return this.delegationDenied;
+    const canonical = this.options.registry.resolveType(type);
+    if (!canonical) return `Unknown agent type: ${JSON.stringify(type)}`;
+    const target = this.options.registry.resolveAgentConfig(canonical);
+    const mode = target.mode ?? "subagent";
+    if (target.enabled === false || (mode !== "subagent" && mode !== "all")) {
+      return `Agent type ${JSON.stringify(canonical)} is not available as a subagent`;
+    }
+    if (!this.selected?.agent.allowedAgents) return;
+    const allowed = new Set(this.selected.agent.allowedAgents.map(normalizeAgentId));
+    if (
+      allowed.has(normalizeAgentId(canonical)) ||
+      allowed.has(normalizeAgentId(target.id ?? target.name))
+    )
+      return;
+    return `Primary agent ${JSON.stringify(this.selected.name)} is not authorized to delegate to ${JSON.stringify(canonical)}.`;
+  }
+
+  private resolveSelection(name: string, explicitStack?: string): Selection | undefined | string {
+    if (normalizeAgentId(name) === "default") return undefined;
+    const canonical = this.options.registry.resolveType(name);
+    if (!canonical) return `Unknown primary agent ${JSON.stringify(name)}.`;
+    const agent = this.options.registry.resolveAgentConfig(canonical);
+    const mode = agent.mode ?? "subagent";
+    if (agent.enabled === false || (mode !== "primary" && mode !== "all")) {
+      return `Agent ${JSON.stringify(canonical)} is not an enabled primary/all agent.`;
+    }
+    const stack = this.resolveStack(agent, explicitStack);
+    if (typeof stack === "string") return stack;
+    if (stack.notice) this.ctx?.ui.notify(stack.notice.message, "warning");
+    if (!stack.model) return `No available model resolved for agent ${JSON.stringify(canonical)}.`;
+
+    const registered = new Set(this.options.pi.getAllTools().map((tool) => tool.name));
+    const tools = agent.toolNames ?? this.options.registry.getToolNamesForType(canonical);
+    const unknown = tools.filter((tool) => !registered.has(tool));
+    if (unknown.length) {
+      return `Agent ${JSON.stringify(canonical)} references unknown tools: ${unknown.join(", ")}.`;
+    }
+    return {
+      name: canonical,
+      agent,
+      model: stack.model,
+      thinking: stack.thinking,
+      tools: [...tools],
+      stack: stack.stack,
+    };
+  }
+
+  private resolveStack(agent: AgentConfig, explicitStack?: string) {
+    if (!this.ctx) return "No active session.";
+    const resolved = resolveAgentStack({
+      agent,
+      registry: this.ctx.modelRegistry,
+      runtimeModel: this.baseline?.model,
+      runtimeThinking: this.baseline?.thinking === "off" ? undefined : this.baseline?.thinking,
+      explicitStack,
+      sessionOverride: this.options.stackOverrides.get(agent),
+    });
+    return resolved.ok ? resolved.value : resolved.error;
+  }
+
+  private async applySelection(
+    next: Selection | undefined,
+    ctx: ExtensionContext,
+  ): Promise<string | undefined> {
+    const baseline = this.baseline;
+    if (!baseline) return "No session baseline is available.";
+    const previous = {
+      model: ctx.model,
+      thinking: this.options.pi.getThinkingLevel(),
+      tools: this.options.pi.getActiveTools(),
+      selected: this.selected,
+      delegationDenied: this.delegationDenied,
+    };
+    const model = next?.model ?? baseline.model;
+    const thinking: PiThinkingLevel = next ? (next.thinking ?? "off") : baseline.thinking;
+    this.delegationDenied = undefined;
+    const tools = this.visibleTools(next?.tools ?? baseline.tools, next);
+
+    try {
+      if (model && !(await this.options.pi.setModel(model))) {
+        throw new Error(`No authentication is available for ${model.provider}/${model.id}.`);
+      }
+      this.options.pi.setThinkingLevel(thinking);
+      this.options.pi.setActiveTools(tools);
+      this.selected = next;
+      this.delegationDenied = undefined;
+      return;
+    } catch (error) {
+      const rollbackErrors: string[] = [];
+      try {
+        if (previous.model && !(await this.options.pi.setModel(previous.model)))
+          rollbackErrors.push("model");
+      } catch {
+        rollbackErrors.push("model");
+      }
+      try {
+        this.options.pi.setThinkingLevel(previous.thinking);
+      } catch {
+        rollbackErrors.push("thinking");
+      }
+      try {
+        this.options.pi.setActiveTools(previous.tools);
+      } catch {
+        rollbackErrors.push("tools");
+      }
+      this.selected = previous.selected;
+      this.delegationDenied = previous.delegationDenied;
+      const message = error instanceof Error ? error.message : String(error);
+      return rollbackErrors.length
+        ? `${message} Rollback failed for: ${rollbackErrors.join(", ")}.`
+        : message;
+    }
+  }
+
+  private reconcileToolVisibility(): void {
+    const active = this.options.pi.getActiveTools();
+    const desired = this.selected?.tools ?? this.baseline?.tools ?? active;
+    this.options.pi.setActiveTools(this.visibleTools(active, this.selected, desired));
+  }
+
+  private visibleTools(tools: string[], selection = this.selected, desired = tools): string[] {
+    const hasTarget =
+      !this.delegationDenied &&
+      this.options.registry.getSubagentTypes().some((type) => {
+        if (!selection?.agent.allowedAgents) return true;
+        const config = this.options.registry.resolveAgentConfig(type);
+        const allowed = new Set(selection.agent.allowedAgents.map(normalizeAgentId));
+        return (
+          allowed.has(normalizeAgentId(type)) ||
+          allowed.has(normalizeAgentId(config.id ?? config.name))
+        );
+      });
+    const managed = new Set<string>(MANAGED_SUBAGENT_TOOLS);
+    const unrelated = tools.filter((name) => !managed.has(name));
+    if (!hasTarget) return unrelated;
+    const registered = new Set(this.options.pi.getAllTools().map((tool) => tool.name));
+    const wanted = selection ? new Set(desired) : new Set(MANAGED_SUBAGENT_TOOLS);
+    return [
+      ...unrelated,
+      ...MANAGED_SUBAGENT_TOOLS.filter((name) => registered.has(name) && wanted.has(name)),
+    ];
+  }
+}
+
+function clean(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return value.trim() || undefined;
+}
+
+function sameAgent(left: AgentConfig, right: AgentConfig): boolean {
+  return normalizeAgentId(left.id ?? left.name) === normalizeAgentId(right.id ?? right.name);
+}
+
+function restoreOverride(
+  overrides: AgentStackOverrides,
+  agent: AgentConfig,
+  previous: string | undefined,
+): void {
+  if (previous) overrides.set(agent, previous);
+  else overrides.clear(agent);
+}

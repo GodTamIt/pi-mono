@@ -1,6 +1,14 @@
+import type { Model } from "@earendil-works/pi-ai";
+import type { AgentTypeRegistry } from "../config/agent-types.ts";
 import type { ChildRuntimeBaseline } from "../lifecycle/child-runtime-baseline.ts";
 import type { WorkspaceProvider } from "../lifecycle/workspace.ts";
-import type { SessionContext, Subagent } from "../types.ts";
+import { AgentStackOverrides } from "../stacks/stack-resolver.ts";
+import type { AgentInvocation, SessionContext, Subagent } from "../types.ts";
+import {
+  type ModelInfo,
+  resolveInvocationForAgent,
+  resolveSpawnConfig,
+} from "../tools/spawn-config.ts";
 import { describeActivity } from "../ui/display.ts";
 import type { ResumeRequest, SpawnRequest, SubagentRecord, SubagentsService } from "./service.ts";
 
@@ -11,6 +19,7 @@ export interface SubagentManagerLike {
     task: string,
     signal?: AbortSignal,
     budgets?: { maxTurns?: number | undefined; graceTurns?: number | undefined },
+    invocation?: { model: Model<any> | undefined; snapshot: AgentInvocation },
   ): Promise<Subagent | undefined>;
   getRecord(id: string): Subagent | undefined;
   listAgents(): Subagent[];
@@ -24,12 +33,25 @@ export interface ServiceRuntimeLike {
   readonly currentCtx: SessionContext | undefined;
   buildChildBaseline(): ChildRuntimeBaseline;
   getSessionInfo(): { parentSessionFile: string; parentSessionId: string };
+  getModelInfo?(): ModelInfo;
+}
+
+export interface SubagentsServiceAdapterOptions {
+  registry: AgentTypeRegistry;
+  stackOverrides?: AgentStackOverrides | undefined;
+  refreshRegistry?: (() => void) | undefined;
+  authorizeTarget?: ((type: string) => string | undefined) | undefined;
+  notify?: ((message: string) => void) | undefined;
+  settings?:
+    | { readonly defaultMaxTurns: number | undefined; readonly graceTurns?: number | undefined }
+    | undefined;
 }
 
 export class SubagentsServiceAdapter implements SubagentsService {
   constructor(
     private readonly manager: SubagentManagerLike,
     private readonly runtime: ServiceRuntimeLike,
+    private readonly options?: SubagentsServiceAdapterOptions,
   ) {}
 
   spawn(request: SpawnRequest): string {
@@ -41,36 +63,87 @@ export class SubagentsServiceAdapter implements SubagentsService {
     validateBudget(request.maxTurns, "maxTurns", 1, 10_000);
     validateBudget(request.graceTurns, "graceTurns", 0, 1_000);
     const description = optionalText(request.description, "description") ?? task.slice(0, 80);
-    const parent = this.runtime.getSessionInfo();
-    return this.manager.spawn(this.runtime.buildChildBaseline(), type, task, {
-      description,
-      maxTurns: request.maxTurns,
-      graceTurns: request.graceTurns,
-      bypassQueue: request.bypassQueue,
-      isBackground: !(request.foreground ?? false),
-      parentSession: parent,
-      invocation: {
+    const options = this.requireResolution();
+    (options.refreshRegistry ?? (() => options.registry.reload()))();
+    const resolved = resolveSpawnConfig(
+      {
+        subagent_type: type,
+        task,
+        description,
         stack,
-        maxTurns: request.maxTurns,
-        graceTurns: request.graceTurns,
-        runInBackground: !(request.foreground ?? false),
+        max_turns: request.maxTurns,
+        grace_turns: request.graceTurns,
+        run_in_background: !(request.foreground ?? false),
       },
-    });
+      options.registry,
+      this.getModelInfo(),
+      options.settings ?? { defaultMaxTurns: undefined },
+      { stackOverrides: options.stackOverrides },
+    );
+    if ("error" in resolved) throw new Error(resolved.error);
+    const authorizationError = options.authorizeTarget?.(resolved.identity.subagentType);
+    if (authorizationError) throw new Error(authorizationError);
+    if (resolved.execution.notice) options.notify?.(resolved.execution.notice);
+    const parent = this.runtime.getSessionInfo();
+    return this.manager.spawn(
+      this.runtime.buildChildBaseline(),
+      resolved.identity.subagentType,
+      task,
+      {
+        description,
+        model: resolved.execution.model,
+        maxTurns: resolved.execution.effectiveMaxTurns,
+        graceTurns: resolved.execution.effectiveGraceTurns,
+        thinkingLevel: resolved.execution.thinking,
+        bypassQueue: request.bypassQueue,
+        isBackground: !(request.foreground ?? false),
+        parentSession: parent,
+        invocation: {
+          ...resolved.execution.agentInvocation,
+          runInBackground: !(request.foreground ?? false),
+        },
+      },
+    );
   }
 
   async resume(request: ResumeRequest): Promise<SubagentRecord | undefined> {
     rejectInheritedContext(request);
     const id = requireText(request.id, "id");
     const task = requireText(request.task, "task");
-    if (optionalText(request.stack, "stack") !== undefined) {
-      throw new Error("stack selection is unavailable when resuming an existing child.");
-    }
+    const stack = optionalText(request.stack, "stack");
     validateBudget(request.maxTurns, "maxTurns", 1, 10_000);
     validateBudget(request.graceTurns, "graceTurns", 0, 1_000);
-    const record = await this.manager.resume(id, task, request.signal, {
-      maxTurns: request.maxTurns,
-      graceTurns: request.graceTurns,
-    });
+    const existing = this.manager.getRecord(id);
+    if (!existing) return undefined;
+    const options = this.requireResolution();
+    (options.refreshRegistry ?? (() => options.registry.reload()))();
+    const authorizationError = options.authorizeTarget?.(existing.type);
+    if (authorizationError) throw new Error(authorizationError);
+    const selection = resolveInvocationForAgent(
+      existing.type,
+      stack ? { stack } : {},
+      options.registry,
+      this.getModelInfo(),
+      { stackOverrides: options.stackOverrides },
+    );
+    if ("error" in selection) throw new Error(selection.error);
+    if (selection.notice) options.notify?.(selection.notice);
+    const invocation = {
+      model: selection.model,
+      snapshot: {
+        ...existing.invocation,
+        ...selection.invocation,
+        maxTurns: request.maxTurns ?? existing.invocation?.maxTurns,
+        graceTurns: request.graceTurns ?? existing.invocation?.graceTurns,
+      },
+    };
+    const record = await this.manager.resume(
+      id,
+      task,
+      request.signal,
+      { maxTurns: request.maxTurns, graceTurns: request.graceTurns },
+      invocation,
+    );
     return record ? toSubagentRecord(record) : undefined;
   }
 
@@ -104,6 +177,22 @@ export class SubagentsServiceAdapter implements SubagentsService {
 
   registerWorkspaceProvider(provider: WorkspaceProvider): () => void {
     return this.manager.registerWorkspaceProvider(provider);
+  }
+
+  private getModelInfo(): ModelInfo {
+    if (!this.runtime.getModelInfo) {
+      throw new Error("SubagentsServiceAdapter requires model resolution wiring.");
+    }
+    return this.runtime.getModelInfo();
+  }
+
+  private requireResolution(): SubagentsServiceAdapterOptions {
+    if (!this.options) {
+      throw new Error(
+        "SubagentsServiceAdapter requires registry/model resolution wiring before spawn or stack resume.",
+      );
+    }
+    return this.options;
   }
 }
 

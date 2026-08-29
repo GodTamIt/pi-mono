@@ -8,7 +8,9 @@ import {
 import type { SubagentSession, TurnLoopResult } from "../../src/lifecycle/subagent-session.ts";
 import { SubagentState, type SubagentStateInit } from "../../src/lifecycle/subagent-state.ts";
 import type { Workspace, WorkspaceProvider } from "../../src/lifecycle/workspace.ts";
+import type { ModelRegistry } from "../../src/session/model-resolver.ts";
 import type { AgentInvocation, CompactionInfo, SubagentType } from "../../src/types.ts";
+import { makeModel } from "../helpers/make-model.ts";
 import { makeStubExecution, makeStubRuntime } from "../helpers/make-subagent.ts";
 import {
   createMockSession,
@@ -650,6 +652,7 @@ function createRunnableAgent(overrides?: {
   signal?: AbortSignal;
   baseCwd?: string;
   workspaceProvider?: WorkspaceProvider;
+  modelRegistry?: ModelRegistry;
 }) {
   const createSubagentSession = overrides?.createSubagentSession ?? defaultFactory();
   const observer = overrides?.observer ?? {};
@@ -672,6 +675,7 @@ function createRunnableAgent(overrides?: {
       runConfig: overrides?.getRunConfig?.(),
       signal: overrides?.signal,
       workspaceProvider: overrides?.workspaceProvider,
+      modelRegistry: overrides?.modelRegistry ?? { find: () => undefined, getAll: () => [] },
     }),
   );
   return agent;
@@ -1071,6 +1075,42 @@ describe("Subagent.resume() — happy path", () => {
 
     expect(vi.mocked(factory).mock.calls[1]![0]).toMatchObject({
       cwd: STUB_SNAPSHOT.cwd,
+      resumeTranscriptPath: "/sessions/child.jsonl",
+    });
+  });
+
+  it("reconstructs with a newly resolved stack model and thinking snapshot", async () => {
+    const initial = createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl");
+    const restored = createSubagentSessionStub();
+    const factory: SessionFactory = vi
+      .fn()
+      .mockResolvedValueOnce(toSubagentSession(initial))
+      .mockResolvedValueOnce(toSubagentSession(restored));
+    const model = makeModel({ provider: "anthropic", id: "deep", reasoning: true });
+    const agent = createRunnableAgent({
+      createSubagentSession: factory,
+      modelRegistry: {
+        find: (provider, id) =>
+          provider === model.provider && id === model.id ? model : undefined,
+        getAll: () => [model],
+      },
+    });
+
+    await agent.run();
+    await agent.resume("continue", undefined, undefined, {
+      model,
+      snapshot: { stack: "deep", modelName: "anthropic/deep", thinking: "high" },
+    });
+
+    expect(agent.invocation).toEqual({
+      stack: "deep",
+      modelName: "anthropic/deep",
+      thinking: "high",
+    });
+    expect(vi.mocked(factory).mock.calls[1]![0]).toMatchObject({
+      model,
+      thinkingLevel: "high",
+      invocation: { stack: "deep", modelName: "anthropic/deep", thinking: "high" },
       resumeTranscriptPath: "/sessions/child.jsonl",
     });
   });

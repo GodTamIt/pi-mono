@@ -12,6 +12,7 @@ import {
   type ChildRuntimeBaseline,
 } from "./lifecycle/child-runtime-baseline.ts";
 import type { ModelRegistry } from "./session/model-resolver.ts";
+import { AgentStackOverrides } from "./stacks/stack-resolver.ts";
 import type { ModelInfo } from "./tools/spawn-config.ts";
 import type { SessionContext } from "./types.ts";
 
@@ -31,6 +32,8 @@ export interface RunConfig {
  * Tests construct a fresh runtime per test for full isolation.
  */
 export class SubagentRuntime {
+  constructor(readonly stackOverrides: AgentStackOverrides = new AgentStackOverrides()) {}
+
   // ── Session state (was closure-scoped in index.ts) ───────────────────────
   /** Active Pi session context — set on session_start, cleared on session_shutdown. */
   currentCtx: SessionContext | undefined = undefined;
@@ -84,6 +87,6 @@ export class SubagentRuntime {
  *
  * Call once at extension startup; pass the result to factories and handlers.
  */
-export function createSubagentRuntime(): SubagentRuntime {
-  return new SubagentRuntime();
+export function createSubagentRuntime(stackOverrides?: AgentStackOverrides): SubagentRuntime {
+  return new SubagentRuntime(stackOverrides);
 }

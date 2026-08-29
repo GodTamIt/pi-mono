@@ -7,6 +7,7 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { AgentTypeRegistry } from "../config/agent-types.ts";
+import type { AgentStackOverrides } from "../stacks/stack-resolver.ts";
 import type { ChildRuntimeBaseline } from "../lifecycle/child-runtime-baseline.ts";
 import type { AgentSpawnConfig } from "../lifecycle/subagent-manager.ts";
 import type { ParentSessionInfo, Subagent } from "../types.ts";
@@ -16,7 +17,12 @@ import { spawnBackground } from "./background-spawner.ts";
 import { runForeground } from "./foreground-runner.ts";
 import { buildAgentGuidelines, buildTypeListText, textResult } from "./helpers.ts";
 import { renderAgentResult } from "./result-renderer.ts";
-import { type ModelInfo, resolveResumeConfig, resolveSpawnConfig } from "./spawn-config.ts";
+import {
+  type ModelInfo,
+  resolveInvocationForAgent,
+  resolveResumeConfig,
+  resolveSpawnConfig,
+} from "./spawn-config.ts";
 
 // ---- Deps interfaces ----
 
@@ -39,15 +45,27 @@ export interface AgentToolManager {
     task: string,
     signal: AbortSignal,
     budgets?: { maxTurns?: number | undefined; graceTurns?: number | undefined },
+    invocation?: {
+      model: import("@earendil-works/pi-ai").Model<any> | undefined;
+      snapshot: import("../types.ts").AgentInvocation;
+    },
   ) => Promise<Subagent | undefined>;
   getRecord: (id: string) => Subagent | undefined;
 }
 
 /** Narrow runtime interface — the Agent tool's slice of SubagentRuntime. */
 export interface AgentToolRuntime {
+  readonly stackOverrides?: AgentStackOverrides | undefined;
   buildChildBaseline(): ChildRuntimeBaseline;
   getModelInfo(): ModelInfo;
   getSessionInfo(): { parentSessionFile: string; parentSessionId: string };
+}
+
+export interface AgentToolOptions {
+  /** Reconcile discovery-dependent state immediately before delegation. */
+  refreshRegistry?: (() => void) | undefined;
+  stackOverrides?: AgentStackOverrides | undefined;
+  authorizeTarget?: ((type: string) => string | undefined) | undefined;
 }
 
 /** Narrow settings accessor — only the fields the Agent tool reads. */
@@ -70,6 +88,7 @@ export class AgentTool {
     private readonly settings: AgentToolSettings,
     private readonly registry: AgentTypeRegistry,
     private readonly agentDir: string,
+    private readonly options: AgentToolOptions = {},
   ) {
     this.typeListText = buildTypeListText(registry, agentDir);
     this.availableTypesText = registry.getAvailableTypes().join(", ");
@@ -81,10 +100,10 @@ export class AgentTool {
     params: Record<string, unknown>,
     signal: AbortSignal | undefined,
     onUpdate: ((update: AgentToolResult<AgentDetails>) => void) | undefined,
-    _ctx: ExtensionContext,
+    ctx: ExtensionContext,
   ) {
-    // Reload custom agents so new .pi/agents/*.md files are picked up without restart
-    this.registry.reload();
+    // Revalidate discovery/auth immediately before any work can enter the queue.
+    (this.options.refreshRegistry ?? (() => this.registry.reload()))();
 
     // ---- Resume existing agent ----
     if (params.resume !== undefined) {
@@ -92,26 +111,33 @@ export class AgentTool {
       if ("error" in config) return textResult(config.error);
       const resumeId = typeof params.resume === "string" ? params.resume.trim() : "";
       if (!resumeId) return textResult("resume must be a non-empty string");
-      if (
-        params.stack !== undefined &&
-        (typeof params.stack !== "string" || !params.stack.trim())
-      ) {
-        return textResult("stack must be a non-empty string");
-      }
-      if (params.stack !== undefined) {
-        return textResult("stack selection is unavailable when resuming an existing child.");
-      }
       const existing = this.manager.getRecord(resumeId);
       if (!existing) {
         return textResult(
           `Agent not found: "${resumeId}". Records are cleared at session start/switch, so it may be from a previous session.`,
         );
       }
+      const authorizationError = this.options.authorizeTarget?.(existing.type);
+      if (authorizationError) return textResult(authorizationError);
       if (existing.isActive())
         return textResult(`Agent "${resumeId}" is still running and cannot be resumed.`);
       if (!existing.isSessionReady() && !existing.sessionReleased) {
         return textResult(`Agent "${resumeId}" has no child transcript to resume.`);
       }
+      const stackOverrides = this.options.stackOverrides ?? this.runtime.stackOverrides;
+      const selection = resolveInvocationForAgent(
+        existing.type,
+        {
+          ...(config.stack ? { stack: config.stack } : {}),
+          ...(config.model ? { model: config.model } : {}),
+          ...(config.thinking ? { thinking: config.thinking } : {}),
+        },
+        this.registry,
+        this.runtime.getModelInfo(),
+        { stackOverrides },
+      );
+      if ("error" in selection) return textResult(selection.error);
+      if (selection.notice) ctx.ui.notify(selection.notice, "warning");
       const record = await this.manager.resume(
         resumeId,
         config.task,
@@ -119,6 +145,15 @@ export class AgentTool {
         {
           maxTurns: config.maxTurns,
           graceTurns: config.graceTurns,
+        },
+        {
+          model: selection.model,
+          snapshot: {
+            ...existing.invocation,
+            ...selection.invocation,
+            maxTurns: config.maxTurns ?? existing.invocation?.maxTurns,
+            graceTurns: config.graceTurns ?? existing.invocation?.graceTurns,
+          },
         },
       );
       if (!record) {
@@ -135,8 +170,12 @@ export class AgentTool {
       this.registry,
       this.runtime.getModelInfo(),
       this.settings,
+      { stackOverrides: this.options.stackOverrides ?? this.runtime.stackOverrides },
     );
     if ("error" in config) return textResult(config.error);
+    const authorizationError = this.options.authorizeTarget?.(config.identity.subagentType);
+    if (authorizationError) return textResult(authorizationError);
+    if (config.execution.notice) ctx.ui.notify(config.execution.notice, "warning");
 
     const baseline = this.runtime.buildChildBaseline();
     const { parentSessionFile, parentSessionId } = this.runtime.getSessionInfo();
@@ -214,7 +253,7 @@ ${guidelines}
         thinking: Type.Optional(
           Type.String({
             description:
-              "Thinking level: off, minimal, low, medium, high, xhigh. Overrides agent default.",
+              "Thinking level: minimal, low, medium, high, xhigh, or max. Overrides agent default.",
           }),
         ),
         stack: Type.Optional(

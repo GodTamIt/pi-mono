@@ -15,7 +15,7 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 }
 
 describe("resolveAgentInvocationConfig", () => {
-  it("locks model and thinking to agent config while invocation budgets take precedence", () => {
+  it("applies legacy one-off model/thinking overlays and invocation budgets", () => {
     const resolved = resolveAgentInvocationConfig(
       makeConfig({
         model: "provider/config-model",
@@ -33,9 +33,9 @@ describe("resolveAgentInvocationConfig", () => {
     );
 
     expect(resolved).toMatchObject({
-      modelInput: "provider/config-model",
-      modelFromParams: false,
-      thinking: "high",
+      modelInput: "provider/param-model",
+      modelFromParams: true,
+      thinking: "minimal",
       maxTurns: 1,
       graceTurns: 0,
       runInBackground: false,

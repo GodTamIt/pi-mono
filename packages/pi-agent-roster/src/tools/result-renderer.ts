@@ -21,7 +21,8 @@ export function renderAgentResult(
   theme: Theme,
 ): string {
   if (isPartial || details.status === "running") return renderRunning(details, theme);
-  if (details.status === "background") return renderBackground(details, theme);
+  if (details.status === "background")
+    return renderBackground(details, resultText, expanded, theme);
   if (details.status === "completed" || details.status === "steered")
     return renderCompleted(details, resultText, expanded, theme);
   if (details.status === "stopped") return renderStopped(details, theme);
@@ -39,9 +40,32 @@ export function renderRunning(details: AgentDetails, theme: Theme): string {
   return line;
 }
 
-/** Render background launch status. */
-export function renderBackground(details: AgentDetails, theme: Theme): string {
-  return theme.fg("dim", `  ${GLYPHS.subLine}  Running in background (ID: ${details.agentId})`);
+/** Render background launch status with a compact invocation summary or expanded raw result. */
+export function renderBackground(
+  details: AgentDetails,
+  resultText: string,
+  expanded: boolean,
+  theme: Theme,
+): string {
+  let line = theme.fg("dim", `  ${GLYPHS.subLine}  Background \u00B7 ID: ${details.agentId}`);
+
+  if (expanded && resultText) {
+    for (const rawLine of resultText.split("\n")) {
+      line += "\n" + theme.fg("dim", `  ${rawLine}`);
+    }
+    return line;
+  }
+
+  const stack = details.tags?.find((tag) => tag.startsWith("stack: "));
+  const thinking = details.tags?.find((tag) => tag.startsWith("thinking: "));
+  const shortParts = [stack, thinking].filter((part): part is string => part !== undefined);
+  if (shortParts.length > 0) {
+    line += "\n" + theme.fg("dim", `  ${shortParts.join(" \u00B7 ")}`);
+  }
+  if (details.modelName) {
+    line += "\n" + theme.fg("dim", `  model: ${details.modelName}`);
+  }
+  return line;
 }
 
 /** Render completed or steered status with optional expanded result text. */

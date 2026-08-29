@@ -206,19 +206,15 @@ Comma entry.`,
     });
   });
 
-  it("passes through thinking level as-is (no validation)", () => {
-    writeAgent(
-      "anythink",
-      `---
-thinking: turbo
----
+  it("isolates an unsupported thinking level", () => {
+    writeAgent("valid", "Valid agent.");
+    writeAgent("anythink", "---\nthinking: turbo\n---\n\nAny thinking.");
 
-Any thinking.`,
-    );
-
-    const result = loadCustomAgents(tmpDir);
-    // Pi validates at session creation — we just pass through
-    expect(result.get("anythink")!.thinking).toBe("turbo");
+    const diagnostics: string[] = [];
+    const result = loadCustomAgents(tmpDir, (diagnostic) => diagnostics.push(diagnostic.message));
+    expect(result.has("anythink")).toBe(false);
+    expect(result.has("valid")).toBe(true);
+    expect(diagnostics).toContainEqual(expect.stringContaining("supported thinking level"));
   });
 
   it("normalizes legacy max_turns: 0 to unlimited", () => {
@@ -245,8 +241,10 @@ max_turns: -5
 Negative turns.`,
     );
 
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("negturns")!.maxTurns).toBeUndefined();
+    const diagnostics: string[] = [];
+    const result = loadCustomAgents(tmpDir, (diagnostic) => diagnostics.push(diagnostic.message));
+    expect(result.has("negturns")).toBe(false);
+    expect(diagnostics).toContainEqual(expect.stringContaining("max_turns"));
   });
 
   it("handles prompt_mode: append", () => {
@@ -263,18 +261,13 @@ Extra instructions.`,
     expect(result.get("appender")!.promptMode).toBe("append");
   });
 
-  it("defaults unknown prompt_mode to append", () => {
-    writeAgent(
-      "badmode",
-      `---
-prompt_mode: merge
----
+  it("rejects an unknown prompt_mode", () => {
+    writeAgent("badmode", "---\nprompt_mode: merge\n---\n\nUnknown mode.");
 
-Unknown mode.`,
-    );
-
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("badmode")!.promptMode).toBe("append");
+    const diagnostics: string[] = [];
+    const result = loadCustomAgents(tmpDir, (diagnostic) => diagnostics.push(diagnostic.message));
+    expect(result.has("badmode")).toBe(false);
+    expect(diagnostics).toContainEqual(expect.stringContaining("replace or append"));
   });
 
   it("loads multiple agents", () => {
@@ -338,8 +331,8 @@ Should be loaded.`,
     );
 
     const result = loadCustomAgents(tmpDir);
-    expect(result.has("Explore")).toBe(true);
-    expect(result.get("Explore")!.description).toBe("Custom Explore");
+    expect(result.has("explore")).toBe(true);
+    expect(result.get("explore")!.description).toBe("Custom Explore");
     expect(result.has("custom")).toBe(true);
   });
 
@@ -384,6 +377,93 @@ Agent prompt.`,
 
     const result = loadCustomAgents(tmpDir);
     expect(result.get("myagent")!.displayName).toBe("MyAgent");
+  });
+
+  it("uses a stable case-insensitive identity when a project file overrides global", () => {
+    const globalDir = join(tmpDir, ".pi", "agent", "agents");
+    mkdirSync(globalDir, { recursive: true });
+    writeFileSync(globalDir + "/Reviewer.md", "---\ndescription: Global\n---\nGlobal.");
+    writeAgent("reviewer", "---\ndescription: Project\n---\nProject.");
+
+    const result = loadCustomAgents(tmpDir);
+    expect([...result.keys()]).toEqual(["reviewer"]);
+    expect(result.get("reviewer")).toMatchObject({
+      id: "reviewer",
+      name: "reviewer",
+      description: "Project",
+      source: "project",
+    });
+  });
+
+  it("does not resurrect a global definition behind an invalid project override", () => {
+    const globalDir = join(tmpDir, ".pi", "agent", "agents");
+    mkdirSync(globalDir, { recursive: true });
+    writeFileSync(`${globalDir}/reviewer.md`, "Global.");
+    writeAgent("REVIEWER", "---\nmode: invalid\n---\nProject.");
+
+    const diagnostics: string[] = [];
+    const result = loadCustomAgents(tmpDir, (diagnostic) => diagnostics.push(diagnostic.message));
+    expect(result.has("reviewer")).toBe(false);
+    expect(diagnostics).toContainEqual(expect.stringContaining("mode must be"));
+  });
+
+  it("parses modes, delegation, stacks, and independent budgets", () => {
+    writeAgent(
+      "reviewer",
+      `---
+mode: all
+allowed_agents: [tests, explore]
+default_stack: BALANCED
+stacks:
+  fast:
+    model: anthropic/haiku
+  balanced:
+    model: anthropic/sonnet
+    thinking: high
+max_turns: 25
+grace_turns: 3
+---
+Review.`,
+    );
+
+    const agent = loadCustomAgents(tmpDir, () => {}).get("reviewer")!;
+    expect(agent.mode).toBe("all");
+    expect(agent.allowedAgents).toEqual(["tests", "explore"]);
+    expect(agent.defaultStack).toBe("balanced");
+    expect(agent.stacks?.get("fast")).toEqual({ model: "anthropic/haiku" });
+    expect(agent.maxTurns).toBe(25);
+    expect(agent.graceTurns).toBe(3);
+  });
+
+  it("accepts the synthetic default as a default_stack", () => {
+    writeAgent("reviewer", "---\ndefault_stack: default\n---\nReview.");
+
+    expect(loadCustomAgents(tmpDir, () => {}).get("reviewer")?.defaultStack).toBe("default");
+  });
+
+  it.each(["inherit_context", "model_stacks"])("rejects unsupported %s per file", (field) => {
+    writeAgent("bad", `---\n${field}: true\n---\nBad.`);
+    writeAgent("good", "Good.");
+    const diagnostics: string[] = [];
+    const result = loadCustomAgents(tmpDir, (diagnostic) => diagnostics.push(diagnostic.message));
+    expect(result.has("bad")).toBe(false);
+    expect(result.has("good")).toBe(true);
+    expect(diagnostics).toContainEqual(expect.stringContaining(`${field} is unsupported`));
+  });
+
+  it("rejects reserved, colliding, malformed, empty, and unknown default stacks", () => {
+    const cases = {
+      reserved: "stacks:\n  default:\n    model: a/b",
+      collision: "stacks:\n  Fast:\n    model: a/b\n  fast:\n    model: c/d",
+      malformed: "stacks:\n  fast:\n    model: sonnet",
+      empty: 'default_stack: ""',
+      unknown: "default_stack: missing\nstacks:\n  fast:\n    model: a/b",
+    };
+    for (const [name, yaml] of Object.entries(cases)) writeAgent(name, `---\n${yaml}\n---\nBad.`);
+    const diagnostics: string[] = [];
+    const result = loadCustomAgents(tmpDir, (diagnostic) => diagnostics.push(diagnostic.message));
+    expect(result.size).toBe(0);
+    expect(diagnostics).toHaveLength(5);
   });
 
   it("honors PI_CODING_AGENT_DIR for global custom agent discovery", () => {

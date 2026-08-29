@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AgentTypeRegistry } from "../src/config/agent-types.ts";
 import type { AgentConfig } from "../src/types.ts";
 import {
+  buildInvocationMetadataParts,
   buildInvocationTags,
   formatSessionTokens,
   getDisplayName,
@@ -52,6 +53,12 @@ describe("getDisplayName", () => {
   it("uses registry to resolve general-purpose displayName", () => {
     expect(getDisplayName("general-purpose", testRegistry)).toBe("Agent");
   });
+
+  it("keeps stale records renderable after their agent definition is removed", () => {
+    const emptyRegistry = new AgentTypeRegistry(() => new Map());
+    expect(getDisplayName("general-purpose", emptyRegistry)).toBe("Agent");
+    expect(getDisplayName("retired-reviewer", emptyRegistry)).toBe("retired-reviewer");
+  });
 });
 
 describe("getPromptModeLabel", () => {
@@ -73,6 +80,30 @@ describe("getPromptModeLabel", () => {
 
   it("returns undefined for replace promptMode", () => {
     expect(getPromptModeLabel("Explore", testRegistry)).toBeUndefined();
+  });
+
+  it("omits a mode label when a stale record no longer has a definition", () => {
+    const emptyRegistry = new AgentTypeRegistry(() => new Map());
+    expect(getPromptModeLabel("retired-reviewer", emptyRegistry)).toBeUndefined();
+  });
+});
+
+describe("buildInvocationMetadataParts", () => {
+  it("labels the selected stack and its resolved model and thinking level", () => {
+    expect(
+      buildInvocationMetadataParts({
+        stack: "deep",
+        model: "anthropic/claude-opus",
+        thinking: "high",
+      }),
+    ).toEqual(["stack: deep", "model: anthropic/claude-opus", "thinking: high"]);
+  });
+
+  it("omits unavailable metadata without placeholder clutter", () => {
+    expect(buildInvocationMetadataParts({ model: "anthropic/claude-sonnet" })).toEqual([
+      "model: anthropic/claude-sonnet",
+    ]);
+    expect(buildInvocationMetadataParts({})).toEqual([]);
   });
 });
 

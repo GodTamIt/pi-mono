@@ -23,9 +23,9 @@ export function resolveAgentInvocationConfig(
 } {
   const stack = typeof params.stack === "string" ? params.stack.trim() : undefined;
   return {
-    modelInput: agentConfig?.model ?? params.model,
-    modelFromParams: agentConfig?.model == null && params.model != null,
-    thinking: (agentConfig?.thinking ?? params.thinking) as ThinkingLevel | undefined,
+    modelInput: params.model ?? agentConfig?.model,
+    modelFromParams: params.model != null,
+    thinking: (params.thinking ?? agentConfig?.thinking) as ThinkingLevel | undefined,
     ...(stack ? { stack } : {}),
     maxTurns: params.max_turns ?? agentConfig?.maxTurns,
     graceTurns: params.grace_turns ?? agentConfig?.graceTurns,

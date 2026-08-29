@@ -1,6 +1,11 @@
 import { Text } from "@earendil-works/pi-tui";
 import { isTerminalErrorStatus, type SubagentStatus } from "../lifecycle/subagent-state.ts";
-import { formatMs, formatTokens, formatTurns } from "../ui/display.ts";
+import {
+  buildInvocationMetadataParts,
+  formatMs,
+  formatTokens,
+  formatTurns,
+} from "../ui/display.ts";
 import { GLYPHS } from "../ui/glyphs.ts";
 import type { NotificationDetails } from "./notification.ts";
 
@@ -53,6 +58,11 @@ export function buildStatsParts(d: StatsSource): string[] {
   return parts;
 }
 
+function renderDetailLine(parts: readonly string[], theme: RendererTheme): string {
+  const separator = ` ${theme.fg("dim", "·")} `;
+  return `\n  ${parts.map((part) => theme.fg("dim", part)).join(separator)}`;
+}
+
 /**
  * Content lines for the result preview: the whole result (capped at 30 lines)
  * when expanded, or just the first line (capped at 80 columns) when collapsed.
@@ -80,13 +90,14 @@ export function createNotificationRenderer() {
     // Line 1: icon + agent description + status
     let line = `${theme.fg(iconStyle, iconGlyph)} ${theme.bold(d.description)} ${theme.fg("dim", statusText)}`;
 
-    // Line 2: stats
-    const parts = buildStatsParts(d);
-    if (parts.length) {
-      line += "\n  " + parts.map((p) => theme.fg("dim", p)).join(" " + theme.fg("dim", "·") + " ");
-    }
+    // Keep audit metadata out of the collapsed summary, but give it a dedicated expanded line.
+    const invocationParts = buildInvocationMetadataParts(d);
+    if (expanded && invocationParts.length) line += renderDetailLine(invocationParts, theme);
 
-    // Line 3: result preview (collapsed) or full (expanded)
+    const parts = buildStatsParts(d);
+    if (parts.length) line += renderDetailLine(parts, theme);
+
+    // Result preview is one line when collapsed and up to 30 lines when expanded.
     const previewLines = buildPreviewLines(d.resultPreview, expanded);
     if (expanded) {
       for (const l of previewLines) line += "\n" + theme.fg("dim", `  ${l}`);
@@ -94,7 +105,7 @@ export function createNotificationRenderer() {
       line += "\n  " + theme.fg("dim", `${GLYPHS.subLine}  ${previewLines[0] ?? ""}`);
     }
 
-    // Line 4: output file link (if present)
+    // Output file link (if present)
     if (d.outputFile) {
       line += "\n  " + theme.fg("muted", `transcript: ${d.outputFile}`);
     }
