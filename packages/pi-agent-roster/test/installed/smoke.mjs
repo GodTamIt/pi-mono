@@ -212,33 +212,8 @@ try {
   const cli = join(cliDir, "node_modules", ".bin", process.platform === "win32" ? "pi.cmd" : "pi");
   const selectedCli = await runRpc(
     cli,
-    ["--roster-name", "installed-smoke", "--agent", "layered", "--stack", "thorough"],
+    ["--agent", "layered", "--stack", "thorough"],
     "commands-selected",
-  );
-  assert(
-    selectedCli.commands.success &&
-      selectedCli.commands.data.commands.some((command) => command.name === "roster-status"),
-    `roster-status was not registered: ${JSON.stringify(selectedCli.commands)}`,
-  );
-  const status = await selectedCli.request({
-    id: "status",
-    type: "prompt",
-    message: "/roster-status",
-  });
-  assert(status.success, `roster-status failed: ${JSON.stringify(status)}`);
-  const statusDeadline = Date.now() + 5_000;
-  while (
-    Date.now() < statusDeadline &&
-    !selectedCli.messages.some((message) =>
-      JSON.stringify(message).includes("Roster installed-smoke: roster_noop ready"),
-    )
-  )
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  assert(
-    selectedCli.messages.some((message) =>
-      JSON.stringify(message).includes("Roster installed-smoke: roster_noop ready"),
-    ),
-    `Flag/tool status was not observed: ${JSON.stringify(selectedCli.messages)}\n${selectedCli.stderr()}`,
   );
   await selectedCli.close();
 

@@ -119,8 +119,6 @@ const topLevel = new Set([
   "package.json",
 ]);
 const mediaFiles = new Set([
-  "media/quick-start.cast",
-  "media/quick-start.svg",
   "media/terminal-dark.svg",
   "media/terminal-light.svg",
   "media/terminal-narrow-dark.svg",

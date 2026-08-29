@@ -2,7 +2,7 @@
 
 `npm run smoke:installed` packs this workspace package, installs the tarball and the exact Pi 0.84.3 peers into an isolated package tree, installs the actual npm Pi CLI separately, and gives the process a fresh `PI_CODING_AGENT_DIR`.
 
-The RPC process is launched with the extension-owned `--roster-name` flag. The fixture queries registered commands and invokes `/roster-status`; its response confirms that Pi loaded the extension, parsed the flag, and exposed the TypeBox-backed `roster_noop` tool.
+The RPC process is launched with the extension-owned `--agent` and `--stack` flags to exercise installed primary selection.
 
 The fixture then uses Pi's SDK with its deterministic faux provider to run the packed extension in-process. It covers foreground tool execution, service foreground/background execution, delayed queue admission, workspace tools, steering, retained and reconstructed resume, child JSONL isolation, lifecycle events, retention release, and parent/child shutdown without network access or credentials.
 

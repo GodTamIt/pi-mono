@@ -57,6 +57,7 @@ function harness(
   let model = baseModel;
   const calls: string[] = [];
   const notify = vi.fn();
+  const setStatus = vi.fn();
   const custom = vi.fn<(...args: any[]) => Promise<string | undefined>>(async () => undefined);
   const pi = {
     getFlag: vi.fn((name: string) => flags[name]),
@@ -88,7 +89,7 @@ function harness(
       getAvailable: () => [baseModel, primaryModel],
     },
     getSystemPrompt: () => "Baseline prompt",
-    ui: { notify, custom },
+    ui: { notify, setStatus, custom },
   } as unknown as ExtensionContext;
   const overrides = new AgentStackOverrides();
   const controller = new PrimaryController({ pi, registry, stackOverrides: overrides });
@@ -100,6 +101,7 @@ function harness(
     overrides,
     calls,
     notify,
+    setStatus,
     custom,
     getActive: () => active,
   };
@@ -136,7 +138,21 @@ describe("PrimaryController", () => {
     expect(h.controller.beforeAgentStart({ systemPrompt: "Turn prompt" } as never)).toEqual({
       systemPrompt: "Baseline prompt\n\nLead the work.",
     });
+    expect(h.setStatus).toHaveBeenLastCalledWith("primary-agent", "Primary: Lead");
     expect(h.controller.authorizeTarget("WORKER")).toBeUndefined();
+  });
+
+  it("clears the primary status at session start and disposal", async () => {
+    const h = harness(config(), { [PRIMARY_AGENT_FLAG]: "lead" });
+
+    await h.controller.handleSessionStart(h.ctx);
+
+    expect(h.setStatus).toHaveBeenNthCalledWith(1, "primary-agent", undefined);
+    expect(h.setStatus).toHaveBeenLastCalledWith("primary-agent", "Primary: Lead");
+
+    h.controller.dispose();
+
+    expect(h.setStatus).toHaveBeenLastCalledWith("primary-agent", undefined);
   });
 
   it("does not re-enable managed tools denied by primary permissions", async () => {
@@ -215,6 +231,7 @@ describe("PrimaryController", () => {
     expect(h.controller.beforeAgentStart({ systemPrompt: "mutated prompt" } as never)).toEqual({
       systemPrompt: "Baseline prompt",
     });
+    expect(h.setStatus).toHaveBeenLastCalledWith("primary-agent", undefined);
   });
 
   it("uses an empty replacement body instead of the captured baseline", async () => {
@@ -478,6 +495,7 @@ describe("PrimaryController", () => {
   it("rolls model back when a later mutation fails", async () => {
     const h = harness(config());
     await h.controller.handleSessionStart(h.ctx);
+    h.setStatus.mockClear();
     vi.mocked(h.pi.setThinkingLevel).mockImplementationOnce(() => {
       throw new Error("thinking failed");
     });
@@ -493,5 +511,6 @@ describe("PrimaryController", () => {
       "model:base",
     ]);
     expect(h.notify).toHaveBeenCalledWith("thinking failed", "error");
+    expect(h.setStatus).not.toHaveBeenCalled();
   });
 });

@@ -27,7 +27,7 @@ Pi packages execute with full system access. Review the extension and any child-
 
 ## Quick Start: the roster is empty by default
 
-The package intentionally ships **no built-in agents**. On a fresh install, `/roster-status` confirms that the extension loaded, but delegation tools stay hidden until at least one enabled `subagent` or `all` profile exists.
+The package intentionally ships **no built-in agents**. Delegation tools stay hidden until at least one enabled `subagent` or `all` profile exists.
 
 1. Save this as `.pi/agents/reviewer.md` before starting Pi:
 
@@ -50,10 +50,10 @@ The package intentionally ships **no built-in agents**. On a fresh install, `/ro
    from optional improvements.
    ```
 
-2. Start Pi and verify the extension:
+2. Start Pi:
 
-   ```text
-   /roster-status
+   ```sh
+   pi
    ```
 
 3. Ask Pi to use the `reviewer` subagent and include the complete task, paths, constraints, and expected output. The child receives no parent conversation.
@@ -73,7 +73,7 @@ An invalid project override still masks the global definition. Files are scanned
 
 | Field | Meaning | Default |
 | --- | --- | --- |
-| `display_name` | Label shown in pickers, rows, widgets, and reports. | Filename |
+| `display_name` | Label shown in pickers, rows, widgets, reports, and the selected-primary footer status. | Filename |
 | `description` | Short purpose shown to the model and in the TUI. | Filename |
 | `mode` | `primary`, `subagent`, or `all`. | `subagent` |
 | `enabled` | Keeps a definition discoverable but unavailable when `false`. | `true` |
@@ -165,16 +165,14 @@ Definitions are also refreshed immediately before delegation, so removed, disabl
 
 ```sh
 pi --agent lead --stack balanced
-pi --roster-name demo
 ```
 
 - `--agent <name>` selects an enabled `primary` or `all` profile at session start.
 - `--stack <name>` requires a non-default `--agent`; it cannot select a stack by itself.
-- `--roster-name <name>` labels the diagnostic instance reported by `/roster-status`; its default is `default`.
 
 Authenticate models through Pi (for example, `/login`) before selecting a profile. A missing model or unavailable authentication produces an error and preserves the current model, thinking level, prompt, and tools.
 
-Use `/agent` for the interactive profile picker, `/agent <name>` for direct selection, and `/agent default` to restore the model, thinking level, prompt, and tools captured at session start. Resetting does not switch or fork the Pi session. Profile changes wait until the parent is idle.
+Use `/agent` for the interactive profile picker, `/agent <name>` for direct selection, and `/agent default` to restore the model, thinking level, prompt, and tools captured at session start. A selected profile appears in the footer as `Primary: <display_name>`; restoring Pi's default removes this status. Resetting does not switch or fork the Pi session. Profile changes wait until the parent is idle.
 
 ## Orchestration and child lifecycle
 
@@ -199,7 +197,6 @@ Child sessions live beside the parent transcript under `<parent-session>/tasks/`
 | `subagent` | Spawn or resume a child. Foreground waits; background returns an ID. | `task`, `subagent_type`, `description`, `stack`, `model`, `thinking`, `max_turns`, `grace_turns`, `run_in_background`, `resume` |
 | `get_subagent_result` | Inspect, wait for, and collect a background result. | `agent_id`, `wait`, `verbose` |
 | `steer_subagent` | Add an explicit mid-run message to a running child. | `agent_id`, `steering` |
-| `roster_noop` | Confirm the baseline tool runtime without changing state. | Optional `note`, returned unchanged |
 
 The three managed subagent tools are visible only when at least one enabled, authorized child target exists. Tasks and steering text must be non-empty. New tasks and resume tasks must be self-contained.
 
@@ -308,8 +305,6 @@ Do not put secrets or assumptions from the parent chat into agent definitions. P
 | `/subagents:sessions` is empty | Queued work has no child session yet. Only records with a live session or persisted transcript are listed. |
 | A result can no longer resume live | The retention sweep may have released the heavy session; resume reconstructs from the child transcript while its record remains available. |
 | The extension does not load | Confirm Node `>=22.22.2` and Pi `>=0.84.3 <0.85.0`, then reinstall the package. |
-
-For a lightweight load check, run `/roster-status`. A healthy response is `Roster <name>: roster_noop ready`.
 
 ## Provenance
 

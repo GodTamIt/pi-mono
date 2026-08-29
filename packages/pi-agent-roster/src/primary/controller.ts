@@ -19,6 +19,7 @@ import { type RosterPickerItem, showRosterPicker } from "../ui/roster-picker.ts"
 
 export const PRIMARY_AGENT_FLAG = "agent";
 export const PRIMARY_STACK_FLAG = "stack";
+const PRIMARY_AGENT_STATUS_KEY = "primary-agent";
 export const MANAGED_SUBAGENT_TOOLS = [
   "subagent",
   "get_subagent_result",
@@ -62,6 +63,7 @@ export class PrimaryController {
     this.ctx = ctx;
     this.selected = undefined;
     this.delegationDenied = undefined;
+    ctx.ui.setStatus(PRIMARY_AGENT_STATUS_KEY, undefined);
     this.options.stackOverrides.reset();
     this.baseline = {
       model: ctx.model,
@@ -460,7 +462,6 @@ export class PrimaryController {
       this.options.pi.setActiveTools(tools);
       this.selected = next;
       this.delegationDenied = undefined;
-      return;
     } catch (error) {
       const rollbackErrors: string[] = [];
       try {
@@ -486,6 +487,16 @@ export class PrimaryController {
         ? `${message} Rollback failed for: ${rollbackErrors.join(", ")}.`
         : message;
     }
+
+    ctx.ui.setStatus(
+      PRIMARY_AGENT_STATUS_KEY,
+      next ? `Primary: ${next.agent.displayName ?? next.agent.name}` : undefined,
+    );
+  }
+
+  dispose(): void {
+    this.ctx?.ui.setStatus(PRIMARY_AGENT_STATUS_KEY, undefined);
+    this.ctx = undefined;
   }
 
   private reconcileToolVisibility(): void {

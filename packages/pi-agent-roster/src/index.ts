@@ -20,7 +20,6 @@ import {
   SettingsManager as SdkSettingsManager,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import { AgentTypeRegistry } from "./config/agent-types.ts";
 import { loadCustomAgents } from "./config/custom-agents.ts";
 import { InterruptHandler, SessionLifecycleHandler, ToolStartHandler } from "./handlers/index.ts";
@@ -36,7 +35,6 @@ import { type NotificationDetails, NotificationManager } from "./observation/not
 import { createNotificationRenderer } from "./observation/renderer.ts";
 import { SubagentEventsObserver } from "./observation/subagent-events-observer.ts";
 import { PRIMARY_AGENT_FLAG, PRIMARY_STACK_FLAG, PrimaryController } from "./primary/controller.ts";
-import { ROSTER_NAME_FLAG, ROSTER_NOOP_TOOL, ROSTER_STATUS_COMMAND } from "./public.ts";
 import { createSubagentRuntime } from "./runtime.ts";
 import { publishSubagentsService } from "./service/service.ts";
 import { SubagentsServiceAdapter } from "./service/service-adapter.ts";
@@ -54,7 +52,7 @@ import { SessionNavigatorHandler } from "./ui/session-navigator.ts";
 import { SubagentsSettingsHandler } from "./ui/subagents-settings.ts";
 
 export default function (pi: ExtensionAPI) {
-  if (typeof pi.registerFlag === "function") registerRosterBaseline(pi);
+  if (typeof pi.registerFlag === "function") registerPrimaryFlags(pi);
   if (typeof pi.registerMessageRenderer !== "function") return;
 
   // ---- Register custom notification renderer ----
@@ -214,6 +212,7 @@ export default function (pi: ExtensionAPI) {
       notifications.dispose();
       invocationRows.dispose();
       widget?.dispose();
+      primary.dispose();
     },
     unpublishService,
   );
@@ -317,12 +316,7 @@ export default function (pi: ExtensionAPI) {
   });
 }
 
-function registerRosterBaseline(pi: ExtensionAPI): void {
-  pi.registerFlag(ROSTER_NAME_FLAG, {
-    description: "Name this roster instance",
-    type: "string",
-    default: "default",
-  });
+function registerPrimaryFlags(pi: ExtensionAPI): void {
   pi.registerFlag(PRIMARY_AGENT_FLAG, {
     description: "Select an enabled primary agent profile",
     type: "string",
@@ -330,35 +324,5 @@ function registerRosterBaseline(pi: ExtensionAPI): void {
   pi.registerFlag(PRIMARY_STACK_FLAG, {
     description: "Select a named stack for --agent",
     type: "string",
-  });
-
-  pi.registerTool({
-    name: ROSTER_NOOP_TOOL,
-    label: "Roster No-op",
-    description: "Confirm that the agent roster tool runtime is available without changing state",
-    parameters: Type.Object(
-      {
-        note: Type.Optional(Type.String({ description: "Optional note returned unchanged" })),
-      },
-      { additionalProperties: false },
-    ),
-    async execute(_toolCallId, params) {
-      return {
-        content: [{ type: "text", text: params.note ?? "pi-agent-roster is ready" }],
-        details: {},
-      };
-    },
-  });
-
-  pi.registerCommand(ROSTER_STATUS_COMMAND, {
-    description: "Show whether the agent roster extension is ready",
-    handler: async (_args, ctx) => {
-      const name = String(pi.getFlag(ROSTER_NAME_FLAG) ?? "default");
-      const ready = pi.getAllTools().some((tool) => tool.name === ROSTER_NOOP_TOOL);
-      ctx.ui.notify(
-        `Roster ${name}: ${ready ? `${ROSTER_NOOP_TOOL} ready` : "tool unavailable"}`,
-        ready ? "info" : "error",
-      );
-    },
   });
 }
