@@ -1,21 +1,12 @@
 /**
- * session-navigator.ts — The `/subagents:sessions` command: pick a subagent and
- * read its transcript through Pi's own per-entry session components.
- *
- * SDK/TUI consumer half of native session navigation. The unit-testable core
- * (selection, sourcing) lives in `session-navigation.ts`; this module wires that
- * core to the command picker and a read-only scrollable overlay, and owns the
- * renderer — it mounts Pi's interactive components (`AssistantMessageComponent`,
- * `ToolExecutionComponent`, …) into a `Container`, mirroring Pi's own
- * `renderSessionContext` mapping. Rendering lives here, not in the pure module,
- * because the components require a `TUI`, `cwd`, and markdown theme.
- *
- * The overlay is strictly read-only — steering stays in the `steer_subagent` tool
- * and the widget. It consumes a `TranscriptSource`, so a released agent's disk
- * snapshot (`fileSnapshotSource`) swaps in without touching the renderer or the overlay.
+ * The `/subagents:sessions` picker and read-only child transcript overlay.
  */
 
-import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import {
+  type ExtensionCommandContext,
+  getMarkdownTheme,
+  type Theme,
+} from "@earendil-works/pi-coding-agent";
 import {
   type Component,
   type MarkdownTheme,
@@ -23,28 +14,26 @@ import {
   type TUI,
   truncateToWidth,
   visibleWidth,
+  wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import type { AgentConfigLookup } from "../config/agent-types.ts";
-import type { Theme } from "./display.ts";
+import { type RosterPickerItem, showRosterPicker } from "./roster-picker.ts";
 import {
   fileSnapshotSource,
   listNavigableAgents,
   liveSource,
   type NavigableSubagent,
+  type NavigationIdentity,
   type TranscriptSource,
 } from "./session-navigation.ts";
 import { TranscriptContent } from "./transcript-content.ts";
 
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Chrome lines: top border + header + header sep + footer sep + footer + bottom border. */
-const CHROME_LINES = 6;
 const MIN_VIEWPORT = 3;
 const VIEWPORT_HEIGHT_PCT = 70;
-/** Overlay width as a share of the terminal, as handed to Pi's overlay compositor. */
-const OVERLAY_WIDTH_PCT = 90;
+const MAX_OVERLAY_WIDTH = 120;
 
-/** Component factory shape Pi's `ui.custom` invokes to mount an overlay. */
+type OverlayTheme = Pick<Theme, "bold" | "fg">;
+
 export type OverlayComponentFactory<R> = (
   tui: TUI,
   theme: Theme,
@@ -52,41 +41,26 @@ export type OverlayComponentFactory<R> = (
   done: (result: R) => void,
 ) => Component;
 
-/** Narrow UI interface — only the `ctx.ui` methods the navigator calls. */
-export interface SessionNavigatorUI {
-  select(title: string, options: string[]): Promise<string | undefined>;
-  notify(message: string, level: "info" | "warning" | "error"): void;
-  custom<R>(component: OverlayComponentFactory<R>, options?: unknown): Promise<R> | undefined;
-}
+export type SessionNavigatorUI = Pick<ExtensionCommandContext["ui"], "notify" | "custom">;
 
-/** Parameters for one `/subagents:sessions` invocation. */
 export interface SessionNavigatorParams {
   ui: SessionNavigatorUI;
   agents: readonly NavigableSubagent[];
   registry: AgentConfigLookup;
-  /** Working directory for tool-call rendering (relative path display). */
   cwd: string;
-  /** Reads a persisted session file for the file-snapshot source. */
   readFile: (path: string) => string;
 }
 
-/** Options for the read-only transcript overlay. */
 export interface TranscriptOverlayOptions {
   tui: TUI;
-  theme: Theme;
+  theme: OverlayTheme;
   source: TranscriptSource;
+  session: NavigationIdentity;
   done: (result: undefined) => void;
   cwd: string;
   markdownTheme: MarkdownTheme;
 }
 
-/**
- * Handler for the `/subagents:sessions` slash command.
- *
- * Lists navigable subagents, lets the operator pick one, and opens its transcript
- * read-only. Receives the agent snapshot (`manager.listAgents()`) rather than the
- * manager, so it stays a reactive consumer with no inbound call into the core.
- */
 export class SessionNavigatorHandler {
   async handle({ ui, agents, registry, cwd, readFile }: SessionNavigatorParams): Promise<void> {
     const entries = listNavigableAgents(agents, registry);
@@ -95,11 +69,14 @@ export class SessionNavigatorHandler {
       return;
     }
 
-    const choice = await ui.select(
-      "Subagent sessions",
-      entries.map((entry) => entry.label),
-    );
-    const entry = entries.find((candidate) => candidate.label === choice);
+    const items: RosterPickerItem[] = entries.map((entry) => ({
+      value: entry.key,
+      label: `${entry.name} · ${entry.status}`,
+      description: entry.description,
+      secondary: `ID ${entry.id} · ${entry.duration} · ${entry.toolUses} tool uses · ${entry.sourceLabel}`,
+    }));
+    const selectedKey = await showRosterPicker(ui, "Subagent sessions", items);
+    const entry = entries.find((candidate) => candidate.key === selectedKey);
     if (!entry) return;
 
     let source: TranscriptSource;
@@ -112,15 +89,23 @@ export class SessionNavigatorHandler {
       ui.notify("Could not read the session transcript file.", "error");
       return;
     }
-    const markdownTheme = getMarkdownTheme();
+
     await ui.custom<undefined>(
       (tui, theme, _keybindings, done) =>
-        new TranscriptOverlay({ tui, theme, source, done, cwd, markdownTheme }),
+        new TranscriptOverlay({
+          tui,
+          theme,
+          source,
+          session: entry,
+          done,
+          cwd,
+          markdownTheme: getMarkdownTheme(),
+        }),
       {
         overlay: true,
         overlayOptions: {
           anchor: "center",
-          width: `${OVERLAY_WIDTH_PCT}%`,
+          width: MAX_OVERLAY_WIDTH,
           maxHeight: `${VIEWPORT_HEIGHT_PCT}%`,
         },
       },
@@ -128,29 +113,24 @@ export class SessionNavigatorHandler {
   }
 }
 
-/**
- * Read-only scrollable transcript overlay.
- *
- * Owns scroll state, chrome, and key handling; the rows it paints come from a
- * `TranscriptContent` collaborator, which holds the transcript's components and
- * refreshes them when the source changes (live agents).
- */
 export class TranscriptOverlay implements Component {
   private scrollOffset = 0;
   private autoScroll = true;
   private unsubscribe: (() => void) | undefined;
   private closed = false;
+  private renderedInnerWidth: number | undefined;
+  private renderedViewportHeight: number | undefined;
 
   private readonly tui: TUI;
-  private readonly theme: Theme;
+  private readonly theme: OverlayTheme;
+  private readonly session: NavigationIdentity;
   private readonly done: (result: undefined) => void;
   private readonly content: TranscriptContent;
-  /** Inner width the compositor last rendered at; input must use the same layout. */
-  private renderedInnerWidth: number | undefined;
 
-  constructor({ tui, theme, source, done, cwd, markdownTheme }: TranscriptOverlayOptions) {
+  constructor({ tui, theme, source, session, done, cwd, markdownTheme }: TranscriptOverlayOptions) {
     this.tui = tui;
     this.theme = theme;
+    this.session = session;
     this.done = done;
     this.content = new TranscriptContent({ tui, cwd, markdownTheme, source });
     this.unsubscribe = source.subscribe((event) => {
@@ -161,15 +141,15 @@ export class TranscriptOverlay implements Component {
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, "escape") || matchesKey(data, "q")) {
-      this.closed = true;
-      this.done(undefined);
+    if (matchesKey(data, "escape") || matchesKey(data, "q") || matchesKey(data, "ctrl+c")) {
+      this.close();
       return;
     }
 
     const totalLines = this.content.lineCount(this.inputWidth());
-    const viewportHeight = this.viewportHeight();
+    const viewportHeight = this.renderedViewportHeight ?? this.viewportHeight(1, 1);
     const maxScroll = Math.max(0, totalLines - viewportHeight);
+    let handled = true;
 
     if (matchesKey(data, "up") || matchesKey(data, "k")) {
       this.scrollOffset = Math.max(0, this.scrollOffset - 1);
@@ -189,83 +169,106 @@ export class TranscriptOverlay implements Component {
     } else if (matchesKey(data, "end")) {
       this.scrollOffset = maxScroll;
       this.autoScroll = true;
+    } else {
+      handled = false;
     }
+
+    if (handled) this.tui.requestRender();
   }
 
   render(width: number): string[] {
     if (width < 6) return [];
-    const th = this.theme;
-    const innerW = width - 4;
-    this.renderedInnerWidth = innerW;
-    const lines: string[] = [];
-
-    const pad = (s: string, len: number): string =>
-      s + " ".repeat(Math.max(0, len - visibleWidth(s)));
-    const row = (content: string): string =>
-      th.fg("border", "│") +
-      " " +
-      truncateToWidth(pad(content, innerW), innerW) +
-      " " +
-      th.fg("border", "│");
-    const hrTop = th.fg("border", `╭${"─".repeat(width - 2)}╮`);
-    const hrBot = th.fg("border", `╰${"─".repeat(width - 2)}╯`);
-    const hrMid = row(th.fg("dim", "─".repeat(innerW)));
-
-    lines.push(hrTop);
-    lines.push(row(th.bold("Subagent session")));
-    lines.push(hrMid);
-
-    const totalLines = this.content.lineCount(innerW);
-    const viewportHeight = this.viewportHeight();
+    const innerWidth = width - 4;
+    this.renderedInnerWidth = innerWidth;
+    const header = this.header(innerWidth);
+    const totalLines = this.content.lineCount(innerWidth);
+    const footer = this.footer(innerWidth, totalLines, this.scrollOffset);
+    const viewportHeight = this.viewportHeight(header.length, footer.length);
+    this.renderedViewportHeight = viewportHeight;
     const maxScroll = Math.max(0, totalLines - viewportHeight);
     if (this.autoScroll) this.scrollOffset = maxScroll;
     const visibleStart = Math.min(this.scrollOffset, maxScroll);
-    const visible = this.content.slice(innerW, visibleStart, viewportHeight);
-    for (let i = 0; i < viewportHeight; i++) lines.push(row(visible[i] ?? ""));
+    const visible = this.content.slice(innerWidth, visibleStart, viewportHeight);
+    const finalFooter = this.footer(innerWidth, totalLines, visibleStart);
 
-    lines.push(hrMid);
-    const scrollPct =
-      totalLines <= viewportHeight
-        ? "100%"
-        : `${Math.round(((visibleStart + viewportHeight) / totalLines) * 100)}%`;
-    const footerLeft = th.fg("dim", `${totalLines} lines · ${scrollPct}`);
-    const footerRight = th.fg("dim", "↑↓ scroll · PgUp/PgDn · Esc close");
-    const footerGap = Math.max(1, innerW - visibleWidth(footerLeft) - visibleWidth(footerRight));
-    lines.push(row(footerLeft + " ".repeat(footerGap) + footerRight));
-    lines.push(hrBot);
-
+    const row = (content: string): string => {
+      const clipped = truncateToWidth(content, innerWidth);
+      const padding = " ".repeat(Math.max(0, innerWidth - visibleWidth(clipped)));
+      return `${this.theme.fg("border", "│")} ${clipped}${padding} ${this.theme.fg("border", "│")}`;
+    };
+    const horizontal = row(this.theme.fg("dim", "─".repeat(innerWidth)));
+    const lines = [this.theme.fg("border", `╭${"─".repeat(width - 2)}╮`)];
+    lines.push(...header.map(row), horizontal);
+    for (let index = 0; index < viewportHeight; index++) lines.push(row(visible[index] ?? ""));
+    lines.push(horizontal, ...finalFooter.map(row));
+    lines.push(this.theme.fg("border", `╰${"─".repeat(width - 2)}╯`));
     return lines;
   }
 
-  // fallow-ignore-next-line unused-class-member
   invalidate(): void {
     this.content.invalidate();
   }
 
   dispose(): void {
     this.closed = true;
-    if (this.unsubscribe) {
-      this.unsubscribe();
-      this.unsubscribe = undefined;
-    }
+    this.releaseSubscription();
   }
 
-  // ---- Private ----
+  private close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.releaseSubscription();
+    this.done(undefined);
+  }
 
-  /**
-   * The width `handleInput` must lay out at: the one the compositor actually
-   * supplied, so scroll bounds match the layout on screen. Before the first
-   * paint there is none, so fall back to the overlay's share of the terminal.
-   */
+  private releaseSubscription(): void {
+    this.unsubscribe?.();
+    this.unsubscribe = undefined;
+  }
+
+  private header(width: number): string[] {
+    const title =
+      `${this.session.name} · ${this.session.status} · ` +
+      `ID ${this.session.id} · ${this.session.sourceLabel}`;
+    const lines = wrapTextWithAnsi(this.theme.bold(title), Math.max(1, width));
+    if (this.session.description) {
+      lines.push(
+        ...wrapTextWithAnsi(this.theme.fg("dim", this.session.description), Math.max(1, width)),
+      );
+    }
+    return lines;
+  }
+
+  private footer(width: number, totalLines: number, visibleStart: number): string[] {
+    const viewport = this.renderedViewportHeight ?? MIN_VIEWPORT;
+    const percent =
+      totalLines <= viewport
+        ? "100%"
+        : `${Math.round(((Math.min(visibleStart, totalLines) + viewport) / totalLines) * 100)}%`;
+    const position = `${totalLines} lines · ${percent}`;
+    const controls =
+      width < 50
+        ? "↑↓/jk scroll · q close"
+        : width < 90
+          ? "↑↓/jk · PgUp/Dn · q/Esc close"
+          : "↑↓/jk · PgUp/PgDn · Home/End · q/Esc/Ctrl+C close";
+    if (visibleWidth(position) + visibleWidth(controls) + 1 > width) {
+      return [this.theme.fg("dim", position), this.theme.fg("dim", controls)];
+    }
+    const gap = " ".repeat(width - visibleWidth(position) - visibleWidth(controls));
+    return [this.theme.fg("dim", `${position}${gap}${controls}`)];
+  }
+
   private inputWidth(): number {
     return (
       this.renderedInnerWidth ??
-      Math.max(0, Math.floor((this.tui.terminal.columns * OVERLAY_WIDTH_PCT) / 100) - 4)
+      Math.max(1, Math.min(MAX_OVERLAY_WIDTH, this.tui.terminal.columns) - 4)
     );
   }
 
-  private viewportHeight(): number {
+  private viewportHeight(headerLines: number, footerLines: number): number {
     const maxRows = Math.floor((this.tui.terminal.rows * VIEWPORT_HEIGHT_PCT) / 100);
-    return Math.max(MIN_VIEWPORT, maxRows - CHROME_LINES);
+    const chromeLines = 4 + headerLines + footerLines;
+    return Math.max(MIN_VIEWPORT, maxRows - chromeLines);
   }
 }

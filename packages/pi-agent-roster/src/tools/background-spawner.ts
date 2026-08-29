@@ -1,7 +1,7 @@
 import type { ChildRuntimeBaseline } from "../lifecycle/child-runtime-baseline.ts";
 import type { AgentSpawnConfig } from "../lifecycle/subagent-manager.ts";
 import type { ParentSessionInfo, Subagent } from "../types.ts";
-import { textResult } from "./helpers.ts";
+import { buildDetails, textResult } from "./helpers.ts";
 import type { ResolvedSpawnConfig } from "./spawn-config.ts";
 
 /** Narrow manager interface for the background spawner. */
@@ -59,13 +59,15 @@ export function spawnBackground(manager: BackgroundManagerDeps, params: Backgrou
       `\nYou will be notified when this agent completes.\n` +
       `Use get_subagent_result to retrieve full results, or steer_subagent to send it messages.\n` +
       `Do not duplicate this agent's work.`,
-    {
-      ...presentation.detailBase,
-      toolUses: 0,
-      tokens: "",
-      durationMs: 0,
-      status: "background" as const,
-      agentId: id,
-    },
+    record
+      ? buildDetails(presentation.detailBase, record, { agentId: id })
+      : {
+          ...presentation.detailBase,
+          toolUses: 0,
+          tokens: "",
+          durationMs: 0,
+          status: "running" as const,
+          agentId: id,
+        },
   );
 }

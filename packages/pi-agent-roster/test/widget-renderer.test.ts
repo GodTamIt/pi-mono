@@ -3,36 +3,32 @@ import { describe, expect, it } from "vitest";
 import { AgentTypeRegistry } from "../src/config/agent-types.ts";
 import type { Theme } from "../src/ui/display.ts";
 import type { WidgetAgent } from "../src/ui/widget-renderer.ts";
-import {
-  renderFinishedLine,
-  renderRunningLines,
-  renderWidgetLines,
-} from "../src/ui/widget-renderer.ts";
+import { renderWidgetLines } from "../src/ui/widget-renderer.ts";
 
-/** Minimal theme stub — wraps text with markup tags for assertion. */
-function stubTheme(): Theme {
-  return {
-    fg: (color: string, text: string) => `[${color}:${text}]`,
-    bold: (text: string) => `**${text}**`,
-  };
-}
-
-const testRegistry = new AgentTypeRegistry(() => new Map());
+const registry = new AgentTypeRegistry(() => new Map());
+const plainTheme: Theme = { fg: (_color, text) => text, bold: (text) => text };
+const ansiTheme: Theme = {
+  fg: (_color, text) => `\x1b[31m${text}\x1b[0m`,
+  bold: (text) => `\x1b[1m${text}\x1b[22m`,
+};
 
 function makeAgent(overrides: Partial<WidgetAgent> = {}): WidgetAgent {
   return {
     id: "agent-1",
     type: "general-purpose",
-    status: "completed",
-    description: "test task",
-    toolUses: 5,
-    startedAt: 1000,
-    completedAt: 6000,
+    status: "running",
+    description: "inspect Unicode café 🚀 and report progress",
+    toolUses: 0,
+    startedAt: Date.now() - 5000,
+    completedAt: undefined,
+    lifetimeUsage: undefined,
     compactionCount: 0,
-    // Activity fields (folded from the former WidgetActivity)
     turnCount: 3,
     maxTurns: 10,
     graceTurns: 2,
+    stack: "deep",
+    model: "anthropic/claude-opus",
+    thinking: "high",
     activeTools: new Map(),
     responseText: "",
     contextPercent: null,
@@ -40,401 +36,165 @@ function makeAgent(overrides: Partial<WidgetAgent> = {}): WidgetAgent {
   };
 }
 
-describe("renderFinishedLine", () => {
-  const theme = stubTheme();
-
-  it("renders completed agent with success icon and stats", () => {
-    const agent = makeAgent();
-    const line = renderFinishedLine(agent, testRegistry, theme);
-
-    // Success icon
-    expect(line).toContain("[success:✓]");
-    // Display name (general-purpose type displayName → "Agent"; tool name is now "subagent")
-    expect(line).toContain("[dim:Agent]");
-    // Description
-    expect(line).toContain("[dim:test task]");
-    // Tool uses
-    expect(line).toContain("5 tool uses");
-    // Duration (5000ms = 5.0s)
-    expect(line).toContain("5.0s");
-    // Turn count and both effective budgets
-    expect(line).toContain("↻3");
-    expect(line).toContain("max 10");
-    expect(line).toContain("grace 2");
-    // No trailing status text for completed
-    expect(line).not.toContain("error");
-    expect(line).not.toContain("aborted");
-    expect(line).not.toContain("stopped");
+function render(agents: WidgetAgent[], width = 120, theme = plainTheme): string[] {
+  return renderWidgetLines({
+    agents,
+    registry,
+    spinnerFrame: 0,
+    terminalWidth: width,
+    theme,
+    shouldShowFinished: () => true,
   });
+}
 
-  it("labels stack metadata so the resolved invocation can be audited", () => {
-    const agent = makeAgent({
-      stack: "deep",
-      model: "anthropic/claude-opus",
-      thinking: "high",
-    });
-    const line = renderFinishedLine(agent, testRegistry, theme);
-
-    expect(line).toContain("stack: deep");
-    expect(line).toContain("model: anthropic/claude-opus");
-    expect(line).toContain("thinking: high");
-    expect(line.indexOf("stack: deep")).toBeLessThan(line.indexOf("model: anthropic/claude-opus"));
-    expect(line.indexOf("model: anthropic/claude-opus")).toBeLessThan(
-      line.indexOf("thinking: high"),
-    );
-  });
-
-  it("renders singular tool use", () => {
-    const agent = makeAgent({ toolUses: 1 });
-    const line = renderFinishedLine(agent, testRegistry, theme);
-
-    expect(line).toContain("1 tool use");
-    expect(line).not.toContain("1 tool uses");
-  });
-
-  it("omits tool uses when zero", () => {
-    const agent = makeAgent({ toolUses: 0 });
-    const line = renderFinishedLine(agent, testRegistry, theme);
-
-    expect(line).not.toContain("tool use");
-  });
-
-  it("labels unlimited budgets instead of leaving an absent limit ambiguous", () => {
-    const agent = makeAgent({ maxTurns: undefined, graceTurns: undefined });
-    const line = renderFinishedLine(agent, testRegistry, theme);
-
-    expect(line).toContain("↻3");
-    expect(line).toContain("max unlimited");
-    expect(line).toContain("grace unlimited");
-  });
-
-  it("uses Date.now() for duration when completedAt is undefined", () => {
-    const now = Date.now();
-    const agent = makeAgent({ startedAt: now - 2000, completedAt: undefined });
-    const line = renderFinishedLine(agent, testRegistry, theme);
-
-    // Should show ~2.0s (may vary slightly due to test execution time)
-    expect(line).toMatch(/[12]\.\ds/);
-  });
-
-  it("renders error status with error icon and message", () => {
-    const agent = makeAgent({ status: "error", error: "something broke" });
-    const line = renderFinishedLine(agent, testRegistry, theme);
-
-    expect(line).toContain("[error:✗]");
-    expect(line).toContain("[error: error: something broke]");
-  });
-
-  it("renders error status without message when error is undefined", () => {
-    const agent = makeAgent({ status: "error" });
-    const line = renderFinishedLine(agent, testRegistry, theme);
-
-    expect(line).toContain("[error:✗]");
-    expect(line).toContain("[error: error]");
-  });
-
-  it("truncates long error messages to 60 chars", () => {
-    const longError = "a".repeat(80);
-    const agent = makeAgent({ status: "error", error: longError });
-    const line = renderFinishedLine(agent, testRegistry, theme);
-
-    // Error message should be sliced to 60 chars
-    expect(line).toContain("a".repeat(60));
-    expect(line).not.toContain("a".repeat(61));
-  });
-
-  it("renders aborted status with error icon and warning text", () => {
-    const agent = makeAgent({ status: "aborted" });
-    const line = renderFinishedLine(agent, testRegistry, theme);
-
-    expect(line).toContain("[error:✗]");
-    expect(line).toContain("[warning: aborted]");
-  });
-
-  it("renders steered status with warning icon and turn limit text", () => {
-    const agent = makeAgent({ status: "steered" });
-    const line = renderFinishedLine(agent, testRegistry, theme);
-
-    expect(line).toContain("[warning:✓]");
-    expect(line).toContain("[warning: (turn limit)]");
-  });
-
-  it("renders stopped status with dim icon and text", () => {
-    const agent = makeAgent({ status: "stopped" });
-    const line = renderFinishedLine(agent, testRegistry, theme);
-
-    expect(line).toContain("[dim:■]");
-    expect(line).toContain("[dim: stopped]");
-  });
-});
-
-describe("renderRunningLines", () => {
-  const theme = stubTheme();
-
-  it("returns header and activity lines", () => {
-    const agent = makeAgent({
-      status: "running",
-      completedAt: undefined,
-      activeTools: new Map([["read_1", "read"]]),
-      turnCount: 2,
-      maxTurns: 10,
-      graceTurns: 0,
-    });
-    const [header, activityLine] = renderRunningLines(agent, testRegistry, 0, theme);
-
-    // Header contains spinner frame, bold name, description
-    expect(header).toContain("[accent:⠋]");
-    expect(header).toContain("**Agent**");
-    expect(header).toContain("[muted:test task]");
-    // Stats: turn count and finite budgets, including zero grace
-    expect(header).toContain("↻2");
-    expect(header).toContain("max 10");
-    expect(header).toContain("grace 0");
-    // Tool uses
-    expect(header).toContain("5 tool uses");
-
-    // Activity line shows what the agent is doing
-    expect(activityLine).toContain("reading");
-  });
-
-  it("shows labeled stack metadata in the running row", () => {
-    const agent = makeAgent({
-      status: "running",
-      completedAt: undefined,
-      stack: "fast",
-      model: "anthropic/claude-haiku",
-      thinking: "low",
-    });
-    const [header] = renderRunningLines(agent, testRegistry, 0, theme);
-
-    expect(header).toContain("stack: fast");
-    expect(header).toContain("model: anthropic/claude-haiku");
-    expect(header).toContain("thinking: low");
-  });
-
-  it("shows thinking when activeTools is empty and responseText is blank", () => {
-    // Default makeAgent has activeTools: new Map() and responseText: ""
-    const agent = makeAgent({ status: "running", completedAt: undefined });
-    const [, activityLine] = renderRunningLines(agent, testRegistry, 0, theme);
-
-    expect(activityLine).toContain("thinking…");
-  });
-
-  it("advances spinner frame", () => {
-    const agent = makeAgent({ status: "running", completedAt: undefined });
-    const [header0] = renderRunningLines(agent, testRegistry, 0, theme);
-    const [header1] = renderRunningLines(agent, testRegistry, 1, theme);
-
-    expect(header0).toContain("[accent:⠋]");
-    expect(header1).toContain("[accent:⠙]");
-  });
-
-  it("includes token display when lifetimeUsage has tokens", () => {
-    const agent = makeAgent({
-      status: "running",
-      completedAt: undefined,
-      lifetimeUsage: { input: 5000, output: 2000, cacheWrite: 1000 },
-      compactionCount: 1,
-      contextPercent: 45,
-    });
-    const [header] = renderRunningLines(agent, testRegistry, 0, theme);
-
-    // 5000 + 2000 + 1000 = 8000 → "8.0k token"
-    expect(header).toContain("8.0k token");
-    // Context percent
-    expect(header).toContain("45%");
-    // Compaction count
-    expect(header).toContain("⇊1");
-  });
-
-  it("omits token display when lifetimeUsage totals zero", () => {
-    const agent = makeAgent({
-      status: "running",
-      completedAt: undefined,
-      lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
-    });
-    const [header] = renderRunningLines(agent, testRegistry, 0, theme);
-
-    expect(header).not.toContain("token");
-  });
-});
-
-describe("renderWidgetLines", () => {
-  const theme = stubTheme();
-
-  it("renders a single running agent with heading and tree connectors", () => {
-    const agent = makeAgent({ status: "running", completedAt: undefined, turnCount: 1 });
-
-    const lines = renderWidgetLines({
-      agents: [agent],
-      registry: testRegistry,
-      spinnerFrame: 0,
-      terminalWidth: 200,
-      theme,
-      shouldShowFinished: () => true,
-    });
-
-    // Heading with active indicator
-    expect(lines[0]).toContain("●");
-    expect(lines[0]).toContain("Agents");
-    // Header line with └─ (last item uses └─ not ├─)
-    expect(lines[1]).toContain("└─");
-    expect(lines[1]).toContain("**Agent**");
-    // Activity line — uses space indent (not │) since it's the last agent
-    expect(lines[2]).not.toContain("│");
-    expect(lines[2]).toContain("⎿");
-    // Total: 3 lines (heading + header + activity)
-    expect(lines).toHaveLength(3);
-  });
-
-  it("renders mixed running + finished + queued agents", () => {
-    const running = makeAgent({ id: "r1", status: "running", completedAt: undefined });
-    const finished = makeAgent({ id: "f1", status: "completed", completedAt: 6000, turnCount: 5 });
-    const queued = makeAgent({ id: "q1", status: "queued", completedAt: undefined });
-
-    const lines = renderWidgetLines({
-      agents: [running, finished, queued],
-      registry: testRegistry,
-      spinnerFrame: 0,
-      terminalWidth: 200,
-      theme,
-      shouldShowFinished: () => true,
-    });
-
-    // Heading (active because running+queued exist)
-    expect(lines[0]).toContain("[accent:\u25cf]");
-    // Finished first, then running, then queued
-    // finished line (1 line)
-    expect(lines[1]).toContain("[success:\u2713]");
-    // running header (1 line) + activity (1 line)
-    expect(lines[2]).toContain("**Agent**");
-    expect(lines[3]).toContain("\u23bf");
-    // queued line (last item, uses \u2514\u2500)
-    expect(lines[4]).toContain("\u2514\u2500");
-    expect(lines[4]).toContain("1 queued");
-    // Total: 5 lines
-    expect(lines).toHaveLength(5);
-  });
-
-  it("filters finished agents via shouldShowFinished", () => {
-    const finished1 = makeAgent({ id: "f1", status: "completed", completedAt: 6000 });
-    const finished2 = makeAgent({ id: "f2", status: "error", completedAt: 6000 });
-
-    const lines = renderWidgetLines({
-      agents: [finished1, finished2],
-      registry: testRegistry,
-      spinnerFrame: 0,
-      terminalWidth: 200,
-      theme,
-      // Only show f1, filter out f2
-      shouldShowFinished: (id) => id === "f1",
-    });
-
-    // Heading + 1 finished line
-    expect(lines).toHaveLength(2);
-    expect(lines[1]).toContain("[success:\u2713]");
-    expect(lines[1]).not.toContain("error");
-  });
-
-  it("overflows when too many agents, prioritizing running > queued > finished", () => {
-    // MAX_WIDGET_LINES = 12: heading takes 1, max body = 11.
-    // 6 running agents = 12 body lines, which exceeds maxBody (11).
-    // With 1 line reserved for overflow indicator, budget = 10.
-    // 5 running agents fit (10 lines), 1 hidden.
-    const agents: WidgetAgent[] = [];
-    for (let i = 0; i < 6; i++) {
-      agents.push(makeAgent({ id: `r${i}`, status: "running", completedAt: undefined }));
+describe("background widget statuses", () => {
+  it("uses textual state labels independent of color and glyphs", () => {
+    const statuses: Array<[WidgetAgent["status"], string]> = [
+      ["queued", "queued"],
+      ["running", "running"],
+      ["completed", "completed"],
+      ["error", "failed"],
+      ["aborted", "aborted"],
+      ["stopped", "stopped"],
+      ["steered", "steered"],
+    ];
+    for (const [status, label] of statuses) {
+      const terminal = status !== "queued" && status !== "running";
+      const text = render([
+        makeAgent({ status, completedAt: terminal ? Date.now() : undefined }),
+      ]).join("\n");
+      expect(text).toContain("Background");
+      expect(text).toContain(label);
     }
-    // Add a finished agent — should be hidden since running takes priority
-    agents.push(makeAgent({ id: "f1", status: "completed", completedAt: 6000 }));
-
-    const lines = renderWidgetLines({
-      agents,
-      registry: testRegistry,
-      spinnerFrame: 0,
-      terminalWidth: 200,
-      theme,
-      shouldShowFinished: () => true,
-    });
-
-    // heading(1) + 5 running*2(10) + overflow(1) = 12
-    expect(lines).toHaveLength(12);
-    // Last line is overflow indicator
-    const lastLine = lines[lines.length - 1];
-    expect(lastLine).toContain("+2 more");
-    expect(lastLine).toContain("1 running");
-    expect(lastLine).toContain("1 finished");
   });
 
-  it("returns empty array when no agents to show", () => {
-    const lines = renderWidgetLines({
-      agents: [],
-      registry: testRegistry,
-      spinnerFrame: 0,
-      terminalWidth: 200,
-      theme,
-      shouldShowFinished: () => true,
-    });
+  it("reports active counts and renders queued agents individually", () => {
+    const text = render([
+      makeAgent({ id: "q1", status: "queued", description: "first queued identity" }),
+      makeAgent({ id: "q2", status: "queued", description: "second queued identity" }),
+    ]).join("\n");
+    expect(text).toContain("2 queued");
+    expect(text).toContain("first queued identity");
+    expect(text).toContain("second queued identity");
+  });
+});
 
-    expect(lines).toEqual([]);
+describe("active-agent details", () => {
+  it("shows background identity, invocation, budgets, usage, timing, and activity", () => {
+    const text = render([
+      makeAgent({
+        toolUses: 4,
+        lifetimeUsage: { input: 5000, output: 2000, cacheWrite: 1000 },
+        compactionCount: 2,
+        contextPercent: 45,
+        activeTools: new Map([["read-1", "read"]]),
+      }),
+    ]).join("\n");
+    for (const required of [
+      "Background · running",
+      "stack: deep",
+      "model: anthropic/claude-opus",
+      "thinking: high",
+      "turn 3",
+      "max 10",
+      "grace 2",
+      "4 tool uses",
+      "8.0k token",
+      "context: 45%",
+      "compactions: 2",
+      "elapsed:",
+      "activity: reading",
+    ]) {
+      expect(text).toContain(required);
+    }
   });
 
-  it("returns empty when all finished agents are filtered out", () => {
-    const agent = makeAgent({ status: "completed", completedAt: 6000 });
+  it("labels unlimited budgets and unavailable context while retaining zero usage", () => {
+    const text = render([
+      makeAgent({ maxTurns: undefined, graceTurns: undefined, contextPercent: null }),
+    ]).join("\n");
+    expect(text).toContain("max unlimited");
+    expect(text).toContain("grace unlimited");
+    expect(text).toContain("0 tool uses");
+    expect(text).toContain("0 token");
+    expect(text).toContain("context: unavailable");
+    expect(text).toContain("compactions: 0");
+  });
 
+  it("gives queued agents explicit waiting activity and the same metadata", () => {
+    const text = render([makeAgent({ status: "queued" })]).join("\n");
+    expect(text).toContain("Background · queued");
+    expect(text).toContain("stack: deep");
+    expect(text).toContain("activity: waiting for a background slot");
+  });
+});
+
+describe("width and row budgets", () => {
+  it.each([40, 60, 80, 120])("stays within %i columns and retains required identity", (width) => {
+    const lines = render([makeAgent()], width, ansiTheme);
+    expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+    const text = lines.join("\n");
+    for (const required of [
+      "running",
+      "stack:",
+      "model:",
+      "thinking:",
+      "turn 3",
+      "max 10",
+      "grace 2",
+      "0 tool uses",
+      "0 token",
+      "context:",
+      "compactions:",
+      "elapsed:",
+      "activity:",
+    ]) {
+      expect(text).toContain(required);
+    }
+  });
+
+  it("handles ANSI and wide Unicode without horizontal overflow", () => {
+    const lines = render(
+      [makeAgent({ description: "界".repeat(80), responseText: "🚀".repeat(80) })],
+      40,
+      ansiTheme,
+    );
+    expect(lines.every((line) => visibleWidth(line) <= 40)).toBe(true);
+    expect(lines.join("\n")).toContain("Background");
+  });
+
+  it("never exceeds 12 rows and prioritizes running, queued, errors, then completions", () => {
+    const agents: WidgetAgent[] = [
+      makeAgent({ id: "run", description: "RUN-FIRST" }),
+      makeAgent({ id: "queue", status: "queued", description: "QUEUE-SECOND" }),
+      makeAgent({ id: "fail", status: "error", completedAt: Date.now(), error: "FAIL-THIRD" }),
+      makeAgent({
+        id: "done",
+        status: "completed",
+        completedAt: Date.now(),
+        description: "DONE-LAST",
+      }),
+    ];
+    const lines = render(agents, 60);
+    const text = lines.join("\n");
+    expect(lines.length).toBeLessThanOrEqual(12);
+    expect(text).toContain("RUN-FIRST");
+    expect(text).toContain("hidden:");
+    expect(text).toMatch(/\d+ queued/);
+    expect(text).toMatch(/\d+ failed/);
+    expect(text).toMatch(/\d+ completed/);
+  });
+
+  it("filters expired terminal agents", () => {
+    const agent = makeAgent({ status: "completed", completedAt: Date.now() });
     const lines = renderWidgetLines({
       agents: [agent],
-      registry: testRegistry,
+      registry,
       spinnerFrame: 0,
-      terminalWidth: 200,
-      theme,
+      terminalWidth: 80,
+      theme: plainTheme,
       shouldShowFinished: () => false,
     });
-
     expect(lines).toEqual([]);
-  });
-
-  it("keeps textual failure status visible when a metadata-rich row is truncated", () => {
-    const agent = makeAgent({
-      status: "error",
-      error: "provider rejected the request",
-      description: "a deliberately long task description",
-      stack: "deep",
-      model: "anthropic/a-very-long-model-name",
-      thinking: "high",
-    });
-    const plainTheme: Theme = {
-      fg: (_color, text) => text,
-      bold: (text) => text,
-    };
-
-    const lines = renderWidgetLines({
-      agents: [agent],
-      registry: testRegistry,
-      spinnerFrame: 0,
-      terminalWidth: 36,
-      theme: plainTheme,
-      shouldShowFinished: () => true,
-    });
-
-    expect(lines[1]).toContain("error");
-    expect(lines.every((line) => visibleWidth(line) <= 36)).toBe(true);
-  });
-
-  it("uses dim heading when only finished agents are visible", () => {
-    const agent = makeAgent({ status: "completed", completedAt: 6000 });
-
-    const lines = renderWidgetLines({
-      agents: [agent],
-      registry: testRegistry,
-      spinnerFrame: 0,
-      terminalWidth: 200,
-      theme,
-      shouldShowFinished: () => true,
-    });
-
-    // Dim heading with open circle
-    expect(lines[0]).toContain("[dim:\u25cb]");
-    expect(lines[0]).toContain("[dim:Agents]");
   });
 });

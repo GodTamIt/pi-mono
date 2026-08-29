@@ -1,3 +1,4 @@
+import type { Model, ThinkingLevel } from "@earendil-works/pi-ai";
 import type {
   BeforeAgentStartEvent,
   BeforeAgentStartEventResult,
@@ -5,12 +6,12 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import type { Model, ThinkingLevel } from "@earendil-works/pi-ai";
 import type { AgentTypeRegistry } from "../config/agent-types.ts";
 import { normalizeAgentId } from "../config/custom-agents.ts";
 import type { AgentStackOverrides } from "../stacks/stack-resolver.ts";
 import { resolveAgentStack } from "../stacks/stack-resolver.ts";
 import type { AgentConfig } from "../types.ts";
+import { type RosterPickerItem, showRosterPicker } from "../ui/roster-picker.ts";
 
 export const PRIMARY_AGENT_FLAG = "agent";
 export const PRIMARY_STACK_FLAG = "stack";
@@ -116,13 +117,49 @@ export class PrimaryController {
   }
 
   async handleAgentCommand(args: string, ctx: ExtensionCommandContext): Promise<void> {
-    const name = args.trim();
-    if (!name) {
-      ctx.ui.notify("Usage: /agent <name|default>", "warning");
+    this.options.registry.reload();
+    const direct = args.trim();
+    const name =
+      direct || (await showRosterPicker(ctx.ui, "Select primary agent", this.agentItems()));
+    if (!name) return;
+    await this.selectPrimary(name, ctx);
+  }
+
+  async handleStackCommand(args: string, ctx: ExtensionCommandContext): Promise<void> {
+    this.options.registry.reload();
+    const parts = args.trim() ? args.trim().split(/\s+/) : [];
+    if (parts.length > 2) {
+      ctx.ui.notify("Usage: /stack [agent] [stack|default|auto]", "warning");
       return;
     }
+
+    const rawAgent =
+      parts[0] ?? (await showRosterPicker(ctx.ui, "Select agent", this.stackAgentItems()));
+    if (!rawAgent) return;
+    if (!parts[1]) {
+      const canonical = this.options.registry.resolveType(rawAgent);
+      if (!canonical) {
+        ctx.ui.notify(`Unknown agent ${JSON.stringify(rawAgent)}.`, "error");
+        return;
+      }
+      if (this.options.registry.resolveAgentConfig(canonical).enabled === false) {
+        ctx.ui.notify(`Agent ${JSON.stringify(canonical)} is disabled.`, "error");
+        return;
+      }
+    }
+    const rawStack =
+      parts[1] ??
+      (await showRosterPicker(
+        ctx.ui,
+        `Select stack for ${this.agentDisplayName(rawAgent)}`,
+        this.stackItems(rawAgent),
+      ));
+    if (!rawStack) return;
+    await this.selectStack(rawAgent, rawStack, ctx);
+  }
+
+  private async selectPrimary(name: string, ctx: ExtensionCommandContext): Promise<void> {
     await ctx.waitForIdle();
-    this.options.registry.reload();
     const resolved = this.resolveSelection(name);
     if (typeof resolved === "string") {
       ctx.ui.notify(resolved, "error");
@@ -135,14 +172,12 @@ export class PrimaryController {
     );
   }
 
-  async handleStackCommand(args: string, ctx: ExtensionCommandContext): Promise<void> {
-    const [rawAgent, rawStack, ...extra] = args.trim().split(/\s+/);
-    if (!rawAgent || !rawStack || extra.length) {
-      ctx.ui.notify("Usage: /stack <agent> <stack|default|auto>", "warning");
-      return;
-    }
+  private async selectStack(
+    rawAgent: string,
+    rawStack: string,
+    ctx: ExtensionCommandContext,
+  ): Promise<void> {
     await ctx.waitForIdle();
-    this.options.registry.reload();
     const canonical = this.options.registry.resolveType(rawAgent);
     if (!canonical) {
       ctx.ui.notify(`Unknown agent ${JSON.stringify(rawAgent)}.`, "error");
@@ -188,6 +223,98 @@ export class PrimaryController {
         : `Stack ${JSON.stringify(rawStack)} selected for ${canonical}.`,
       "info",
     );
+  }
+
+  private agentItems(): RosterPickerItem[] {
+    const baselineModel = this.baseline?.model;
+    const baselineThinking = this.baseline?.thinking ?? "off";
+    const items: RosterPickerItem[] = [
+      {
+        value: "default",
+        label: `Pi default · Default${this.selected ? "" : " · Current"}`,
+        description: "Use Pi's model, thinking level, prompt, and tools captured at session start.",
+        secondary: `stack: default · model: ${formatModel(baselineModel)} · thinking: ${baselineThinking}`,
+      },
+    ];
+    for (const canonical of this.options.registry.getPrimaryTypes()) {
+      const agent = this.options.registry.resolveAgentConfig(canonical);
+      const stack = this.resolveStack(agent);
+      items.push({
+        value: canonical,
+        label: `${agent.displayName ?? agent.name}${
+          this.selected?.name === canonical ? " · Current" : ""
+        }`,
+        description: agent.description,
+        secondary:
+          typeof stack === "string"
+            ? stack
+            : `stack: ${stack.stack} · model: ${formatModel(stack.model)} · thinking: ${stack.thinking ?? "off"}`,
+      });
+    }
+    return items;
+  }
+
+  private stackAgentItems(): RosterPickerItem[] {
+    return this.options.registry.getAvailableTypes().map((canonical) => {
+      const agent = this.options.registry.resolveAgentConfig(canonical);
+      const stack = this.resolveStack(agent);
+      return {
+        value: canonical,
+        label: agent.displayName ?? agent.name,
+        description: agent.description,
+        secondary:
+          typeof stack === "string"
+            ? stack
+            : `stack: ${stack.stack} · model: ${formatModel(stack.model)} · thinking: ${stack.thinking ?? "off"}`,
+      };
+    });
+  }
+
+  private stackItems(rawAgent: string): RosterPickerItem[] {
+    const canonical = this.options.registry.resolveType(rawAgent);
+    if (!canonical) return [];
+    const agent = this.options.registry.resolveAgentConfig(canonical);
+    const override = this.options.stackOverrides.get(agent);
+    const entries: Array<{ value: string; label: string; explicit?: string | undefined }> = [
+      {
+        value: "auto",
+        label: `auto${override ? "" : " · Current override: auto"}`,
+      },
+      {
+        value: "default",
+        label: `default · Default${
+          override && normalizeAgentId(override) === "default" ? " · Current override" : ""
+        }`,
+        explicit: "default",
+      },
+      ...[...(agent.stacks?.keys() ?? [])].map((stack) => ({
+        value: stack,
+        label: `${stack}${
+          override && normalizeAgentId(override) === normalizeAgentId(stack)
+            ? " · Current override"
+            : ""
+        }`,
+        explicit: stack,
+      })),
+    ];
+    return entries.map((entry) => {
+      const stack = this.previewStack(agent, entry.explicit);
+      return {
+        value: entry.value,
+        label: entry.label,
+        secondary:
+          typeof stack === "string"
+            ? stack
+            : `model: ${formatModel(stack.model)} · thinking: ${stack.thinking ?? "off"}`,
+      };
+    });
+  }
+
+  private agentDisplayName(rawAgent: string): string {
+    const canonical = this.options.registry.resolveType(rawAgent);
+    if (!canonical) return rawAgent;
+    const agent = this.options.registry.resolveAgentConfig(canonical);
+    return agent.displayName ?? agent.name;
   }
 
   async reload(ctx: ExtensionCommandContext): Promise<void> {
@@ -284,6 +411,10 @@ export class PrimaryController {
   }
 
   private resolveStack(agent: AgentConfig, explicitStack?: string) {
+    return this.previewStack(agent, explicitStack, this.options.stackOverrides.get(agent));
+  }
+
+  private previewStack(agent: AgentConfig, explicitStack?: string, sessionOverride?: string) {
     if (!this.ctx) return "No active session.";
     const resolved = resolveAgentStack({
       agent,
@@ -291,7 +422,7 @@ export class PrimaryController {
       runtimeModel: this.baseline?.model,
       runtimeThinking: this.baseline?.thinking === "off" ? undefined : this.baseline?.thinking,
       explicitStack,
-      sessionOverride: this.options.stackOverrides.get(agent),
+      sessionOverride,
     });
     return resolved.ok ? resolved.value : resolved.error;
   }
@@ -378,6 +509,10 @@ export class PrimaryController {
       ...MANAGED_SUBAGENT_TOOLS.filter((name) => registered.has(name) && wanted.has(name)),
     ];
   }
+}
+
+function formatModel(model: Model<any> | undefined): string {
+  return model ? `${model.provider}/${model.id}` : "none";
 }
 
 function clean(value: unknown): string | undefined {

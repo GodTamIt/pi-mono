@@ -51,6 +51,8 @@ export async function runForeground(
       maxTurns: recordRef?.maxTurns ?? execution.effectiveMaxTurns,
       durationMs: Date.now() - startedAt,
       status: "running",
+      agentId: recordRef?.id,
+      childSessionId: recordRef?.childSessionId,
       activity: describeActivity(
         recordRef?.activeTools ?? new Map(),
         recordRef?.responseText ?? "",

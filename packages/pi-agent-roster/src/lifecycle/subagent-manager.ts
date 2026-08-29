@@ -59,6 +59,8 @@ export interface SubagentManagerObserver {
   onSubagentCompacted(record: Subagent, info: CompactionInfo): void;
   /** Fires synchronously after a background agent record is created (before run). */
   onSubagentCreated(record: Subagent): void;
+  /** Fires after a child session is installed, including session replacement on resume. */
+  onSubagentSessionCreated?(record: Subagent): void;
 }
 
 export interface SubagentManagerOptions {
@@ -160,9 +162,10 @@ export class SubagentManager {
       onStarted: (agent) => {
         this.observer?.onSubagentStarted(agent);
       },
-      ...(foregroundObserver?.onSessionCreated
-        ? { onSessionCreated: (agent: Subagent) => foregroundObserver.onSessionCreated?.(agent) }
-        : {}),
+      onSessionCreated: (agent) => {
+        this.observer?.onSubagentSessionCreated?.(agent);
+        foregroundObserver?.onSessionCreated?.(agent);
+      },
       onRunFinished: (agent) => {
         if (isBackground) {
           try {

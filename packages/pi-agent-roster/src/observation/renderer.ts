@@ -87,27 +87,22 @@ export function createNotificationRenderer() {
 
     const { iconGlyph, iconStyle, statusText } = resolveStatusPresentation(d.status);
 
-    // Line 1: icon + agent description + status
+    // Collapsed view stays a compact summary; expanded view adds the audit details below.
     let line = `${theme.fg(iconStyle, iconGlyph)} ${theme.bold(d.description)} ${theme.fg("dim", statusText)}`;
+    line += ` ${theme.fg("dim", `ID: ${d.id}`)}`;
 
-    // Keep audit metadata out of the collapsed summary, but give it a dedicated expanded line.
-    const invocationParts = buildInvocationMetadataParts(d);
-    if (expanded && invocationParts.length) line += renderDetailLine(invocationParts, theme);
-
-    const parts = buildStatsParts(d);
-    if (parts.length) line += renderDetailLine(parts, theme);
-
-    // Result preview is one line when collapsed and up to 30 lines when expanded.
-    const previewLines = buildPreviewLines(d.resultPreview, expanded);
     if (expanded) {
-      for (const l of previewLines) line += "\n" + theme.fg("dim", `  ${l}`);
-    } else {
-      line += "\n  " + theme.fg("dim", `${GLYPHS.subLine}  ${previewLines[0] ?? ""}`);
-    }
+      const invocationParts = buildInvocationMetadataParts(d);
+      if (invocationParts.length) line += renderDetailLine(invocationParts, theme);
 
-    // Output file link (if present)
-    if (d.outputFile) {
-      line += "\n  " + theme.fg("muted", `transcript: ${d.outputFile}`);
+      const parts = buildStatsParts(d);
+      if (parts.length) line += renderDetailLine(parts, theme);
+
+      const previewLines = buildPreviewLines(d.resultPreview, true);
+      for (const l of previewLines) line += "\n" + theme.fg("dim", `  ${l}`);
+
+      // Output file link (if present)
+      if (d.outputFile) line += "\n  " + theme.fg("muted", `transcript: ${d.outputFile}`);
     }
 
     return new Text(line, 0, 0);

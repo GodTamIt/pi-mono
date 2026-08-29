@@ -18,12 +18,25 @@ export function getStatusNote(status: string): string {
 
 /** Build AgentDetails from a base + record-specific fields. */
 export function buildDetails(
-  base: Pick<AgentDetails, "displayName" | "description" | "subagentType" | "modelName" | "tags">,
+  base: Pick<
+    AgentDetails,
+    | "displayName"
+    | "description"
+    | "subagentType"
+    | "modelName"
+    | "tags"
+    | "task"
+    | "isBackground"
+    | "stack"
+    | "thinking"
+    | "graceTurns"
+  >,
   record: {
     toolUses: number;
     startedAt: number;
     completedAt?: number | undefined;
     status: string;
+    result?: string | undefined;
     error?: string | undefined;
     id?: string | undefined;
     lifetimeUsage: LifetimeUsage;
@@ -42,6 +55,7 @@ export function buildDetails(
     durationMs: (record.completedAt ?? Date.now()) - record.startedAt,
     status: record.status as AgentDetails["status"],
     agentId: record.id,
+    output: record.result,
     error: record.error,
     ...overrides,
   };

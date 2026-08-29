@@ -256,7 +256,7 @@ describe("AgentWidget — projection reads activity off Subagent records", () =>
     const lines = renderFn!(stubTui, stubTheme).render();
     const allText = lines.join("\n");
     // Turn state and both finite budgets come from the record.
-    expect(allText).toContain("↻3");
+    expect(allText).toContain("turn 3");
     expect(allText).toContain("max 6");
     expect(allText).toContain("grace 0");
     expect(allText).toContain("stack: deep");
@@ -268,29 +268,31 @@ describe("AgentWidget — projection reads activity off Subagent records", () =>
 });
 
 describe("AgentWidget.update self-seeds finished agents", () => {
-  it("seeds a completed agent so it ages out after one turn", () => {
+  it("keeps a completion for one complete subsequent parent turn", () => {
     const { widget, lastContent } = makeWidget([
       { id: "a1", status: "completed", completedAt: 5000 },
     ]);
     widget.update();
-    // Registered/visible: the last setWidget content is a render callback.
     expect(typeof lastContent()).toBe("function");
-    // One turn ages the seeded entry to 1; completed agents linger only 1 turn.
+    widget.onTurnStart();
+    expect(typeof lastContent()).toBe("function");
     widget.onTurnStart();
     expect(lastContent()).toBeUndefined();
   });
 
-  it("lingers an error agent for two turns before aging out", () => {
-    const { widget, lastContent } = makeWidget([{ id: "a1", status: "error", completedAt: 5000 }]);
-    widget.update();
-    expect(typeof lastContent()).toBe("function");
-    // Error agents linger 2 turns: still visible after the first.
-    widget.onTurnStart();
-    expect(typeof lastContent()).toBe("function");
-    // Cleared after the second.
-    widget.onTurnStart();
-    expect(lastContent()).toBeUndefined();
-  });
+  it.each(["error", "aborted", "stopped", "steered"])(
+    "keeps %s for two complete subsequent parent turns",
+    (status) => {
+      const { widget, lastContent } = makeWidget([{ id: "a1", status, completedAt: 5000 }]);
+      widget.update();
+      widget.onTurnStart();
+      expect(typeof lastContent()).toBe("function");
+      widget.onTurnStart();
+      expect(typeof lastContent()).toBe("function");
+      widget.onTurnStart();
+      expect(lastContent()).toBeUndefined();
+    },
+  );
 
   it("does not advance the linger age on repeated update() without a turn", () => {
     const { widget, lastContent } = makeWidget([
@@ -302,6 +304,8 @@ describe("AgentWidget.update self-seeds finished agents", () => {
     // update() seeds at most once and never ages — the agent is still visible.
     expect(typeof lastContent()).toBe("function");
     widget.onTurnStart();
+    expect(typeof lastContent()).toBe("function");
+    widget.onTurnStart();
     expect(lastContent()).toBeUndefined();
   });
 
@@ -309,6 +313,7 @@ describe("AgentWidget.update self-seeds finished agents", () => {
     const agent = { id: "a1", status: "completed", completedAt: 5000 };
     const { widget, lastContent } = makeWidget([agent]);
     widget.update();
+    widget.onTurnStart();
     widget.onTurnStart();
     expect(lastContent()).toBeUndefined();
 

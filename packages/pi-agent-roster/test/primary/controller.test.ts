@@ -57,6 +57,7 @@ function harness(
   let model = baseModel;
   const calls: string[] = [];
   const notify = vi.fn();
+  const custom = vi.fn<(...args: any[]) => Promise<string | undefined>>(async () => undefined);
   const pi = {
     getFlag: vi.fn((name: string) => flags[name]),
     getThinkingLevel: vi.fn(() => thinking),
@@ -87,11 +88,38 @@ function harness(
       getAvailable: () => [baseModel, primaryModel],
     },
     getSystemPrompt: () => "Baseline prompt",
-    ui: { notify },
+    ui: { notify, custom },
   } as unknown as ExtensionContext;
   const overrides = new AgentStackOverrides();
   const controller = new PrimaryController({ pi, registry, stackOverrides: overrides });
-  return { controller, ctx, pi, registry, overrides, calls, notify, getActive: () => active };
+  return {
+    controller,
+    ctx,
+    pi,
+    registry,
+    overrides,
+    calls,
+    notify,
+    custom,
+    getActive: () => active,
+  };
+}
+
+function renderPickerFactory(factory: unknown, width = 80): string[] {
+  let component: { render(width: number): string[] } | undefined;
+  const create = factory as (
+    tui: { requestRender(): void },
+    theme: { fg(_color: string, text: string): string; bold(text: string): string },
+    keybindings: object,
+    done: (value: string | undefined) => void,
+  ) => { render(width: number): string[] };
+  component = create(
+    { requestRender: () => undefined },
+    { fg: (_color, text) => text, bold: (text) => text },
+    {},
+    () => undefined,
+  );
+  return component.render(width);
 }
 
 describe("PrimaryController", () => {
@@ -266,6 +294,144 @@ describe("PrimaryController", () => {
       `tools:read,bash,${MANAGED_SUBAGENT_TOOLS.join(",")}`,
     ]);
     expect(h.controller.authorizeTarget("worker")).toBeUndefined();
+  });
+
+  it("opens the primary picker without waiting and cancels without mutation", async () => {
+    const h = harness();
+    await h.controller.handleSessionStart(h.ctx);
+    h.calls.length = 0;
+    const waitForIdle = vi.fn(async () => undefined);
+
+    await h.controller.handleAgentCommand("", {
+      ...h.ctx,
+      waitForIdle,
+    } as unknown as ExtensionCommandContext);
+
+    expect(h.custom).toHaveBeenCalledOnce();
+    const lines = renderPickerFactory(h.custom.mock.calls[0]![0], 60).join("\n");
+    expect(lines).toContain("Select primary agent");
+    expect(lines).toContain("Pi default · Default · Current");
+    expect(lines).toContain("stack: default");
+    expect(waitForIdle).not.toHaveBeenCalled();
+    expect(h.calls).toEqual([]);
+  });
+
+  it("marks the selected primary current while retaining the synthetic default row", async () => {
+    const h = harness();
+    await h.controller.handleSessionStart(h.ctx);
+    const commandCtx = {
+      ...h.ctx,
+      waitForIdle: vi.fn(async () => undefined),
+    } as unknown as ExtensionCommandContext;
+    await h.controller.handleAgentCommand("lead", commandCtx);
+
+    await h.controller.handleAgentCommand("", commandCtx);
+
+    const lines = renderPickerFactory(h.custom.mock.calls[0]![0], 120).join("\n");
+    expect(lines).toContain("Pi default · Default");
+    expect(lines).toContain("Lead · Current");
+    expect(lines).toContain("stack: default · model: anthropic/primary · thinking: high");
+  });
+
+  it("uses the missing-argument stack pickers and waits only after both selections", async () => {
+    const lead = config({
+      stacks: new Map([["light", { model: "anthropic/base", thinking: "low" }]]),
+    });
+    const h = harness(lead);
+    await h.controller.handleSessionStart(h.ctx);
+    h.custom.mockResolvedValueOnce("lead").mockResolvedValueOnce("light");
+    const waitForIdle = vi.fn(async () => undefined);
+
+    await h.controller.handleStackCommand("", {
+      ...h.ctx,
+      waitForIdle,
+    } as unknown as ExtensionCommandContext);
+
+    expect(h.custom).toHaveBeenCalledTimes(2);
+    expect(waitForIdle).toHaveBeenCalledOnce();
+    expect(h.overrides.get(lead)).toBe("light");
+  });
+
+  it("cancels the stack picker without waiting or changing the override", async () => {
+    const lead = config({ stacks: new Map([["light", { model: "anthropic/base" }]]) });
+    const h = harness(lead);
+    await h.controller.handleSessionStart(h.ctx);
+    h.custom.mockResolvedValueOnce("lead").mockResolvedValueOnce(undefined);
+    const waitForIdle = vi.fn(async () => undefined);
+
+    await h.controller.handleStackCommand("", {
+      ...h.ctx,
+      waitForIdle,
+    } as unknown as ExtensionCommandContext);
+
+    expect(waitForIdle).not.toHaveBeenCalled();
+    expect(h.overrides.get(lead)).toBeUndefined();
+    expect(h.notify).not.toHaveBeenCalled();
+  });
+
+  it("shows auto, synthetic default, frontmatter stacks, and the current override", async () => {
+    const lead = config({
+      stacks: new Map([
+        ["light", { model: "anthropic/base", thinking: "low" }],
+        ["deep", { model: "anthropic/primary", thinking: "high" }],
+      ]),
+    });
+    const h = harness(lead);
+    await h.controller.handleSessionStart(h.ctx);
+    const commandCtx = {
+      ...h.ctx,
+      waitForIdle: vi.fn(async () => undefined),
+    } as unknown as ExtensionCommandContext;
+    await h.controller.handleStackCommand("lead light", commandCtx);
+
+    await h.controller.handleStackCommand("lead", commandCtx);
+
+    const lines = renderPickerFactory(h.custom.mock.calls[0]![0], 120).join("\n");
+    expect(lines).toContain("auto");
+    expect(lines).toContain("default · Default");
+    expect(lines).toContain("light · Current override");
+    expect(lines).toContain("deep");
+    expect(lines).toContain("model: anthropic/base · thinking: off");
+  });
+
+  it("routes direct and picked primary values through the same validation", async () => {
+    const direct = harness();
+    await direct.controller.handleSessionStart(direct.ctx);
+    await direct.controller.handleAgentCommand("missing", {
+      ...direct.ctx,
+      waitForIdle: vi.fn(async () => undefined),
+    } as unknown as ExtensionCommandContext);
+
+    const picked = harness();
+    await picked.controller.handleSessionStart(picked.ctx);
+    picked.custom.mockResolvedValueOnce("missing");
+    await picked.controller.handleAgentCommand("", {
+      ...picked.ctx,
+      waitForIdle: vi.fn(async () => undefined),
+    } as unknown as ExtensionCommandContext);
+
+    expect(picked.notify.mock.calls.at(-1)).toEqual(direct.notify.mock.calls.at(-1));
+  });
+
+  it("routes direct and picked stack values through the same validation", async () => {
+    const lead = config({ stacks: new Map([["light", { model: "anthropic/base" }]]) });
+    const direct = harness(lead);
+    await direct.controller.handleSessionStart(direct.ctx);
+    await direct.controller.handleStackCommand("lead missing", {
+      ...direct.ctx,
+      waitForIdle: vi.fn(async () => undefined),
+    } as unknown as ExtensionCommandContext);
+
+    const picked = harness(lead);
+    await picked.controller.handleSessionStart(picked.ctx);
+    picked.custom.mockResolvedValueOnce("missing");
+    await picked.controller.handleStackCommand("lead", {
+      ...picked.ctx,
+      waitForIdle: vi.fn(async () => undefined),
+    } as unknown as ExtensionCommandContext);
+
+    expect(picked.notify.mock.calls.at(-1)).toEqual(direct.notify.mock.calls.at(-1));
+    expect(picked.overrides.get(lead)).toBeUndefined();
   });
 
   it("rolls model back when a later mutation fails", async () => {

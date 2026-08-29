@@ -2,7 +2,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import type { AgentTypeRegistry } from "../config/agent-types.ts";
 import { resolveAgentInvocationConfig } from "../config/invocation-config.ts";
 import type { ModelRegistry } from "../session/model-resolver.ts";
-import { AgentStackOverrides, resolveAgentStack } from "../stacks/stack-resolver.ts";
+import { type AgentStackOverrides, resolveAgentStack } from "../stacks/stack-resolver.ts";
 import type { AgentConfig, AgentInvocation, SubagentType, ThinkingLevel } from "../types.ts";
 import {
   type AgentDetails,
@@ -46,7 +46,16 @@ export interface SpawnPresentation {
   agentTags: string[];
   detailBase: Pick<
     AgentDetails,
-    "displayName" | "description" | "subagentType" | "modelName" | "tags"
+    | "displayName"
+    | "description"
+    | "subagentType"
+    | "modelName"
+    | "tags"
+    | "task"
+    | "isBackground"
+    | "stack"
+    | "thinking"
+    | "graceTurns"
   >;
 }
 
@@ -223,6 +232,11 @@ export function resolveSpawnConfig(
     subagentType: canonical,
     modelName,
     tags: agentTags.length > 0 ? agentTags : undefined,
+    task,
+    isBackground: runInBackground,
+    stack: selection.invocation.stack,
+    thinking: selection.invocation.thinking,
+    graceTurns: effectiveGraceTurns,
   };
 
   return {

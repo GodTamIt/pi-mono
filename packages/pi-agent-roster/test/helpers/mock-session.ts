@@ -58,10 +58,12 @@ export function toAgentSession(session: MockSession): AgentSession {
 export function createSubagentSessionStub(
   session: MockSession = createMockSession(),
   outputFile?: string,
+  sessionId = "child-session-1",
 ) {
   return {
     session,
     outputFile,
+    sessionId,
     runTurnLoop: vi
       .fn()
       .mockResolvedValue({ responseText: "done", aborted: false, steered: false }),

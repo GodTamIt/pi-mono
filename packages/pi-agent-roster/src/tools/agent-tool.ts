@@ -7,16 +7,19 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { AgentTypeRegistry } from "../config/agent-types.ts";
-import type { AgentStackOverrides } from "../stacks/stack-resolver.ts";
 import type { ChildRuntimeBaseline } from "../lifecycle/child-runtime-baseline.ts";
 import type { AgentSpawnConfig } from "../lifecycle/subagent-manager.ts";
+import type { AgentStackOverrides } from "../stacks/stack-resolver.ts";
 import type { ParentSessionInfo, Subagent } from "../types.ts";
-import { type AgentDetails, getDisplayName, type Theme } from "../ui/display.ts";
-import { GLYPHS } from "../ui/glyphs.ts";
+import type { AgentDetails, Theme } from "../ui/display.ts";
 import { spawnBackground } from "./background-spawner.ts";
 import { runForeground } from "./foreground-runner.ts";
 import { buildAgentGuidelines, buildTypeListText, textResult } from "./helpers.ts";
-import { renderAgentResult } from "./result-renderer.ts";
+import {
+  type InvocationRowRegistry,
+  type InvocationRowRenderContext,
+  renderInvocationRow,
+} from "./invocation-row.ts";
 import {
   type ModelInfo,
   resolveInvocationForAgent,
@@ -89,6 +92,7 @@ export class AgentTool {
     private readonly registry: AgentTypeRegistry,
     private readonly agentDir: string,
     private readonly options: AgentToolOptions = {},
+    private readonly invocationRows?: InvocationRowRegistry | undefined,
   ) {
     this.typeListText = buildTypeListText(registry, agentDir);
     this.availableTypesText = registry.getAvailableTypes().join(", ");
@@ -199,7 +203,8 @@ export class AgentTool {
     const typeListText = this.typeListText;
     const availableTypesText = this.availableTypesText;
     const agentDir = this.agentDir;
-    const registry = this.registry;
+    const invocationRows = this.invocationRows;
+    const getRecord = (id: string) => this.manager.getRecord(id);
 
     const guidelines = [
       "- For parallel work, use run_in_background: true on each agent. Foreground calls run sequentially — only one executes at a time.",
@@ -293,26 +298,17 @@ ${guidelines}
         ),
       }),
 
-      // ---- Custom rendering: inline subagent results ----
-
-      renderCall(args: Record<string, unknown>, theme: Theme) {
-        const displayName = args.subagent_type
-          ? getDisplayName(args.subagent_type as string, registry)
-          : "Subagent";
-        const desc = (args.description as string | undefined) ?? "";
-        return new Text(
-          `${GLYPHS.toolCall} ` +
-            theme.fg("toolTitle", theme.bold(displayName)) +
-            (desc ? "  " + theme.fg("muted", desc) : ""),
-          0,
-          0,
-        );
+      // The result renderer owns the complete logical row; the call slot stays empty.
+      renderShell: "self",
+      renderCall() {
+        return new Text("", 0, 0);
       },
 
       renderResult(
         result: AgentToolResult<AgentDetails | undefined>,
-        { expanded, isPartial }: ToolRenderResultOptions,
+        _options: ToolRenderResultOptions,
         theme: Theme,
+        context: InvocationRowRenderContext,
       ) {
         const details = result.details;
         if (!details) {
@@ -320,7 +316,7 @@ ${guidelines}
           return new Text(text, 0, 0);
         }
         const resultText = result.content[0]?.type === "text" ? result.content[0].text : "";
-        return new Text(renderAgentResult(details, resultText, expanded, isPartial, theme), 0, 0);
+        return renderInvocationRow(details, resultText, theme, context, invocationRows, getRecord);
       },
 
       execute: (

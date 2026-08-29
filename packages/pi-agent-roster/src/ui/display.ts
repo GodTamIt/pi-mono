@@ -6,7 +6,7 @@
  */
 
 import type { AgentConfigLookup } from "../config/agent-types.ts";
-import type { AgentInvocation, SubagentType } from "../types.ts";
+import type { AgentInvocation, SubagentType, ThinkingLevel } from "../types.ts";
 import { GLYPHS } from "./glyphs.ts";
 
 // ---- Types ----
@@ -46,6 +46,14 @@ export interface AgentDetails {
   /** Effective max turns (undefined = unlimited). */
   maxTurns?: number | undefined;
   agentId?: string | undefined;
+  childSessionId?: string | undefined;
+  task?: string | undefined;
+  isBackground?: boolean | undefined;
+  stack?: string | undefined;
+  thinking?: ThinkingLevel | undefined;
+  graceTurns?: number | undefined;
+  compactions?: number | undefined;
+  output?: string | undefined;
   error?: string | undefined;
 }
 

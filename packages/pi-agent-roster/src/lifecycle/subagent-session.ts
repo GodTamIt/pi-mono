@@ -83,6 +83,11 @@ export class SubagentSession {
     return this.meta.outputFile;
   }
 
+  /** Stable child session identity used by read-only lifecycle UI. */
+  get sessionId(): string {
+    return this.meta.sessionId;
+  }
+
   /** Drive the initial run's turn loop; emits `completed` on success. */
   async runTurnLoop(prompt: string, opts: TurnLoopOptions): Promise<TurnLoopResult> {
     const session = this._session;

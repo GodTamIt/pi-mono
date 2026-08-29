@@ -205,6 +205,8 @@ describe("createNotificationRenderer", () => {
     expect(text).toContain("[success:✓]");
     expect(text).toContain("**Test agent**");
     expect(text).toContain("completed");
+    expect(text).toContain("ID: agent-1");
+    expect(text.split("\n")).toHaveLength(1);
   });
 
   it("renders error status with error icon", () => {
@@ -217,6 +219,8 @@ describe("createNotificationRenderer", () => {
     const text = renderText(result);
     expect(text).toContain("[error:✗]");
     expect(text).toContain("error");
+    expect(text).toContain("ID: agent-1");
+    expect(text.split("\n")).toHaveLength(1);
   });
 
   it("shows stack resolution on a dedicated line only when expanded", () => {
@@ -239,45 +243,56 @@ describe("createNotificationRenderer", () => {
     expect(collapsed).not.toContain("thinking: high");
   });
 
-  it("shows full result lines when expanded", () => {
+  it("retains bounded result and transcript details when expanded", () => {
     const renderer = createNotificationRenderer();
     const result = renderer(
-      { details: makeDetails({ resultPreview: "line1\nline2\nline3" }) },
+      {
+        details: makeDetails({
+          stack: "deep",
+          model: "anthropic/opus",
+          thinking: "high",
+          outputFile: "/tmp/transcript.jsonl",
+          resultPreview: Array.from({ length: 35 }, (_, i) => `line${i}`).join("\n"),
+        }),
+      },
       { expanded: true },
       stubTheme(),
     );
     const text = renderText(result);
-    expect(text).toContain("line1");
-    expect(text).toContain("line2");
-    expect(text).toContain("line3");
+    expect(text).toContain("stack: deep");
+    expect(text).toContain("model: anthropic/opus");
+    expect(text).toContain("thinking: high");
+    expect(text).toContain("3 tool uses");
+    expect(text).toContain("line29");
+    expect(text).not.toContain("line30");
+    expect(text).toContain("/tmp/transcript.jsonl");
   });
 
-  it("shows collapsed preview when not expanded", () => {
+  it("shows result preview when expanded", () => {
     const renderer = createNotificationRenderer();
     const result = renderer(
       { details: makeDetails({ resultPreview: "short result" }) },
-      { expanded: false },
+      { expanded: true },
       stubTheme(),
     );
-    expect(renderText(result)).toContain("⎿");
     expect(renderText(result)).toContain("short result");
   });
 
-  it("shows output file link when present", () => {
+  it("shows output file link when expanded", () => {
     const renderer = createNotificationRenderer();
     const result = renderer(
       { details: makeDetails({ outputFile: "/tmp/transcript.jsonl" }) },
-      { expanded: false },
+      { expanded: true },
       stubTheme(),
     );
     expect(renderText(result)).toContain("/tmp/transcript.jsonl");
   });
 
-  it("includes stats line with tool uses and tokens", () => {
+  it("includes stats when expanded", () => {
     const renderer = createNotificationRenderer();
     const result = renderer(
       { details: makeDetails({ toolUses: 7, totalTokens: 5000 }) },
-      { expanded: false },
+      { expanded: true },
       stubTheme(),
     );
     const text = renderText(result);

@@ -79,7 +79,7 @@ export class AgentWidget implements SubagentManagerObserver {
   private widgetInterval: ReturnType<typeof setInterval> | undefined;
   /** Tracks each observed completion so resumed agents get a fresh linger window. */
   private finishedTurnAge = new Map<string, { completedAt: number; age: number }>();
-  /** How many extra turns errors/aborted agents linger (completed agents clear after 1 turn). */
+  /** Number of complete subsequent parent turns for which terminal agents remain visible. */
   private static readonly ERROR_LINGER_TURNS = 2;
 
   /** Whether the widget callback is currently registered with the TUI. */
@@ -161,7 +161,9 @@ export class AgentWidget implements SubagentManagerObserver {
   private shouldShowFinished(agentId: string, status: string): boolean {
     const age = this.finishedTurnAge.get(agentId)?.age ?? 0;
     const maxAge = ERROR_STATUSES.has(status) ? AgentWidget.ERROR_LINGER_TURNS : 1;
-    return age < maxAge;
+    // Age advances at turn start. Equality means the requested subsequent turn
+    // has begun and must remain visible until the following turn starts.
+    return age <= maxAge;
   }
 
   /**

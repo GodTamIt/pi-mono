@@ -1,5 +1,5 @@
 import { getMarkdownTheme, initTheme } from "@earendil-works/pi-coding-agent";
-import type { Component, TUI } from "@earendil-works/pi-tui";
+import { type Component, type TUI, visibleWidth } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { AgentTypeRegistry } from "../../src/config/agent-types.ts";
 import type { SessionMessage } from "../../src/types.ts";
@@ -28,6 +28,16 @@ function makeOverlay(
     tui: opts.tui ?? mockTui(),
     theme: ansiTheme(),
     source: opts.source ?? fakeSource(),
+    session: {
+      key: "live:child-1",
+      id: "child-1",
+      name: "Agent",
+      description: "Unicode task 設計 🚀",
+      status: "running",
+      duration: "2.0s",
+      toolUses: 1,
+      sourceLabel: "live session",
+    },
     done: opts.done ?? vi.fn(),
     cwd: "/test/cwd",
     markdownTheme: getMarkdownTheme(),
@@ -40,25 +50,29 @@ describe("TranscriptOverlay", () => {
     expect(lines.some((l) => l.includes("Hello world"))).toBe(true);
   });
 
-  it("subscribes on construction and requests a render on change", () => {
+  it("keeps one subscription and requests a render on change", () => {
     const tui = mockTui();
     let captured: (() => void) | undefined;
-    const source = fakeSource({
-      subscribe: (onChange) => {
-        captured = onChange;
-        return () => {};
-      },
+    const subscribe = vi.fn((onChange: () => void) => {
+      captured = onChange;
+      return () => {};
     });
-    makeOverlay({ source, tui });
+    const source = fakeSource({ subscribe });
+    const overlay = makeOverlay({ source, tui });
+    overlay.render(80);
+    overlay.render(60);
     captured?.();
+    expect(subscribe).toHaveBeenCalledOnce();
     expect(tui.requestRender).toHaveBeenCalledOnce();
   });
 
-  it("closes and calls done on Escape", () => {
+  it.each(["\x1b", "q", "\x03"])("closes on %j and releases its subscription", (key) => {
     const done = vi.fn();
-    const overlay = makeOverlay({ done });
-    overlay.handleInput("\x1b");
+    const unsubscribe = vi.fn();
+    const overlay = makeOverlay({ source: fakeSource({ subscribe: () => unsubscribe }), done });
+    overlay.handleInput(key);
     expect(done).toHaveBeenCalledWith(undefined);
+    expect(unsubscribe).toHaveBeenCalledOnce();
   });
 
   it("unsubscribes on dispose", () => {
@@ -92,11 +106,9 @@ describe("TranscriptOverlay", () => {
   });
 
   describe("scroll bounds", () => {
-    // A 200-column terminal renders the overlay at 90% (180 columns, inner 176)
-    // while the full terminal would be inner 196. Text sized between the two
-    // wraps to two rows at the overlay width and one row at the terminal width,
-    // so a layout computed at the wrong width yields the wrong maxScroll.
-    const OVERLAY_WIDTH = 180;
+    // A 200-column terminal caps this overlay at 120 columns. Input must use
+    // that rendered width rather than the terminal width when finding bounds.
+    const OVERLAY_WIDTH = 120;
     const wrappingMessages = Array.from({ length: 30 }, (_, i) => ({
       role: "user",
       content: `${String(i).padStart(3, "0")} ${"wrap".repeat(46)}`,
@@ -125,6 +137,59 @@ describe("TranscriptOverlay", () => {
     });
   });
 
+  it("supports arrows, j/k, pages and aliases, Home, and End without global shortcuts", () => {
+    const source = fakeSource({
+      getMessages: () =>
+        Array.from({ length: 40 }, (_, i) => ({
+          role: "user",
+          content: `row ${i}`,
+        })) as SessionMessage[],
+    });
+    const tui = mockTui();
+    const overlay = makeOverlay({ source, tui });
+    const bottom = overlay.render(80);
+
+    for (const key of ["\x1b[A", "k", "\x1b[5~", "\x1b[1;2A", "\x1b[H"]) {
+      overlay.handleInput(key);
+    }
+    expect(overlay.render(80)).not.toEqual(bottom);
+    for (const key of ["\x1b[B", "j", "\x1b[6~", "\x1b[1;2B", "\x1b[F"]) {
+      overlay.handleInput(key);
+    }
+    expect(overlay.render(80)).toEqual(bottom);
+    const renders = vi.mocked(tui.requestRender).mock.calls.length;
+    overlay.handleInput("x");
+    expect(tui.requestRender).toHaveBeenCalledTimes(renders);
+  });
+
+  it.each([40, 60, 80, 120])(
+    "wraps ANSI/Unicode-safe chrome and content at %i columns",
+    (width) => {
+      const lines = makeOverlay({
+        source: fakeSource({
+          getMessages: () =>
+            [
+              { role: "user", content: `\u001b[31m${"界🚀".repeat(40)}\u001b[0m` },
+            ] as unknown as SessionMessage[],
+        }),
+      }).render(width);
+      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+      expect(lines.join("\n")).toContain("Agent");
+      expect(lines.join("\n")).toContain("child-1");
+      expect(lines.join("\n")).toContain("live");
+      expect(lines.join("\n")).toContain("session");
+    },
+  );
+
+  it("renders monochrome chrome without introducing ANSI sequences", () => {
+    const output = makeOverlay({
+      source: fakeSource({ getMessages: () => [] }),
+    })
+      .render(60)
+      .join("\n");
+    expect(output).not.toContain("\u001b");
+  });
+
   it("refreshes its content when the source changes", () => {
     let messages = [{ role: "user", content: "first" }] as unknown as SessionMessage[];
     let captured: (() => void) | undefined;
@@ -144,18 +209,26 @@ describe("TranscriptOverlay", () => {
 });
 
 describe("SessionNavigatorHandler", () => {
-  function makeUI(selectResult?: string) {
+  function makeUI(pickerResult?: string) {
     return {
-      select: vi.fn().mockResolvedValue(selectResult),
       notify: vi.fn(),
-      custom: vi.fn().mockResolvedValue(undefined),
+      custom: vi.fn().mockResolvedValueOnce(pickerResult).mockResolvedValue(undefined),
     };
   }
 
-  // Invoke the component factory captured by the handler's ui.custom call and
-  // render it — the act (handle) stays explicit in each test.
-  function renderCapturedOverlay(ui: ReturnType<typeof makeUI>, width = 80): string[] {
+  function renderCapturedPicker(ui: ReturnType<typeof makeUI>, width = 120): string[] {
     const factory = ui.custom.mock.calls[0]![0] as (
+      tui: TUI,
+      theme: ReturnType<typeof ansiTheme>,
+      kb: unknown,
+      done: (r: string | undefined) => void,
+    ) => Component;
+    return factory(mockTui(), ansiTheme(), undefined, vi.fn()).render(width);
+  }
+
+  // Invoke the overlay factory captured by the handler's second ui.custom call.
+  function renderCapturedOverlay(ui: ReturnType<typeof makeUI>, width = 80): string[] {
+    const factory = ui.custom.mock.calls[1]![0] as (
       tui: TUI,
       theme: ReturnType<typeof ansiTheme>,
       kb: unknown,
@@ -192,8 +265,7 @@ describe("SessionNavigatorHandler", () => {
       cwd: "/test/cwd",
       readFile: noReadFile,
     });
-    expect(ui.select).toHaveBeenCalledOnce();
-    expect(ui.custom).not.toHaveBeenCalled();
+    expect(ui.custom).toHaveBeenCalledOnce();
   });
 
   it("opens a read-only overlay sourced from the picked record", async () => {
@@ -201,11 +273,7 @@ describe("SessionNavigatorHandler", () => {
       { role: "assistant", content: [{ type: "text", text: "picked agent reply" }] },
     ] as unknown as SessionMessage[];
     const record = makeNavigable({ agentMessages: messages });
-    const [label] = (() => {
-      // The handler labels entries identically to listNavigableAgents.
-      return ["Agent (Test task) · 2 tools · completed · 3.0s"];
-    })();
-    const ui = makeUI(label);
+    const ui = makeUI("live:agent-1");
 
     await new SessionNavigatorHandler().handle({
       ui,
@@ -215,13 +283,46 @@ describe("SessionNavigatorHandler", () => {
       readFile: noReadFile,
     });
 
-    expect(ui.custom).toHaveBeenCalledOnce();
+    expect(ui.custom).toHaveBeenCalledTimes(2);
+    expect(ui.custom.mock.calls[1]![1]).toMatchObject({
+      overlayOptions: { width: 120, maxHeight: "70%" },
+    });
+    const picker = renderCapturedPicker(ui).join("\n");
+    expect(picker).toContain("Agent · completed");
+    expect(picker).toContain("Test task");
+    expect(picker).toContain("ID agent-1 · 3.0s · 2 tool uses · live session");
     // Invariant #423: the handler is a reactive consumer — it sources the
     // transcript and never reads tool definitions off the record itself; only
     // the overlay does, lazily, through the TranscriptSource at render time.
     expect(record.getToolDefinition).not.toHaveBeenCalled();
     // Invoke the captured component factory and render to confirm it is sourced from the picked record.
     expect(renderCapturedOverlay(ui).some((l) => l.includes("picked agent reply"))).toBe(true);
+  });
+
+  it("selects duplicate display labels by stable child key", async () => {
+    const first = makeNavigable({
+      id: "first",
+      agentMessages: [{ role: "user", content: "first transcript" }] as unknown as SessionMessage[],
+    });
+    const second = makeNavigable({
+      id: "second",
+      agentMessages: [
+        { role: "user", content: "second transcript" },
+      ] as unknown as SessionMessage[],
+    });
+    const ui = makeUI("live:second");
+
+    await new SessionNavigatorHandler().handle({
+      ui,
+      agents: [first, second],
+      registry,
+      cwd: "/test/cwd",
+      readFile: noReadFile,
+    });
+
+    const rendered = renderCapturedOverlay(ui).join("\n");
+    expect(rendered).toContain("second transcript");
+    expect(rendered).not.toContain("first transcript");
   });
 
   it("opens an overlay sourced from the persisted file when a released agent is picked", async () => {
@@ -248,9 +349,7 @@ describe("SessionNavigatorHandler", () => {
       isSessionReady: () => false,
       outputFile: "/tasks/e1.jsonl",
     });
-    const ui = makeUI(
-      "Agent (Old task) · 5 tools · completed · 3.0s · session released (snapshot)",
-    );
+    const ui = makeUI("snapshot:e1");
 
     await new SessionNavigatorHandler().handle({
       ui,
@@ -261,8 +360,11 @@ describe("SessionNavigatorHandler", () => {
     });
 
     expect(readFile).toHaveBeenCalledWith("/tasks/e1.jsonl");
-    expect(ui.custom).toHaveBeenCalledOnce();
-    expect(renderCapturedOverlay(ui).some((l) => l.includes("released reply"))).toBe(true);
+    expect(ui.custom).toHaveBeenCalledTimes(2);
+    const rendered = renderCapturedOverlay(ui).join("\n");
+    expect(rendered).toContain("released reply");
+    expect(rendered).toContain("ID e1");
+    expect(rendered).toContain("released snapshot");
   });
 
   it("notifies and skips the overlay when the session file cannot be read", async () => {
@@ -279,9 +381,7 @@ describe("SessionNavigatorHandler", () => {
       isSessionReady: () => false,
       outputFile: "/tasks/e1.jsonl",
     });
-    const ui = makeUI(
-      "Agent (Old task) · 5 tools · completed · 3.0s · session released (snapshot)",
-    );
+    const ui = makeUI("snapshot:e1");
 
     await new SessionNavigatorHandler().handle({
       ui,
@@ -292,6 +392,6 @@ describe("SessionNavigatorHandler", () => {
     });
 
     expect(ui.notify).toHaveBeenCalledWith("Could not read the session transcript file.", "error");
-    expect(ui.custom).not.toHaveBeenCalled();
+    expect(ui.custom).toHaveBeenCalledOnce();
   });
 });

@@ -1,31 +1,21 @@
-/**
- * widget-renderer.ts — Pure rendering functions for the agent widget.
- *
- * All functions are stateless: they receive data and return formatted strings.
- * No timers, no SDK types, no side effects. Consumed by AgentWidget.
- */
+/** Pure, width-aware rendering for the background-agent widget. */
 
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { AgentConfigLookup } from "../config/agent-types.ts";
 import { isActiveStatus, type SubagentStatus } from "../lifecycle/subagent-state.ts";
 import type { LifetimeUsage } from "../lifecycle/usage.ts";
 import { getLifetimeTotal } from "../lifecycle/usage.ts";
 import type { SubagentType } from "../types.ts";
 import {
-  buildInvocationMetadataParts,
   describeActivity,
   formatMs,
-  formatSessionTokens,
-  formatTurns,
+  formatTokens,
   getDisplayName,
   getPromptModeLabel,
   type Theme,
 } from "./display.ts";
 import { GLYPHS, SPINNER } from "./glyphs.ts";
 
-// ── Data interfaces ──────────────────────────────────────────────────────────
-
-/** Minimal agent snapshot for rendering — no class methods, no mutation surface. */
 export interface WidgetAgent {
   readonly id: string;
   readonly type: SubagentType;
@@ -37,7 +27,6 @@ export interface WidgetAgent {
   readonly error?: string | undefined;
   readonly lifetimeUsage?: Readonly<LifetimeUsage> | undefined;
   readonly compactionCount: number;
-  // Live activity (folded from the former WidgetActivity — precomputed by AgentWidget)
   readonly turnCount: number;
   readonly maxTurns?: number | undefined;
   readonly graceTurns?: number | undefined;
@@ -46,245 +35,188 @@ export interface WidgetAgent {
   readonly thinking?: string | undefined;
   readonly activeTools: ReadonlyMap<string, string>;
   readonly responseText: string;
-  /** Context-window utilisation (0–100), or null when unavailable. */
   readonly contextPercent: number | null;
 }
 
-// ── Per-agent rendering ──────────────────────────────────────────────────────
+const MAX_WIDGET_LINES = 12;
 
-/** Render a single finished agent line (no tree connector prefix). */
+type StatusColor = "accent" | "muted" | "success" | "error" | "warning" | "dim";
+
+function statusPresentation(status: SubagentStatus): {
+  text: string;
+  color: StatusColor;
+  icon: string;
+} {
+  switch (status) {
+    case "queued":
+      return { text: "queued", color: "muted", icon: GLYPHS.queued };
+    case "running":
+      return { text: "running", color: "accent", icon: "" };
+    case "completed":
+      return { text: "completed", color: "success", icon: GLYPHS.success };
+    case "error":
+      return { text: "failed", color: "error", icon: GLYPHS.failure };
+    case "aborted":
+      return { text: "aborted", color: "warning", icon: GLYPHS.failure };
+    case "stopped":
+      return { text: "stopped", color: "dim", icon: GLYPHS.stopped };
+    case "steered":
+      return { text: "steered (turn limit)", color: "warning", icon: GLYPHS.success };
+  }
+}
+
+function identity(
+  agent: WidgetAgent,
+  registry: AgentConfigLookup,
+  theme: Theme,
+  icon: string,
+): string {
+  const name = getDisplayName(agent.type, registry);
+  const mode = getPromptModeLabel(agent.type, registry);
+  const status = statusPresentation(agent.status);
+  const modeText = mode ? ` (${mode})` : "";
+  const prefix = icon || status.icon;
+  return `${theme.fg(status.color, prefix)} ${theme.bold(name)}${modeText} ${theme.fg(status.color, `[Background · ${status.text}]`)}`.trimStart();
+}
+
+function activeMetadata(agent: WidgetAgent, now: number): string[] {
+  const tokens = getLifetimeTotal(agent.lifetimeUsage);
+  return [
+    `stack: ${agent.stack ?? "unavailable"}`,
+    `model: ${agent.model ?? "unavailable"}`,
+    `thinking: ${agent.thinking ?? "unavailable"}`,
+    `turn ${agent.turnCount}`,
+    `max ${agent.maxTurns ?? "unlimited"}`,
+    `grace ${agent.graceTurns ?? "unlimited"}`,
+    `${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`,
+    formatTokens(tokens),
+    `context: ${agent.contextPercent == null ? "unavailable" : `${agent.contextPercent}%`}`,
+    `compactions: ${agent.compactionCount}`,
+    `elapsed: ${formatMs(now - agent.startedAt)}`,
+  ];
+}
+
+/** Pack metadata at semantic boundaries; only an individually over-wide value is truncated. */
+function packParts(parts: readonly string[], width: number): string[] {
+  const available = Math.max(1, width);
+  const rows: string[] = [];
+  let row = "";
+  for (const part of parts) {
+    const safePart = visibleWidth(part) <= available ? part : truncateToWidth(part, available);
+    const candidate = row ? `${row} · ${safePart}` : safePart;
+    if (row && visibleWidth(candidate) > available) {
+      rows.push(row);
+      row = safePart;
+    } else {
+      row = candidate;
+    }
+  }
+  if (row) rows.push(row);
+  return rows;
+}
+
+function activeActivity(agent: WidgetAgent): string {
+  if (agent.status === "queued") return "waiting for a background slot";
+  return describeActivity(agent.activeTools, agent.responseText);
+}
+
+/** Legacy single-agent formatter retained for focused consumers and tests. */
 export function renderFinishedLine(
   agent: WidgetAgent,
   registry: AgentConfigLookup,
   theme: Theme,
 ): string {
-  const name = getDisplayName(agent.type, registry);
-  const modeLabel = getPromptModeLabel(agent.type, registry);
   const duration = formatMs((agent.completedAt ?? Date.now()) - agent.startedAt);
-
-  let icon: string;
-  let statusText: string;
-  if (agent.status === "completed") {
-    icon = theme.fg("success", GLYPHS.success);
-    statusText = "";
-  } else if (agent.status === "steered") {
-    icon = theme.fg("warning", GLYPHS.success);
-    statusText = theme.fg("warning", " (turn limit)");
-  } else if (agent.status === "stopped") {
-    icon = theme.fg("dim", GLYPHS.stopped);
-    statusText = theme.fg("dim", " stopped");
-  } else if (agent.status === "error") {
-    icon = theme.fg("error", GLYPHS.failure);
-    const errMsg = agent.error ? `: ${agent.error.slice(0, 60)}` : "";
-    statusText = theme.fg("error", ` error${errMsg}`);
-  } else {
-    // aborted
-    icon = theme.fg("error", GLYPHS.failure);
-    statusText = theme.fg("warning", " aborted");
-  }
-
-  const parts: string[] = [];
-  parts.push(...formatInvocation(agent), ...formatTurnBudget(agent));
-  if (agent.toolUses > 0)
-    parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
-  parts.push(duration);
-
-  const modeTag = modeLabel ? ` ${theme.fg("dim", `(${modeLabel})`)}` : "";
-  return `${icon} ${theme.fg("dim", name)}${modeTag}${statusText}  ${theme.fg("dim", agent.description)} ${theme.fg("dim", "·")} ${theme.fg("dim", parts.join(" · "))}`;
+  const error = agent.status === "error" && agent.error ? ` · ${agent.error.slice(0, 60)}` : "";
+  return `${identity(agent, registry, theme, "")} · duration: ${duration} · ${agent.description}${error}`;
 }
 
-/** Render a single running agent as header + activity line pair (no tree connector prefix). */
+/** Legacy two-line formatter; the widget itself wraps metadata semantically. */
 export function renderRunningLines(
   agent: WidgetAgent,
   registry: AgentConfigLookup,
   spinnerFrame: number,
   theme: Theme,
 ): [header: string, activity: string] {
-  const name = getDisplayName(agent.type, registry);
-  const modeLabel = getPromptModeLabel(agent.type, registry);
-  const modeTag = modeLabel ? ` ${theme.fg("dim", `(${modeLabel})`)}` : "";
-  const elapsed = formatMs(Date.now() - agent.startedAt);
-
-  const tokens = getLifetimeTotal(agent.lifetimeUsage);
-  const tokenText =
-    tokens > 0
-      ? formatSessionTokens(tokens, agent.contextPercent, theme, agent.compactionCount)
-      : "";
-
-  const parts: string[] = [];
-  parts.push(...formatInvocation(agent), ...formatTurnBudget(agent));
-  if (agent.toolUses > 0)
-    parts.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
-  if (tokenText) parts.push(tokenText);
-  parts.push(elapsed);
-  const statsText = parts.join(" · ");
-
   const frame = SPINNER[spinnerFrame % SPINNER.length] ?? "";
-  const activityText = describeActivity(agent.activeTools, agent.responseText);
-
-  const header = `${theme.fg("accent", frame)} ${theme.bold(name)}${modeTag}  ${theme.fg("muted", agent.description)} ${theme.fg("dim", "·")} ${theme.fg("dim", statsText)}`;
-  const activityLine = theme.fg("dim", `  ${GLYPHS.subLine}  ${activityText}`);
-
-  return [header, activityLine];
+  const header = `${identity(agent, registry, theme, frame)} · ${activeMetadata(agent, Date.now()).join(" · ")} · ${theme.fg("muted", agent.description)}`;
+  return [header, theme.fg("dim", `${GLYPHS.subLine} activity: ${activeActivity(agent)}`)];
 }
 
-function formatInvocation(agent: WidgetAgent): string[] {
-  return buildInvocationMetadataParts(agent);
+interface RenderBlock {
+  status: SubagentStatus;
+  lines: string[];
 }
 
-function formatTurnBudget(agent: WidgetAgent): string[] {
-  return [
-    formatTurns(agent.turnCount),
-    `max ${agent.maxTurns ?? "unlimited"}`,
-    `grace ${agent.graceTurns ?? "unlimited"}`,
-  ];
-}
-
-// ── Full widget rendering ────────────────────────────────────────────────────
-
-/** Maximum number of rendered lines before overflow collapse kicks in. */
-const MAX_WIDGET_LINES = 12;
-
-interface AgentCategories {
-  running: WidgetAgent[];
-  queued: WidgetAgent[];
-  finished: WidgetAgent[];
-}
-
-/** Partition agents into rendering buckets. */
-function categorizeAgents(
-  agents: readonly WidgetAgent[],
-  shouldShowFinished: (agentId: string, status: string) => boolean,
-): AgentCategories {
-  return {
-    running: agents.filter((a) => a.status === "running"),
-    queued: agents.filter((a) => a.status === "queued"),
-    finished: agents.filter(
-      (a) =>
-        !isActiveStatus(a.status) && a.completedAt != null && shouldShowFinished(a.id, a.status),
-    ),
-  };
-}
-
-interface WidgetSections {
-  finishedLines: string[];
-  runningLines: [string, string][];
-  queuedLine: string | undefined;
-}
-
-/** Render each agent bucket into pre-formatted lines with ├─ tree connectors. */
-function buildSections(
-  categories: AgentCategories,
+function activeBlock(
+  agent: WidgetAgent,
   registry: AgentConfigLookup,
   spinnerFrame: number,
   theme: Theme,
-  truncate: (line: string) => string,
-): WidgetSections {
-  const finishedLines: string[] = [];
-  for (const a of categories.finished) {
-    finishedLines.push(
-      truncate(theme.fg("dim", "\u251C\u2500") + " " + renderFinishedLine(a, registry, theme)),
-    );
-  }
-
-  const runningLines: [string, string][] = [];
-  for (const a of categories.running) {
-    const [header, act] = renderRunningLines(a, registry, spinnerFrame, theme);
-    runningLines.push([
-      truncate(theme.fg("dim", "\u251C\u2500") + ` ${header}`),
-      truncate(theme.fg("dim", "\u2502  ") + act),
-    ]);
-  }
-
-  const queuedLine =
-    categories.queued.length > 0
-      ? truncate(
-          theme.fg("dim", "\u251C\u2500") +
-            ` ${theme.fg("muted", GLYPHS.queued)} ${theme.fg("dim", `${categories.queued.length} queued`)}`,
-        )
-      : undefined;
-
-  return { finishedLines, runningLines, queuedLine };
-}
-
-/**
- * Assemble widget lines when total body fits within MAX_WIDGET_LINES.
- * Fixes the last tree connector: ├─ → └─, and │ → space for the running-agent activity line.
- */
-function assembleWithinBudget(heading: string, sections: WidgetSections): string[] {
-  const { finishedLines, runningLines, queuedLine } = sections;
-  const lines: string[] = [heading, ...finishedLines];
-  for (const pair of runningLines) lines.push(...pair);
-  if (queuedLine) lines.push(queuedLine);
-
-  // Fix last connector: swap \u251C\u2500 \u2192 \u2514\u2500.
-  if (lines.length > 1) {
-    const last = lines.length - 1;
-    lines[last] = (lines[last] ?? "").replace("\u251C\u2500", "\u2514\u2500");
-    if (runningLines.length > 0 && !queuedLine) {
-      if (last >= 2) {
-        lines[last - 1] = (lines[last - 1] ?? "").replace("\u251C\u2500", "\u2514\u2500");
-        lines[last] = (lines[last] ?? "").replace("\u2502  ", "   ");
-      }
-    }
-  }
-  return lines;
-}
-
-/**
- * Assemble widget lines when total body exceeds MAX_WIDGET_LINES.
- * Prioritizes running > queued > finished and appends an overflow indicator.
- */
-function assembleOverflow(
-  heading: string,
-  sections: WidgetSections,
-  maxBody: number,
-  truncate: (line: string) => string,
-  theme: Theme,
-): string[] {
-  const { finishedLines, runningLines, queuedLine } = sections;
-  const lines: string[] = [heading];
-  let budget = maxBody - 1;
-  let hiddenRunning = 0;
-  let hiddenFinished = 0;
-
-  for (const pair of runningLines) {
-    if (budget >= 2) {
-      lines.push(...pair);
-      budget -= 2;
-    } else {
-      hiddenRunning++;
-    }
-  }
-
-  if (queuedLine && budget >= 1) {
-    lines.push(queuedLine);
-    budget--;
-  }
-
-  for (const fl of finishedLines) {
-    if (budget >= 1) {
-      lines.push(fl);
-      budget--;
-    } else {
-      hiddenFinished++;
-    }
-  }
-
-  const overflowParts: string[] = [];
-  if (hiddenRunning > 0) overflowParts.push(`${hiddenRunning} running`);
-  if (hiddenFinished > 0) overflowParts.push(`${hiddenFinished} finished`);
-  const overflowText = overflowParts.join(", ");
-  lines.push(
-    truncate(
-      theme.fg("dim", "\u2514\u2500") +
-        ` ${theme.fg("dim", `+${hiddenRunning + hiddenFinished} more (${overflowText})`)}`,
-    ),
+  width: number,
+  now: number,
+): RenderBlock {
+  const contentWidth = Math.max(1, width - 4);
+  const frame =
+    agent.status === "running" ? (SPINNER[spinnerFrame % SPINNER.length] ?? "") : GLYPHS.queued;
+  const first = identity(agent, registry, theme, frame);
+  const metadata = packParts(activeMetadata(agent, now), contentWidth).map((line) =>
+    theme.fg("dim", line),
   );
-  return lines;
+  const description = truncateToWidth(`task: ${agent.description}`, contentWidth);
+  const activity = truncateToWidth(`activity: ${activeActivity(agent)}`, contentWidth);
+  return {
+    status: agent.status,
+    lines: [first, ...metadata, theme.fg("muted", description), theme.fg("dim", activity)],
+  };
 }
 
-/** Pure rendering of the widget body. Returns lines to display. */
+function finishedBlock(
+  agent: WidgetAgent,
+  registry: AgentConfigLookup,
+  theme: Theme,
+  width: number,
+): RenderBlock {
+  const contentWidth = Math.max(1, width - 4);
+  const duration = formatMs((agent.completedAt ?? Date.now()) - agent.startedAt);
+  const required = `${identity(agent, registry, theme, "")} · duration: ${duration}`;
+  const detail = agent.status === "error" && agent.error ? agent.error : agent.description;
+  return {
+    status: agent.status,
+    lines: [truncateToWidth(required, contentWidth), truncateToWidth(detail, contentWidth)],
+  };
+}
+
+function hiddenLabel(status: SubagentStatus): string {
+  return status === "error" ? "failed" : status;
+}
+
+function overflowLines(hidden: readonly RenderBlock[], width: number, theme: Theme): string[] {
+  const counts = new Map<SubagentStatus, number>();
+  for (const block of hidden) counts.set(block.status, (counts.get(block.status) ?? 0) + 1);
+  const order: SubagentStatus[] = [
+    "running",
+    "queued",
+    "error",
+    "aborted",
+    "stopped",
+    "steered",
+    "completed",
+  ];
+  const parts = order
+    .filter((status) => counts.has(status))
+    .map((status) => `${counts.get(status)} ${hiddenLabel(status)}`);
+  const packed = packParts(parts, Math.max(1, width - 4));
+  return packed.map((line, index) => theme.fg("dim", `${index === 0 ? "hidden: " : ""}${line}`));
+}
+
+function decorateBlock(block: RenderBlock, last: boolean, width: number, theme: Theme): string[] {
+  return block.lines.map((line, index) => {
+    const prefix = index === 0 ? (last ? "└─ " : "├─ ") : last ? "   " : "│  ";
+    return truncateToWidth(theme.fg("dim", prefix) + line, width);
+  });
+}
+
 export function renderWidgetLines(params: {
   agents: readonly WidgetAgent[];
   registry: AgentConfigLookup;
@@ -294,41 +226,61 @@ export function renderWidgetLines(params: {
   shouldShowFinished: (agentId: string, status: string) => boolean;
 }): string[] {
   const { agents, registry, spinnerFrame, terminalWidth, theme, shouldShowFinished } = params;
-
-  const { running, queued, finished } = categorizeAgents(agents, shouldShowFinished);
-
-  const hasActive = running.length > 0 || queued.length > 0;
-  const hasFinished = finished.length > 0;
-
-  if (!hasActive && !hasFinished) return [];
-
-  const truncate = (line: string) => truncateToWidth(line, terminalWidth);
-  const headingColor = hasActive ? "accent" : "dim";
-  const headingIcon = hasActive ? GLYPHS.agentsActive : GLYPHS.agentsIdle;
-
-  const { finishedLines, runningLines, queuedLine } = buildSections(
-    { running, queued, finished },
-    registry,
-    spinnerFrame,
-    theme,
-    truncate,
+  const width = Math.max(1, terminalWidth);
+  const running = agents.filter((agent) => agent.status === "running");
+  const queued = agents.filter((agent) => agent.status === "queued");
+  const finished = agents.filter(
+    (agent) =>
+      !isActiveStatus(agent.status) &&
+      agent.completedAt != null &&
+      shouldShowFinished(agent.id, agent.status),
   );
+  if (running.length === 0 && queued.length === 0 && finished.length === 0) return [];
 
-  // Assemble with overflow cap (heading takes 1 line).
-  const maxBody = MAX_WIDGET_LINES - 1;
-  const totalBody = finishedLines.length + runningLines.length * 2 + (queuedLine ? 1 : 0);
-  const heading = truncate(
-    theme.fg(headingColor, headingIcon) + " " + theme.fg(headingColor, "Agents"),
-  );
+  const now = Date.now();
+  const terminalErrors = finished.filter((agent) => agent.status !== "completed");
+  const completions = finished.filter((agent) => agent.status === "completed");
+  const blocks = [
+    ...running.map((agent) => activeBlock(agent, registry, spinnerFrame, theme, width, now)),
+    ...queued.map((agent) => activeBlock(agent, registry, spinnerFrame, theme, width, now)),
+    ...terminalErrors.map((agent) => finishedBlock(agent, registry, theme, width)),
+    ...completions.map((agent) => finishedBlock(agent, registry, theme, width)),
+  ];
 
-  if (totalBody <= maxBody) {
-    return assembleWithinBudget(heading, { finishedLines, runningLines, queuedLine });
+  const selected = [...blocks];
+  const hidden: RenderBlock[] = [];
+  while (selected.length > 0) {
+    const bodySize = selected.reduce((sum, block) => sum + block.lines.length, 0);
+    const overflowSize = hidden.length ? overflowLines(hidden, width, theme).length : 0;
+    if (bodySize + overflowSize <= MAX_WIDGET_LINES - 1) break;
+    const last = selected.pop();
+    if (!last) break;
+    hidden.unshift(last);
   }
-  return assembleOverflow(
-    heading,
-    { finishedLines, runningLines, queuedLine },
-    maxBody,
-    truncate,
-    theme,
-  );
+
+  const activeCount = running.length + queued.length;
+  const countParts: string[] = [];
+  if (running.length) countParts.push(`${running.length} running`);
+  if (queued.length) countParts.push(`${queued.length} queued`);
+  const headingState = countParts.length ? countParts.join(", ") : `${finished.length} recent`;
+  const headingIcon = activeCount ? GLYPHS.agentsActive : GLYPHS.agentsIdle;
+  const headingColor = activeCount ? "accent" : "dim";
+  const lines = [
+    truncateToWidth(
+      theme.fg(headingColor, `${headingIcon} Background agents — ${headingState}`),
+      width,
+    ),
+  ];
+  selected.forEach((block, index) => {
+    const last = hidden.length === 0 && index === selected.length - 1;
+    lines.push(...decorateBlock(block, last, width, theme));
+  });
+  if (hidden.length) {
+    const overflow = overflowLines(hidden, width, theme);
+    overflow.forEach((line, index) => {
+      const prefix = index === 0 ? "└─ " : "   ";
+      lines.push(truncateToWidth(theme.fg("dim", prefix) + line, width));
+    });
+  }
+  return lines.slice(0, MAX_WIDGET_LINES);
 }

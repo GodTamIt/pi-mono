@@ -188,6 +188,7 @@ export class Subagent {
   // (transcript pointer) survives and the resume path can tell "released" from
   // "never had a session."
   private _releasedOutputFile?: string | undefined;
+  private _releasedSessionId?: string | undefined;
   private _sessionReleased = false;
   /** True once releaseSession() has freed a live session (distinct from never having had one). */
   get sessionReleased(): boolean {
@@ -207,6 +208,11 @@ export class Subagent {
    */
   get outputFile(): string | undefined {
     return this.subagentSession?.outputFile ?? this._releasedOutputFile;
+  }
+
+  /** Stable child session ID, retained after the heavy session is released. */
+  get childSessionId(): string | undefined {
+    return this.subagentSession?.sessionId ?? this._releasedSessionId;
   }
 
   /** Lineage metadata retained for storage and UI only. */
@@ -497,6 +503,7 @@ export class Subagent {
   ): Promise<void> {
     const runtime = this.admitted();
     this._releasedOutputFile = transcriptPath;
+    this._releasedSessionId = previousSession?.sessionId ?? this._releasedSessionId;
     this.subagentSession = undefined;
     this._sessionReleased = true;
     await disposeQuietly(previousSession, "child session workspace resume");
@@ -773,6 +780,7 @@ export class Subagent {
     const session = this.subagentSession;
     if (!session) return;
     this._releasedOutputFile = session.outputFile ?? this._releasedOutputFile;
+    this._releasedSessionId = session.sessionId;
     this.subagentSession = undefined;
     this._sessionReleased = true;
     await disposeQuietly(session, "child session release");

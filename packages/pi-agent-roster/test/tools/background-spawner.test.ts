@@ -65,12 +65,15 @@ describe("spawnBackground", () => {
     const result = spawnBackground(deps.manager, makeParams({ settings: { maxConcurrent: 4 } }));
     expect(result.content[0]!.text).toContain("queued");
     expect(result.content[0]!.text).toContain("max 4 concurrent");
+    expect(result.details?.status).toBe("queued");
   });
 
-  it("mentions 'started' in result when record is running", () => {
-    const { manager } = createToolDeps();
-    const result = spawnBackground(manager, makeParams());
+  it("mentions 'started' and preserves running state when the record is running", () => {
+    const deps = createToolDeps();
+    deps.manager.getRecord = vi.fn().mockReturnValue(createTestSubagent({ status: "running" }));
+    const result = spawnBackground(deps.manager, makeParams());
     expect(result.content[0]!.text).toContain("started");
+    expect(result.details?.status).toBe("running");
   });
 
   it("includes output file path in result when present", () => {

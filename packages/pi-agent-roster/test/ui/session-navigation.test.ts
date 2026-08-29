@@ -37,9 +37,16 @@ describe("listNavigableAgents", () => {
     const entry = listNavigableAgents([released], registry)[0]!;
     expect(entry.kind).toBe("snapshot");
     expect(entry.kind === "snapshot" && entry.outputFile).toBe("/tasks/released-1.jsonl");
-    expect(entry.label).toBe(
-      "Agent (Investigate the bug) · 3 tools · completed · 3.0s · session released (snapshot)",
-    );
+    expect(entry).toMatchObject({
+      key: "snapshot:released",
+      id: "released",
+      name: "Agent",
+      description: "Investigate the bug",
+      status: "completed",
+      duration: "3.0s",
+      toolUses: 3,
+      sourceLabel: "released snapshot",
+    });
   });
 
   it("drops a record with neither a live session nor an outputFile", () => {
@@ -47,8 +54,9 @@ describe("listNavigableAgents", () => {
     expect(listNavigableAgents([gone], registry)).toEqual([]);
   });
 
-  it("builds a label with name, description, tool count, status, and duration", () => {
+  it("builds picker metadata separately from its stable identity", () => {
     const record = makeNavigable({
+      id: "child-7",
       type: "general-purpose",
       description: "Investigate the bug",
       toolUses: 3,
@@ -57,8 +65,25 @@ describe("listNavigableAgents", () => {
       completedAt: 4000,
     });
     const entry = listNavigableAgents([record], registry)[0]!;
-    // getDisplayName resolves "general-purpose" against the empty registry to its fallback display name.
-    expect(entry.label).toBe("Agent (Investigate the bug) · 3 tools · completed · 3.0s");
+    expect(entry).toMatchObject({
+      key: "live:child-7",
+      id: "child-7",
+      name: "Agent",
+      description: "Investigate the bug",
+      status: "completed",
+      duration: "3.0s",
+      toolUses: 3,
+      sourceLabel: "live session",
+    });
+  });
+
+  it("keeps duplicate rendered metadata unambiguous through stable keys", () => {
+    const entries = listNavigableAgents(
+      [makeNavigable({ id: "one" }), makeNavigable({ id: "two" })],
+      registry,
+    );
+    expect(entries.map((entry) => entry.name)).toEqual(["Agent", "Agent"]);
+    expect(entries.map((entry) => entry.key)).toEqual(["live:one", "live:two"]);
   });
 
   it("orders live entries before snapshot ones", () => {

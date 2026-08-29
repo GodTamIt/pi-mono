@@ -47,6 +47,7 @@ import { deriveSubagentSessionDir } from "./session/session-dir.ts";
 import { SettingsManager } from "./settings.ts";
 import { AgentTool } from "./tools/agent-tool.ts";
 import { GetResultTool } from "./tools/get-result-tool.ts";
+import { InvocationRowRegistry } from "./tools/invocation-row.ts";
 import { SteerTool } from "./tools/steer-tool.ts";
 import { AgentWidget } from "./ui/agent-widget.ts";
 import { SessionNavigatorHandler } from "./ui/session-navigator.ts";
@@ -184,6 +185,9 @@ export default function (pi: ExtensionAPI) {
     getRetentionPolicy: () => settings,
   });
 
+  const invocationRows = new InvocationRowRegistry((id) => manager.getRecord(id));
+  observer.add(invocationRows);
+
   const primary = new PrimaryController({
     pi,
     registry,
@@ -208,16 +212,21 @@ export default function (pi: ExtensionAPI) {
     manager,
     () => {
       notifications.dispose();
+      invocationRows.dispose();
       widget?.dispose();
     },
     unpublishSubagentsService,
   );
 
   pi.on("session_start", async (event, ctx) => {
+    invocationRows.clear();
     await lifecycle.handleSessionStart(event, ctx);
     await primary.handleSessionStart(ctx);
   });
-  pi.on("session_before_switch", () => lifecycle.handleSessionBeforeSwitch());
+  pi.on("session_before_switch", () => {
+    invocationRows.clear();
+    return lifecycle.handleSessionBeforeSwitch();
+  });
   pi.on("session_shutdown", () => lifecycle.handleSessionShutdown());
   pi.on("before_agent_start", (event) => primary.beforeAgentStart(event));
 
@@ -233,16 +242,27 @@ export default function (pi: ExtensionAPI) {
   // Abort all subagents when the parent agent loop is interrupted (ESC), unless
   // the user has turned that policy off. The predicate is read at abort time.
   const interrupt = new InterruptHandler(manager, () => settings.abortAllOnInterrupt);
-  pi.on("turn_start", (_event, ctx) => interrupt.handleTurnStart(ctx));
+  pi.on("turn_start", (_event, ctx) => {
+    interrupt.handleTurnStart(ctx);
+    widget?.onTurnStart();
+  });
 
   // ---- Agent tool ----
 
   pi.registerTool(
-    new AgentTool(manager, runtime, settings, registry, getAgentDir(), {
-      stackOverrides: runtime.stackOverrides,
-      refreshRegistry: () => primary.reconcileBeforeDelegation(),
-      authorizeTarget: (type) => primary.authorizeTarget(type),
-    }).toToolDefinition(),
+    new AgentTool(
+      manager,
+      runtime,
+      settings,
+      registry,
+      getAgentDir(),
+      {
+        stackOverrides: runtime.stackOverrides,
+        refreshRegistry: () => primary.reconcileBeforeDelegation(),
+        authorizeTarget: (type) => primary.authorizeTarget(type),
+      },
+      invocationRows,
+    ).toToolDefinition(),
   );
 
   // ---- get_subagent_result tool ----

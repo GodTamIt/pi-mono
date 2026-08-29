@@ -26,7 +26,7 @@ import {
   type MarkdownTheme,
   Spacer,
   type TUI,
-  truncateToWidth,
+  wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import type { AgentSessionEvent, SessionMessage } from "../types.ts";
 import { describeActivity } from "./display.ts";
@@ -152,7 +152,7 @@ export class TranscriptContent {
     if (this.settledRows) return this.settledRows;
     const rows: string[] = [];
     for (const block of this.blocks) {
-      block.rows ??= block.container.render(width).map((row) => truncateToWidth(row, width));
+      block.rows ??= block.container.render(width).flatMap((row) => wrapTextWithAnsi(row, width));
       rows.push(...block.rows);
     }
     this.settledRows = rows;
@@ -165,7 +165,7 @@ export class TranscriptContent {
     const streaming = this.options.source.streaming();
     if (streaming) {
       const activity = `${GLYPHS.streaming} ${describeActivity(streaming.activeTools, streaming.responseText)}`;
-      rows.push("", truncateToWidth(activity, width));
+      rows.push("", ...wrapTextWithAnsi(activity, width));
     }
     return rows;
   }
@@ -177,7 +177,9 @@ export class TranscriptContent {
       this.inFlightWidth = width;
       this.inFlightRows = undefined;
     }
-    this.inFlightRows ??= this.inFlight.render(width).map((row) => truncateToWidth(row, width));
+    this.inFlightRows ??= this.inFlight
+      .render(width)
+      .flatMap((row) => wrapTextWithAnsi(row, width));
     return this.inFlightRows;
   }
 
