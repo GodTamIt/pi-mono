@@ -54,7 +54,6 @@ describe("isolated child contracts", () => {
       deps.agentDir,
     ).toToolDefinition() as unknown as {
       parameters: { properties: Record<string, unknown>; required: string[] };
-      description: string;
     };
     expect(def.parameters.properties).toHaveProperty("task");
     expect(def.parameters.properties).toHaveProperty("stack");
@@ -63,7 +62,10 @@ describe("isolated child contracts", () => {
     expect(def.parameters.properties).not.toHaveProperty("prompt");
     expect(def.parameters.properties).not.toHaveProperty("inherit_context");
     expect(def.parameters.required).toContain("task");
-    expect(def.description).toContain("sees none of the main conversation");
+    expect(def.parameters.properties.task).toHaveProperty(
+      "description",
+      "Self-contained task: the child has no parent context; include required facts, paths, constraints, and expected output.",
+    );
   });
 
   it("rejects blank text, zero max turns, and the removed context option", () => {

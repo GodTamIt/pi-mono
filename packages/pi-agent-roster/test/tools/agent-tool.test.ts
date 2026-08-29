@@ -44,7 +44,7 @@ describe("AgentTool", () => {
 
   it("includes promptSnippet", () => {
     const def = makeTool(createToolDeps()).toToolDefinition();
-    expect(def.promptSnippet).toBe("Launch a specialized agent for complex, multi-step tasks.");
+    expect(def.promptSnippet).toBe("Delegate complex, multi-step tasks to a specialized agent.");
   });
 
   it("exposes only the documented snake_case invocation schema", () => {
@@ -63,8 +63,8 @@ describe("AgentTool", () => {
         "thinking",
       ].sort(),
     );
-    expect(def.parameters.properties.task.description).toContain(
-      "child sees none of the main conversation",
+    expect(def.parameters.properties.task.description).toBe(
+      "Self-contained task: the child has no parent context; include required facts, paths, constraints, and expected output.",
     );
     expect(Value.Check(def.parameters, { task: "Inspect src/runtime.ts" })).toBe(true);
     expect(Value.Check(def.parameters, { task: "   " })).toBe(false);

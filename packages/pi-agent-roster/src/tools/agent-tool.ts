@@ -14,7 +14,11 @@ import type { ParentSessionInfo, Subagent } from "../types.ts";
 import type { AgentDetails, Theme } from "../ui/display.ts";
 import { spawnBackground } from "./background-spawner.ts";
 import { runForeground } from "./foreground-runner.ts";
-import { buildAgentGuidelines, buildTypeListText, textResult } from "./helpers.ts";
+import {
+  buildAgentGuidelines,
+  buildTypeListText,
+  textResult,
+} from "./helpers.ts";
 import {
   type InvocationRowRegistry,
   type InvocationRowRenderContext,
@@ -47,7 +51,10 @@ export interface AgentToolManager {
     id: string,
     task: string,
     signal: AbortSignal,
-    budgets?: { maxTurns?: number | undefined; graceTurns?: number | undefined },
+    budgets?: {
+      maxTurns?: number | undefined;
+      graceTurns?: number | undefined;
+    },
     invocation?: {
       model: import("@earendil-works/pi-ai").Model<any> | undefined;
       snapshot: import("../types.ts").AgentInvocation;
@@ -113,7 +120,8 @@ export class AgentTool {
     if (params.resume !== undefined) {
       const config = resolveResumeConfig(params);
       if ("error" in config) return textResult(config.error);
-      const resumeId = typeof params.resume === "string" ? params.resume.trim() : "";
+      const resumeId =
+        typeof params.resume === "string" ? params.resume.trim() : "";
       if (!resumeId) return textResult("resume must be a non-empty string");
       const existing = this.manager.getRecord(resumeId);
       if (!existing) {
@@ -124,11 +132,16 @@ export class AgentTool {
       const authorizationError = this.options.authorizeTarget?.(existing.type);
       if (authorizationError) return textResult(authorizationError);
       if (existing.isActive())
-        return textResult(`Agent "${resumeId}" is still running and cannot be resumed.`);
+        return textResult(
+          `Agent "${resumeId}" is still running and cannot be resumed.`,
+        );
       if (!existing.isSessionReady() && !existing.sessionReleased) {
-        return textResult(`Agent "${resumeId}" has no child transcript to resume.`);
+        return textResult(
+          `Agent "${resumeId}" has no child transcript to resume.`,
+        );
       }
-      const stackOverrides = this.options.stackOverrides ?? this.runtime.stackOverrides;
+      const stackOverrides =
+        this.options.stackOverrides ?? this.runtime.stackOverrides;
       const selection = resolveInvocationForAgent(
         existing.type,
         {
@@ -165,7 +178,9 @@ export class AgentTool {
       }
       // Resume-return delivery edge: the resumed outcome is returned directly.
       record.markConsumed();
-      return textResult(record.result?.trim() ?? record.error?.trim() ?? "No output.");
+      return textResult(
+        record.result?.trim() ?? record.error?.trim() ?? "No output.",
+      );
     }
 
     // ---- Config resolution (pure) ----
@@ -174,16 +189,27 @@ export class AgentTool {
       this.registry,
       this.runtime.getModelInfo(),
       this.settings,
-      { stackOverrides: this.options.stackOverrides ?? this.runtime.stackOverrides },
+      {
+        stackOverrides:
+          this.options.stackOverrides ?? this.runtime.stackOverrides,
+      },
     );
     if ("error" in config) return textResult(config.error);
-    const authorizationError = this.options.authorizeTarget?.(config.identity.subagentType);
+    const authorizationError = this.options.authorizeTarget?.(
+      config.identity.subagentType,
+    );
     if (authorizationError) return textResult(authorizationError);
-    if (config.execution.notice) ctx.ui.notify(config.execution.notice, "warning");
+    if (config.execution.notice)
+      ctx.ui.notify(config.execution.notice, "warning");
 
     const baseline = this.runtime.buildChildBaseline();
-    const { parentSessionFile, parentSessionId } = this.runtime.getSessionInfo();
-    const parentSession: ParentSessionInfo = { parentSessionFile, parentSessionId, toolCallId };
+    const { parentSessionFile, parentSessionId } =
+      this.runtime.getSessionInfo();
+    const parentSession: ParentSessionInfo = {
+      parentSessionFile,
+      parentSessionId,
+      toolCallId,
+    };
 
     // ---- Background execution ----
     if (config.execution.runInBackground) {
@@ -196,7 +222,12 @@ export class AgentTool {
     }
 
     // ---- Foreground execution — stream progress via onUpdate ----
-    return runForeground(this.manager, { config, baseline, parentSession }, signal, onUpdate);
+    return runForeground(
+      this.manager,
+      { config, baseline, parentSession },
+      signal,
+      onUpdate,
+    );
   }
 
   toToolDefinition() {
@@ -207,47 +238,40 @@ export class AgentTool {
     const getRecord = (id: string) => this.manager.getRecord(id);
 
     const guidelines = [
-      "- For parallel work, use run_in_background: true on each agent. Foreground calls run sequentially — only one executes at a time.",
+      "- Foreground calls serialize; use run_in_background for parallel work.",
       ...this.agentGuidelines,
-      "- The child sees none of the main conversation. Put every required fact, path, constraint, and expected output in task.",
-      "- Subagent results are returned as text — summarize them for the user.",
-      "- Use run_in_background for work you don't need immediately. You will be notified when it completes.",
-      "- Resume requires a new self-contained task and uses only that child's own history.",
-      "- Use steer_subagent to send mid-run messages to a running background agent.",
-      '- Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").',
-      "- Use thinking to control extended thinking level.",
     ].join("\n");
 
     return defineTool({
       name: "subagent" as const,
       label: "Subagent",
-      promptSnippet: "Launch a specialized agent for complex, multi-step tasks.",
-      description: `Launch a new agent to handle complex, multi-step tasks autonomously.
+      promptSnippet:
+        "Delegate complex, multi-step tasks to a specialized agent.",
+      description: `Delegate complex, multi-step tasks to a specialized, isolated agent.
 
-The subagent tool launches specialized agents that autonomously handle complex tasks. Each agent type has specific capabilities and tools available to it.
-
-Available agent types:
+Agent types:
 ${typeListText}
 
-Guidelines:
+Guidance:
 ${guidelines}
 `,
       parameters: Type.Object(
         {
           task: Type.String({
             description:
-              "Required self-contained task. The child sees none of the main conversation, so include every required fact, path, constraint, and expected output.",
+              "Self-contained task: the child has no parent context; include required facts, paths, constraints, and expected output.",
             minLength: 1,
             pattern: "\\S",
           }),
           description: Type.Optional(
             Type.String({
-              description: "Optional short description for the UI; defaults to the task.",
+              description:
+                "Optional short description for the UI; defaults to the task.",
             }),
           ),
           subagent_type: Type.Optional(
             Type.String({
-              description: `The type of specialized agent to use. Required for a new child. Available types: ${availableTypesText}. Custom agents from .pi/agents/<name>.md (project) or ${agentDir}/agents/<name>.md (global) are also available.`,
+              description: `The type of specialized agent to use. Required for a new child. Available types: ${availableTypesText}.`,
             }),
           ),
           model: Type.Optional(
@@ -278,7 +302,8 @@ ${guidelines}
           ),
           grace_turns: Type.Optional(
             Type.Integer({
-              description: "Additional turns after the soft limit. Omit for unlimited.",
+              description:
+                "Additional turns after the soft limit. Omit for unlimited.",
               minimum: 0,
               maximum: 1000,
             }),
@@ -292,7 +317,7 @@ ${guidelines}
           resume: Type.Optional(
             Type.String({
               description:
-                "Optional child agent ID to resume using only its persisted history and the new task.",
+                "Child ID; resumes only that child's history with a new self-contained task.",
               minLength: 1,
               pattern: "\\S",
             }),
@@ -315,11 +340,20 @@ ${guidelines}
       ) {
         const details = result.details;
         if (!details) {
-          const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+          const text =
+            result.content[0]?.type === "text" ? result.content[0].text : "";
           return new Text(text, 0, 0);
         }
-        const resultText = result.content[0]?.type === "text" ? result.content[0].text : "";
-        return renderInvocationRow(details, resultText, theme, context, invocationRows, getRecord);
+        const resultText =
+          result.content[0]?.type === "text" ? result.content[0].text : "";
+        return renderInvocationRow(
+          details,
+          resultText,
+          theme,
+          context,
+          invocationRows,
+          getRecord,
+        );
       },
 
       execute: (
