@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.3
+
+### Patch Changes
+
+- 6210b27: Warn and continue when a primary agent references unknown permission tools.
+
 ## 0.1.0-alpha.2
 
 ### Patch Changes
