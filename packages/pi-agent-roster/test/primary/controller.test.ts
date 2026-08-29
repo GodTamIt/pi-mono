@@ -147,15 +147,15 @@ describe("PrimaryController", () => {
     expect(h.getActive()).toEqual(["read"]);
   });
 
-  it("rejects primary selection with an unknown exact permission key", async () => {
+  it("warns and applies primary selection with an unknown exact permission key", async () => {
     const h = harness(config({ permission: { missing_tool: "deny" } }), {
       [PRIMARY_AGENT_FLAG]: "lead",
     });
     await h.controller.handleSessionStart(h.ctx);
-    expect(h.pi.setModel).not.toHaveBeenCalled();
+    expect(h.pi.setModel).toHaveBeenCalledWith(primaryModel);
     expect(h.notify).toHaveBeenCalledWith(
       expect.stringContaining("unknown tools: missing_tool"),
-      "error",
+      "warning",
     );
   });
 

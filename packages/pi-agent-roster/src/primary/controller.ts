@@ -401,7 +401,10 @@ export class PrimaryController {
     const registered = this.options.pi.getAllTools().map((tool) => tool.name);
     const unknown = unknownPermissionToolNames(registered, agent.permission);
     if (unknown.length) {
-      return `Agent ${JSON.stringify(canonical)} has permission entries for unknown tools: ${unknown.join(", ")}.`;
+      this.ctx?.ui.notify(
+        `Agent ${JSON.stringify(canonical)} has permission entries for unknown tools: ${unknown.join(", ")}. Ignoring those entries.`,
+        "warning",
+      );
     }
     const tools = resolvePermittedToolNames(registered, agent.permission);
     return {
