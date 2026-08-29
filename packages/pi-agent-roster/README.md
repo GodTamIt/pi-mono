@@ -1,6 +1,6 @@
 # pi-agent-roster
 
-Primary-agent profiles and in-process subagent orchestration for Pi. Define a roster in Markdown; select profiles and model stacks; then delegate foreground or background work without leaving the parent TUI.
+Primary-agent profiles and in-process subagent orchestration for Pi. Define a roster in Markdown. Named stacks are reusable model/thinking presets that let you switch between authenticated models without editing agent definitions. Delegate foreground or background work without leaving the parent TUI.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./media/terminal-dark.svg">
@@ -116,9 +116,11 @@ stacks:
 Split independent work, give each child a self-contained task, and synthesize the results.
 ```
 
-Replace the example model IDs with authenticated models available to Pi. A child profile does not need to list the three managed tools; they are denied inside children as a recursion guard.
+A child profile does not need to list the three managed tools; they are denied inside children as a recursion guard.
 
 ## Stacks, precedence, and reload
+
+The preceding example defines model/thinking combinations once under `stacks`; choose one with `default_stack`, then switch among authenticated `provider/model` values available to Pi without editing the agent definition.
 
 Every agent has a synthetic `default` stack. It uses the agent's `model` and `thinking` when present, otherwise the model and thinking level captured from Pi at session start. Named stacks override those values.
 
@@ -135,8 +137,8 @@ Useful commands:
 
 ```text
 /stack reviewer fast       # set a session-local override
-/stack reviewer default    # force the synthetic default
-/stack reviewer auto       # clear the session-local override
+/stack reviewer default    # force synthetic default override
+/stack reviewer auto       # clear override; resume configured selection
 /agents:reload             # rescan definitions and reapply the selected primary
 ```
 

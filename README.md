@@ -14,7 +14,8 @@ Focused extensions for [Pi](https://github.com/earendil-works/pi) with installed
 Primary-agent profiles and in-process subagent orchestration for Pi.
 
 - **Bring your own roster.** No agent definitions ship in the package; project and global Markdown profiles opt in explicitly.
-- **One profile format.** Use an agent as a primary, a subagent, or both, with per-agent tools, prompts, delegation policy, stacks, models, thinking, and turn budgets.
+- **One profile format.** Use an agent as a primary, a subagent, or both, with per-agent tools, prompts, delegation policy, models, thinking, and turn budgets.
+- **Switch models quickly.** Named stacks are reusable model/thinking presets that let you switch between authenticated models without editing agent definitions.
 - **Observable work.** Foreground progress, a live background tree, completion notifications, expandable tool rows, and a read-only child-session viewer stay inside Pi's TUI.
 - **Controlled lifecycle.** FIFO background admission, steering, result collection, transcript-backed resume, bounded child shutdown, retention, and an optional workspace-isolation seam.
 - **Extension API.** Other Pi extensions can spawn, inspect, resume, steer, abort, await, and isolate children through a typed service.
