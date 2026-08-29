@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.2
+
+### Patch Changes
+
+- 23ab734: Clarify agent tool permissions and context-file configuration.
+
 ## 0.1.0-alpha.1
 
 ### Minor Changes
