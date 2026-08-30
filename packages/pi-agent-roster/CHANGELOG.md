@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.8
+
+### Minor Changes
+
+- 5e6579e: Streamline primary stack selection, add agent and stack shortcuts, and show the effective stack in the footer.
+
 ## 0.1.0-alpha.7
 
 ### Minor Changes
