@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.7
+
+### Minor Changes
+
+- f1f487c: Support named `default` stacks, add `/stack` argument completion, and propagate the user-selected primary stack to matching subagent profiles with primary model/thinking fallback.
+
 ## 0.1.0-alpha.6
 
 ### Patch Changes
