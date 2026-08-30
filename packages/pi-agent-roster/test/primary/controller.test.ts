@@ -138,10 +138,7 @@ describe("PrimaryController", () => {
     expect(h.controller.beforeAgentStart({ systemPrompt: "Turn prompt" } as never)).toEqual({
       systemPrompt: "Baseline prompt\n\nLead the work.",
     });
-    expect(h.setStatus).toHaveBeenLastCalledWith(
-      "primary-agent",
-      "Primary: Lead · stack: default",
-    );
+    expect(h.setStatus).toHaveBeenLastCalledWith("primary-agent", "Primary: Lead · stack: default");
     expect(h.controller.authorizeTarget("WORKER")).toBeUndefined();
   });
 
@@ -151,10 +148,7 @@ describe("PrimaryController", () => {
     await h.controller.handleSessionStart(h.ctx);
 
     expect(h.setStatus).toHaveBeenNthCalledWith(1, "primary-agent", undefined);
-    expect(h.setStatus).toHaveBeenLastCalledWith(
-      "primary-agent",
-      "Primary: Lead · stack: default",
-    );
+    expect(h.setStatus).toHaveBeenLastCalledWith("primary-agent", "Primary: Lead · stack: default");
 
     h.controller.dispose();
 
@@ -296,10 +290,7 @@ describe("PrimaryController", () => {
       "thinking:off",
       `tools:read,${MANAGED_SUBAGENT_TOOLS.join(",")}`,
     ]);
-    expect(h.setStatus).toHaveBeenLastCalledWith(
-      "primary-agent",
-      "Primary: Lead · stack: light",
-    );
+    expect(h.setStatus).toHaveBeenLastCalledWith("primary-agent", "Primary: Lead · stack: light");
 
     await h.controller.handleStackCommand("lead auto", commandCtx);
     expect(h.overrides.get(lead)).toBeUndefined();

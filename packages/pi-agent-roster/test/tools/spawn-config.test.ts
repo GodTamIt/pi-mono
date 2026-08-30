@@ -245,9 +245,7 @@ describe("resolveSpawnConfig — stack/model resolution", () => {
       name: "worker",
       stacks: new Map([["OPEN", { model: "anthropic/child", thinking: "low" }]]),
     });
-    const childStackRegistry = new AgentTypeRegistry(
-      () => new Map([["worker", childStackConfig]]),
-    );
+    const childStackRegistry = new AgentTypeRegistry(() => new Map([["worker", childStackConfig]]));
     const childProfile = resolveSpawnConfig(
       { subagent_type: "worker", task: "test" },
       childStackRegistry,
@@ -285,7 +283,8 @@ describe("resolveSpawnConfig — stack/model resolution", () => {
         },
       );
       expect(result).toEqual({
-        error: "stack, model, and thinking cannot override the active primary agent's propagated stack.",
+        error:
+          "stack, model, and thinking cannot override the active primary agent's propagated stack.",
       });
     }
   });

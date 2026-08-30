@@ -272,7 +272,7 @@ ${guidelines}
           model: Type.Optional(
             Type.String({
               description:
-                'Optional model override when Pi\'s default primary is active. Unavailable when a roster primary propagates its stack.',
+                "Optional model override when Pi's default primary is active. Unavailable when a roster primary propagates its stack.",
             }),
           ),
           thinking: Type.Optional(
