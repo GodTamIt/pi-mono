@@ -22,6 +22,7 @@ import {
   renderInvocationRow,
 } from "./invocation-row.ts";
 import {
+  type PropagatedStackSelection,
   type ModelInfo,
   resolveInvocationForAgent,
   resolveResumeConfig,
@@ -73,6 +74,7 @@ export interface AgentToolOptions {
   refreshRegistry?: (() => void) | undefined;
   stackOverrides?: AgentStackOverrides | undefined;
   authorizeTarget?: ((type: string) => string | undefined) | undefined;
+  getPropagatedStack?: (() => PropagatedStackSelection | undefined) | undefined;
 }
 
 /** Narrow settings accessor — only the fields the Agent tool reads. */
@@ -142,7 +144,7 @@ export class AgentTool {
         },
         this.registry,
         this.runtime.getModelInfo(),
-        { stackOverrides },
+        { stackOverrides, propagatedStack: this.options.getPropagatedStack?.() },
       );
       if ("error" in selection) return textResult(selection.error);
       if (selection.notice) ctx.ui.notify(selection.notice, "warning");
@@ -195,6 +197,7 @@ export class AgentTool {
       this.settings,
       {
         stackOverrides: this.options.stackOverrides ?? this.runtime.stackOverrides,
+        propagatedStack: this.options.getPropagatedStack?.(),
       },
     );
     if ("error" in config) return textResult(config.error);
@@ -269,18 +272,19 @@ ${guidelines}
           model: Type.Optional(
             Type.String({
               description:
-                'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.',
+                'Optional model override when Pi\'s default primary is active. Unavailable when a roster primary propagates its stack.',
             }),
           ),
           thinking: Type.Optional(
             Type.String({
               description:
-                "Thinking level: minimal, low, medium, high, xhigh, or max. Overrides agent default.",
+                "Thinking level override when Pi's default primary is active. Unavailable when a roster primary propagates its stack.",
             }),
           ),
           stack: Type.Optional(
             Type.String({
-              description: "Optional named stack selection for this agent.",
+              description:
+                "Optional named stack when Pi's default primary is active. Unavailable when a roster primary propagates its stack.",
               minLength: 1,
               pattern: "\\S",
             }),

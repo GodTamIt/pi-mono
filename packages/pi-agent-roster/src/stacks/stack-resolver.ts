@@ -70,8 +70,9 @@ export function resolveAgentStack(options: ResolveAgentStackOptions): AgentStack
   }
 
   const syntheticThinking = agent.thinking ?? options.runtimeThinking;
-  const named = selected === DEFAULT_STACK ? undefined : findProfile(agent, selected);
-  // Schema validation normally guarantees this; keep the resolver safe for programmatic configs.
+  const named = findProfile(agent, selected);
+  // `default` may be either a named profile or the synthetic agent/runtime fallback.
+  // Schema validation normally guarantees every other selected stack exists.
   if (selected !== DEFAULT_STACK && !named) return unknownStack(agent, selected, "selected stack");
 
   const modelInput = clean(options.model) ?? named?.model ?? clean(agent.model);
@@ -150,20 +151,26 @@ function configuredDefault(agent: AgentConfig): string {
 }
 
 function resolveStackName(agent: AgentConfig, wanted: string): string | undefined {
-  if (normalize(wanted) === DEFAULT_STACK) return DEFAULT_STACK;
   const entry = [...(agent.stacks?.keys() ?? [])].find(
     (name) => normalize(name) === normalize(wanted),
   );
-  return entry;
+  if (entry) return entry;
+  return normalize(wanted) === DEFAULT_STACK ? DEFAULT_STACK : undefined;
 }
 
 function findProfile(agent: AgentConfig, name: string) {
-  const canonical = resolveStackName(agent, name);
-  return canonical && canonical !== DEFAULT_STACK ? agent.stacks?.get(canonical) : undefined;
+  const canonical = [...(agent.stacks?.keys() ?? [])].find(
+    (stack) => normalize(stack) === normalize(name),
+  );
+  return canonical ? agent.stacks?.get(canonical) : undefined;
 }
 
 function unknownStack(agent: AgentConfig, selected: string, context: string): AgentStackResolution {
-  const available = [DEFAULT_STACK, ...(agent.stacks?.keys() ?? [])].join(", ");
+  const named = [...(agent.stacks?.keys() ?? [])];
+  const available = [
+    ...(named.some((name) => normalize(name) === DEFAULT_STACK) ? [] : [DEFAULT_STACK]),
+    ...named,
+  ].join(", ");
   return {
     ok: false,
     error: `Unknown ${context} ${JSON.stringify(selected)} for agent ${JSON.stringify(agent.name)}. Available stacks: ${available}`,

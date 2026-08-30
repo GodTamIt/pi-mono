@@ -5,6 +5,7 @@ import type { WorkspaceProvider } from "../lifecycle/workspace.ts";
 import type { AgentStackOverrides } from "../stacks/stack-resolver.ts";
 import type { AgentInvocation, SessionContext, Subagent } from "../types.ts";
 import {
+  type PropagatedStackSelection,
   type ModelInfo,
   resolveInvocationForAgent,
   resolveSpawnConfig,
@@ -42,6 +43,7 @@ export interface SubagentsServiceAdapterOptions {
   refreshRegistry?: (() => void) | undefined;
   authorizeTarget?: ((type: string) => string | undefined) | undefined;
   notify?: ((message: string) => void) | undefined;
+  getPropagatedStack?: (() => PropagatedStackSelection | undefined) | undefined;
   settings?:
     | { readonly defaultMaxTurns: number | undefined; readonly graceTurns?: number | undefined }
     | undefined;
@@ -87,7 +89,10 @@ export class SubagentsServiceAdapter implements SubagentsService {
       options.registry,
       this.getModelInfo(),
       options.settings ?? { defaultMaxTurns: undefined },
-      { stackOverrides: options.stackOverrides },
+      {
+        stackOverrides: options.stackOverrides,
+        propagatedStack: options.getPropagatedStack?.(),
+      },
     );
     if ("error" in resolved) throw new Error(resolved.error);
     const authorizationError = options.authorizeTarget?.(resolved.identity.subagentType);
@@ -133,7 +138,10 @@ export class SubagentsServiceAdapter implements SubagentsService {
       stack ? { stack } : {},
       options.registry,
       this.getModelInfo(),
-      { stackOverrides: options.stackOverrides },
+      {
+        stackOverrides: options.stackOverrides,
+        propagatedStack: options.getPropagatedStack?.(),
+      },
     );
     if ("error" in selection) throw new Error(selection.error);
     if (selection.notice) options.notify?.(selection.notice);

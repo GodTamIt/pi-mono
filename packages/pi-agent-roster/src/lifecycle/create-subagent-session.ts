@@ -196,6 +196,7 @@ export async function createSubagentSession(
       cwd: params.cwd,
       model: params.model,
       thinkingLevel: params.thinkingLevel,
+      thinkingLevelResolved: params.invocation !== undefined,
     },
     env,
     deps.registry,

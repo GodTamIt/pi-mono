@@ -199,6 +199,97 @@ describe("resolveSpawnConfig — stack/model resolution", () => {
     expect(result.execution.model).toBe(model);
   });
 
+  it("falls back to the primary resolution when the child lacks the propagated stack", () => {
+    const childModel = makeModel({ provider: "anthropic", id: "child", reasoning: true });
+    const primaryModel = makeModel({ provider: "openai", id: "primary-open" });
+    const config = makeAgentConfig({
+      id: "worker",
+      name: "worker",
+      defaultStack: "child",
+      stacks: new Map([["child", { model: "anthropic/child", thinking: "low" }]]),
+    });
+    const registry = new AgentTypeRegistry(() => new Map([["worker", config]]));
+    const modelInfo = {
+      parentModel: childModel,
+      modelRegistry: {
+        find: (provider: string, id: string) =>
+          [childModel, primaryModel].find(
+            (model) => model.provider === provider && model.id === id,
+          ),
+        getAll: () => [childModel, primaryModel],
+        getAvailable: () => [childModel, primaryModel],
+      },
+    };
+    const propagatedStack = {
+      stack: "open",
+      fallbackModel: primaryModel,
+      fallbackThinking: "high" as const,
+    };
+    const fallback = resolveSpawnConfig(
+      { subagent_type: "worker", task: "test" },
+      registry,
+      modelInfo,
+      defaultSettings,
+      { propagatedStack },
+    );
+    if ("error" in fallback) throw new Error(fallback.error);
+    expect(fallback.execution.model).toBe(primaryModel);
+    expect(fallback.execution.agentInvocation).toMatchObject({
+      stack: "open",
+      modelName: "openai/primary-open",
+      thinking: "high",
+    });
+
+    const childStackConfig = makeAgentConfig({
+      id: "worker",
+      name: "worker",
+      stacks: new Map([["OPEN", { model: "anthropic/child", thinking: "low" }]]),
+    });
+    const childStackRegistry = new AgentTypeRegistry(
+      () => new Map([["worker", childStackConfig]]),
+    );
+    const childProfile = resolveSpawnConfig(
+      { subagent_type: "worker", task: "test" },
+      childStackRegistry,
+      modelInfo,
+      defaultSettings,
+      { propagatedStack },
+    );
+    if ("error" in childProfile) throw new Error(childProfile.error);
+    expect(childProfile.execution.model).toBe(childModel);
+    expect(childProfile.execution.agentInvocation).toMatchObject({
+      stack: "OPEN",
+      modelName: "anthropic/child",
+      thinking: "low",
+    });
+  });
+
+  it("rejects child stack/model/thinking overrides while a primary stack is propagated", () => {
+    const primaryModel = makeModel({ provider: "openai", id: "primary-open" });
+    for (const override of [
+      { stack: "other" },
+      { model: "anthropic/other" },
+      { thinking: "low" },
+    ]) {
+      const result = resolveSpawnConfig(
+        { subagent_type: "general-purpose", task: "test", ...override },
+        testRegistry,
+        makeModelInfo(),
+        defaultSettings,
+        {
+          propagatedStack: {
+            stack: "open",
+            fallbackModel: primaryModel,
+            fallbackThinking: "high",
+          },
+        },
+      );
+      expect(result).toEqual({
+        error: "stack, model, and thinking cannot override the active primary agent's propagated stack.",
+      });
+    }
+  });
+
   it("inherits parent model when no model specified", () => {
     const parentModel = makeModel({ id: "claude-sonnet", name: "Claude Sonnet" });
     const result = resolveSpawnConfig(

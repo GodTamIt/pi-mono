@@ -252,6 +252,21 @@ describe("assembleSessionConfig — thinking level", () => {
     expect(result.thinkingLevel).toBe("high");
   });
 
+  it("preserves a resolved off level instead of falling back to agentConfig.thinking", () => {
+    mockResolveAgentConfig.mockReturnValueOnce(exploreConfig({ thinking: "medium" }));
+
+    const result = assembleSessionConfig(
+      "Explore",
+      ctx,
+      { thinkingLevel: undefined, thinkingLevelResolved: true },
+      mockEnv,
+      mockAgentLookup,
+      mockIO,
+    );
+
+    expect(result.thinkingLevel).toBeUndefined();
+  });
+
   it("agentConfig.thinking is used when no option is provided", () => {
     mockResolveAgentConfig.mockReturnValueOnce(exploreConfig({ thinking: "medium" }));
 

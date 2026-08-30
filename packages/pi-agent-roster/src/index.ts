@@ -201,6 +201,7 @@ export default function (pi: ExtensionAPI) {
     refreshRegistry: () => primary.reconcileBeforeDelegation(),
     authorizeTarget: (type) => primary.authorizeTarget(type),
     notify: (message) => primary.notify(message),
+    getPropagatedStack: () => primary.getPropagatedStack(),
   });
   const unpublishService = publishSubagentsService(service);
 
@@ -259,6 +260,7 @@ export default function (pi: ExtensionAPI) {
         stackOverrides: runtime.stackOverrides,
         refreshRegistry: () => primary.reconcileBeforeDelegation(),
         authorizeTarget: (type) => primary.authorizeTarget(type),
+        getPropagatedStack: () => primary.getPropagatedStack(),
       },
       invocationRows,
     ).toToolDefinition(),
@@ -279,6 +281,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("stack", {
     description: "Select a session-local agent stack",
+    getArgumentCompletions: (prefix) => primary.getStackArgumentCompletions(prefix),
     handler: (args, ctx) => primary.handleStackCommand(args, ctx),
   });
 

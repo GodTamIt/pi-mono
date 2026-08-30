@@ -1,4 +1,5 @@
 import type { Model, ThinkingLevel } from "@earendil-works/pi-ai";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import type {
   BeforeAgentStartEvent,
   BeforeAgentStartEventResult,
@@ -131,6 +132,47 @@ export class PrimaryController {
     await this.selectPrimary(name, ctx);
   }
 
+  getStackArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
+    this.options.registry.reload();
+    const firstSpace = argumentPrefix.search(/\s/);
+    if (firstSpace === -1) {
+      const query = normalizeAgentId(argumentPrefix);
+      const items = this.stackCommandAgentTypes()
+        .filter((canonical) => normalizeAgentId(canonical).startsWith(query))
+        .map((canonical) => {
+          const agent = this.options.registry.resolveAgentConfig(canonical);
+          return {
+            value: `${canonical} `,
+            label: canonical,
+            description: agent.description,
+          };
+        });
+      return items.length ? items : null;
+    }
+
+    const match = argumentPrefix.match(/^(\S+)\s+(\S*)$/);
+    if (!match) return null;
+    const canonical = this.options.registry.resolveType(match[1] ?? "");
+    if (!canonical) return null;
+    const agent = this.options.registry.resolveAgentConfig(canonical);
+    if (agent.enabled === false || (this.selected && !sameAgent(this.selected.agent, agent))) {
+      return null;
+    }
+    const query = normalizeAgentId(match[2] ?? "");
+    const items = this.availableStackNames(agent)
+      .filter((stack) => normalizeAgentId(stack).startsWith(query))
+      .map((stack) => ({
+        value: `${canonical} ${stack}`,
+        label: stack,
+        ...(stack === "auto"
+          ? { description: "Clear the session override and use the configured default." }
+          : stack === "default"
+            ? { description: "Use the named default stack, or the synthetic fallback." }
+            : {}),
+      }));
+    return items.length ? items : null;
+  }
+
   async handleStackCommand(args: string, ctx: ExtensionCommandContext): Promise<void> {
     this.options.registry.reload();
     const parts = args.trim() ? args.trim().split(/\s+/) : [];
@@ -192,6 +234,14 @@ export class PrimaryController {
     const agent = this.options.registry.resolveAgentConfig(canonical);
     if (agent.enabled === false) {
       ctx.ui.notify(`Agent ${JSON.stringify(canonical)} is disabled.`, "error");
+      return;
+    }
+
+    if (this.selected && !sameAgent(this.selected.agent, agent)) {
+      ctx.ui.notify(
+        `Subagent ${JSON.stringify(canonical)} cannot override active primary ${JSON.stringify(this.selected.name)} stack ${JSON.stringify(this.selected.stack)}.`,
+        "error",
+      );
       return;
     }
 
@@ -261,7 +311,7 @@ export class PrimaryController {
   }
 
   private stackAgentItems(): RosterPickerItem[] {
-    return this.options.registry.getAvailableTypes().map((canonical) => {
+    return this.stackCommandAgentTypes().map((canonical) => {
       const agent = this.options.registry.resolveAgentConfig(canonical);
       const stack = this.resolveStack(agent);
       return {
@@ -274,6 +324,10 @@ export class PrimaryController {
             : `stack: ${stack.stack} · model: ${formatModel(stack.model)} · thinking: ${stack.thinking ?? "off"}`,
       };
     });
+  }
+
+  private stackCommandAgentTypes(): string[] {
+    return this.selected ? [this.selected.name] : this.options.registry.getAvailableTypes();
   }
 
   private stackItems(rawAgent: string): RosterPickerItem[] {
@@ -293,15 +347,17 @@ export class PrimaryController {
         }`,
         explicit: "default",
       },
-      ...[...(agent.stacks?.keys() ?? [])].map((stack) => ({
-        value: stack,
-        label: `${stack}${
-          override && normalizeAgentId(override) === normalizeAgentId(stack)
-            ? " · Current override"
-            : ""
-        }`,
-        explicit: stack,
-      })),
+      ...this.availableStackNames(agent)
+        .filter((stack) => stack !== "auto" && stack !== "default")
+        .map((stack) => ({
+          value: stack,
+          label: `${stack}${
+            override && normalizeAgentId(override) === normalizeAgentId(stack)
+              ? " · Current override"
+              : ""
+          }`,
+          explicit: stack,
+        })),
     ];
     return entries.map((entry) => {
       const stack = this.previewStack(agent, entry.explicit);
@@ -367,6 +423,16 @@ export class PrimaryController {
     this.ctx?.ui.notify(message, "warning");
   }
 
+  /** Propagate the active stack name, with the primary's resolution as the child fallback. */
+  getPropagatedStack() {
+    if (!this.selected) return undefined;
+    return {
+      stack: this.selected.stack,
+      fallbackModel: this.selected.model,
+      fallbackThinking: this.selected.thinking,
+    };
+  }
+
   authorizeTarget(type: string): string | undefined {
     if (this.delegationDenied) return this.delegationDenied;
     const canonical = this.options.registry.resolveType(type);
@@ -421,6 +487,16 @@ export class PrimaryController {
 
   private resolveStack(agent: AgentConfig, explicitStack?: string) {
     return this.previewStack(agent, explicitStack, this.options.stackOverrides.get(agent));
+  }
+
+  private availableStackNames(agent: AgentConfig): string[] {
+    return [
+      "auto",
+      "default",
+      ...[...(agent.stacks?.keys() ?? [])].filter(
+        (stack) => !["auto", "default"].includes(normalizeAgentId(stack)),
+      ),
+    ];
   }
 
   private previewStack(agent: AgentConfig, explicitStack?: string, sessionOverride?: string) {

@@ -64,6 +64,23 @@ describe("resolveAgentStack", () => {
     });
   });
 
+  it("uses a named default stack as the automatic default", () => {
+    const config = agent([
+      ["default", { model: "anthropic/deep", thinking: "high" }],
+      ["fast", { model: "anthropic/fast", thinking: "low" }],
+    ]);
+    config.defaultStack = undefined;
+
+    expect(resolveAgentStack({ agent: config, registry })).toMatchObject({
+      ok: true,
+      value: { stack: "default", modelName: "anthropic/deep", thinking: "high" },
+    });
+    expect(resolveAgentStack({ agent: config, registry, explicitStack: "DEFAULT" })).toMatchObject({
+      ok: true,
+      value: { stack: "default", modelName: "anthropic/deep", thinking: "high" },
+    });
+  });
+
   it("inherits named thinking and overlays legacy fields independently", () => {
     const config = agent([["fast", { model: "anthropic/fast" }]]);
     const inherited = resolveAgentStack({ agent: config, registry, explicitStack: "fast" });

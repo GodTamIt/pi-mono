@@ -16,8 +16,16 @@ export interface ModelInfo {
   modelRegistry: ModelRegistry | undefined;
 }
 
+export interface PropagatedStackSelection {
+  stack: string;
+  fallbackModel: Model<any>;
+  fallbackThinking?: ThinkingLevel | undefined;
+}
+
 export interface SpawnResolutionOptions {
   stackOverrides?: AgentStackOverrides | undefined;
+  /** Active primary stack name and fallback values. Child invocation overrides are disabled. */
+  propagatedStack?: PropagatedStackSelection | undefined;
 }
 
 export interface SpawnIdentity {
@@ -151,6 +159,55 @@ export function resolveInvocationForAgent(
   }
   if (!modelInfo.modelRegistry) return { error: "No model registry available." };
 
+  if (
+    options.propagatedStack &&
+    (params.stack !== undefined || params.model !== undefined || params.thinking !== undefined)
+  ) {
+    return {
+      error:
+        "stack, model, and thinking cannot override the active primary agent's propagated stack.",
+    };
+  }
+
+  if (options.propagatedStack) {
+    const { stack, fallbackModel, fallbackThinking } = options.propagatedStack;
+    const childStack = [...(agent.stacks?.keys() ?? [])].find(
+      (name) => normalizeStackName(name) === normalizeStackName(stack),
+    );
+    if (!childStack) {
+      return {
+        agent,
+        model: fallbackModel,
+        invocation: {
+          stack,
+          modelName: `${fallbackModel.provider}/${fallbackModel.id}`,
+          thinking: fallbackThinking,
+        },
+      };
+    }
+
+    const resolved = resolveAgentStack({
+      agent,
+      registry: modelInfo.modelRegistry,
+      runtimeModel: fallbackModel,
+      runtimeThinking: fallbackThinking,
+      explicitStack: childStack,
+    });
+    if (!resolved.ok) return { error: resolved.error };
+    if (!resolved.value.model || !resolved.value.modelName) {
+      return { error: `No available model resolved for agent ${JSON.stringify(canonical)}.` };
+    }
+    return {
+      agent,
+      model: resolved.value.model,
+      invocation: {
+        stack: resolved.value.stack,
+        modelName: resolved.value.modelName,
+        thinking: resolved.value.thinking,
+      },
+    };
+  }
+
   const thinking = parseThinking(params.thinking);
   if (params.thinking !== undefined && !thinking) {
     return { error: "thinking must be one of minimal, low, medium, high, xhigh, or max" };
@@ -266,6 +323,10 @@ function parseThinking(value: unknown): ThinkingLevel | undefined {
   return typeof value === "string" && THINKING_LEVELS.has(value as ThinkingLevel)
     ? (value as ThinkingLevel)
     : undefined;
+}
+
+function normalizeStackName(value: string): string {
+  return value.trim().toLocaleLowerCase("en-US");
 }
 
 function trimmedString(value: unknown): string | undefined {

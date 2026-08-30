@@ -63,6 +63,8 @@ export interface AssemblerOptions {
   model?: Model<any> | undefined;
   /** Explicit thinking level — wins over agentConfig.thinking. */
   thinkingLevel?: ThinkingLevel | undefined;
+  /** True when resolution intentionally selected no thinking, preventing config fallback. */
+  thinkingLevelResolved?: boolean | undefined;
 }
 
 /**
@@ -159,8 +161,11 @@ export function assembleSessionConfig(
   const model =
     options.model ?? resolveDefaultModel(ctx.parentModel, ctx.modelRegistry, agentConfig.model);
 
-  // Thinking level: explicit option > agent config > undefined (inherit)
-  const thinkingLevel = options.thinkingLevel ?? agentConfig.thinking;
+  // A resolved invocation may intentionally select no thinking (off), so undefined
+  // must not fall back to the child agent's own thinking configuration.
+  const thinkingLevel = options.thinkingLevelResolved
+    ? options.thinkingLevel
+    : (options.thinkingLevel ?? agentConfig.thinking);
 
   // Per-agent max turns (combined with per-call maxTurns and defaultMaxTurns by SubagentSession.runTurnLoop)
   const agentMaxTurns = agentConfig.maxTurns;

@@ -180,7 +180,6 @@ function parseStacks(value: unknown, path: string): ReadonlyMap<string, AgentSta
     const id = normalizeAgentId(name);
     const profilePath = `${path}:stacks.${rawName}`;
     if (!name) throw new Error(`${profilePath} name must not be empty`);
-    if (id === "default") throw new Error(`${profilePath} uses reserved name "default"`);
     if (normalized.has(id))
       throw new Error(`${profilePath} collides case-insensitively with another stack`);
     normalized.add(id);

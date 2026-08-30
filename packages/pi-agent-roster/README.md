@@ -82,8 +82,8 @@ An invalid project override still masks the global definition. Files are scanned
 | `context_files` | Whether child sessions discover and append the normal `AGENTS.md`/`CLAUDE.md` hierarchy. It has no effect on primary prompt assembly. | `true` |
 | `model` | Exact `provider/model` or fuzzy available-model name. | Active parent model |
 | `thinking` | `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. | Active parent level |
-| `stacks` | Named model/thinking profiles. Stack models must use `provider/model` format. | None |
-| `default_stack` | Named stack or the synthetic `default`. | `default` |
+| `stacks` | Named model/thinking profiles. Stack models must use `provider/model` format. Name the go-to profile `default` to select it automatically. | None |
+| `default_stack` | Optional name of a different stack to select automatically. | `default` |
 | `max_turns` | Soft turn limit, `1–10000`; `0` also means unlimited. | Project/global setting |
 | `grace_turns` | Turns allowed after the wrap-up request, `0–1000`. | Project/global setting |
 | `run_in_background` | When present, forces tool launches for this agent into that mode; otherwise the call chooses. | Foreground |
@@ -118,12 +118,11 @@ mode: primary
 allowed_agents: [reviewer, tests]
 permission:
   bash: deny
-default_stack: balanced
 stacks:
   fast:
     model: provider/code-small
     thinking: low
-  balanced:
+  default:
     model: provider/code-large
     thinking: high
 ---
@@ -135,27 +134,31 @@ The three managed delegation tools are always excluded inside children as a recu
 
 ## Stacks, precedence, and reload
 
-The preceding example defines model/thinking combinations once under `stacks`; choose one with `default_stack`, then switch among authenticated `provider/model` values available to Pi without editing the agent definition.
+The preceding example defines model/thinking combinations once under `stacks`. The stack named `default` is the go-to and is selected automatically; switch among authenticated `provider/model` values available to Pi without editing the agent definition. Use `default_stack` only when another named stack should be selected automatically instead.
 
-Every agent has a synthetic `default` stack. It uses the agent's `model` and `thinking` when present, otherwise the model and thinking level captured from Pi at session start. Named stacks override those values.
+Every agent has a `default` selection. When `stacks.default` exists, its model and thinking values are used. Otherwise `default` is a synthetic fallback that uses the agent's `model` and `thinking` when present, then the model and thinking level captured from Pi at session start. Other named stacks override those fallback values in the same way.
 
 Stack selection precedence is:
 
 1. Explicit `stack` on a tool or service request, or `--stack` at startup.
 2. Session-local override from `/stack`.
-3. The agent's `default_stack`.
-4. Synthetic `default`.
+3. The agent's `default_stack`, when configured.
+4. The named `stacks.default` profile, or the synthetic `default` fallback when that profile is absent.
 
-Within the selected profile, one-off `model` and `thinking` tool arguments win, then named-stack values, then agent fields, then the captured Pi baseline. Thinking is clamped to a level the selected model supports, preferring the nearest lower level and otherwise the model's lowest supported level. Only authenticated models in Pi's available-model registry can resolve.
+When a roster primary is active, its selected stack **name** propagates to every new or resumed subagent. If the child defines a case-insensitively matching stack, the child uses that profile's model and thinking configuration. If it does not, the child falls back to the primary stack's resolved model and thinking level. Child `stack`, `model`, and `thinking` invocation arguments are rejected in this mode, so callers do not need to pass `stack` when delegating.
+
+When Pi's default primary is active, children continue to resolve independently: one-off `model` and `thinking` arguments win, then the child's named-stack values, then child agent fields, then the captured Pi baseline. Thinking is clamped to a level the selected model supports, preferring the nearest lower level and otherwise the model's lowest supported level. Only authenticated models in Pi's available-model registry can resolve.
 
 Useful commands:
 
 ```text
 /stack reviewer fast       # set a session-local override
-/stack reviewer default    # force synthetic default override
+/stack reviewer default    # force the named default, or the synthetic fallback
 /stack reviewer auto       # clear override; resume configured selection
 /agents:reload             # rescan definitions and reapply the selected primary
 ```
+
+Running `/stack` without arguments opens agent and stack pickers. While typing arguments, command completion lists matching agents first and that agent's `auto`, `default`, and named stacks second. When a roster primary is active, `/stack` lists only that primary because subagent stack overrides are disabled.
 
 Names are case-insensitive. A stale session override falls back to the configured default with a warning. Overrides reset at the next Pi session start. `/agents:reload` waits for the parent to become idle; if the current primary disappeared or became ineligible, it restores Pi's default profile.
 
@@ -194,7 +197,7 @@ Child sessions live beside the parent transcript under `<parent-session>/tasks/`
 
 | Tool | Purpose | Important inputs |
 | --- | --- | --- |
-| `subagent` | Spawn or resume a child. Foreground waits; background returns an ID. | `task`, `subagent_type`, `description`, `stack`, `model`, `thinking`, `max_turns`, `grace_turns`, `run_in_background`, `resume` |
+| `subagent` | Spawn or resume a child. Foreground waits; background returns an ID. A roster primary propagates its stack name; a matching child stack wins, otherwise the primary resolution is used. | `task`, `subagent_type`, `description`, `stack`, `model`, `thinking`, `max_turns`, `grace_turns`, `run_in_background`, `resume`; stack/model/thinking overrides require Pi's default primary |
 | `get_subagent_result` | Inspect, wait for, and collect a background result. | `agent_id`, `wait`, `verbose` |
 | `steer_subagent` | Add an explicit mid-run message to a running child. | `agent_id`, `steering` |
 
@@ -225,7 +228,7 @@ const result = service.inspect(id);
 - `waitForAll` and `hasRunning`
 - `registerWorkspaceProvider`, returning a disposer
 
-Service spawns are background by default. `foreground: true` starts immediately but still returns an ID synchronously; callers can inspect or await through the service. `bypassQueue` is intended for integrations that must start immediately.
+Service spawns are background by default. `foreground: true` starts immediately but still returns an ID synchronously; callers can inspect or await through the service. `bypassQueue` is intended for integrations that must start immediately. As with tool launches, an active roster primary propagates its stack name, uses a matching child stack when present, falls back to the primary resolution otherwise, and rejects a service request's child `stack` override.
 
 `SUBAGENT_EVENTS` exports the high-level event channel names: `subagents:created`, `started`, `completed`, `failed`, `resumed`, `compacted`, and `steered`. Ordered `subagents:child:*` session lifecycle events are also emitted for synchronous observers. `SubagentRecord` includes status, invocation, usage, context, compaction, conversation, result/error, and transcript metadata.
 
@@ -298,7 +301,7 @@ Do not put secrets or assumptions from the parent chat into agent definitions. P
 | A project agent does not fall back to the global one | Project identity wins even when invalid. Fix or remove the project file and read the `[pi-agent-roster]` diagnostic. |
 | A primary cannot delegate | Ensure its `permission` does not deny the managed tools and `allowed_agents` admits at least one enabled child profile. |
 | “Model not found” or authentication error | Use `/login`, confirm the model is in Pi's available registry, and use `provider/model` for named stack entries. Failed selection preserves the current profile. |
-| A stack disappeared | Run `/stack <agent> auto` to clear the override, or choose `default`; stale overrides otherwise fall back with a warning. |
+| A stack disappeared | Run `/stack <agent> auto` to clear the override, or choose `default` (the named go-to profile when defined, otherwise the synthetic fallback); stale overrides otherwise fall back with a warning. |
 | “Unknown child tools” | Each exact `permission` key must be built in or registered by an extension that the child actually loads. Check Pi package filters and `excludedExtensionPackages`. |
 | Background work stopped on `Esc` | `abortAllOnInterrupt` defaults to `true`. Toggle it in `/subagents:settings`; foreground work still follows the parent interrupt. |
 | The child seems unaware of the conversation | This is required isolation. Repeat every necessary fact, path, constraint, and output expectation in `task`. |

@@ -336,10 +336,19 @@ Review.`,
     expect(agent.graceTurns).toBe(3);
   });
 
-  it("accepts the synthetic default as a default_stack", () => {
-    writeAgent("reviewer", "---\ndefault_stack: default\n---\nReview.");
+  it("accepts default as either the synthetic fallback or a named stack", () => {
+    writeAgent("fallback", "---\ndefault_stack: default\n---\nReview.");
+    writeAgent(
+      "named",
+      "---\nstacks:\n  default:\n    model: anthropic/sonnet\n    thinking: high\n---\nReview.",
+    );
 
-    expect(loadCustomAgents(tmpDir, () => {}).get("reviewer")?.defaultStack).toBe("default");
+    const agents = loadCustomAgents(tmpDir, () => {});
+    expect(agents.get("fallback")?.defaultStack).toBe("default");
+    expect(agents.get("named")?.stacks?.get("default")).toEqual({
+      model: "anthropic/sonnet",
+      thinking: "high",
+    });
   });
 
   it.each(["inherit_context", "model_stacks"])("rejects unsupported %s per file", (field) => {
@@ -352,9 +361,8 @@ Review.`,
     expect(diagnostics).toContainEqual(expect.stringContaining(`${field} is unsupported`));
   });
 
-  it("rejects reserved, colliding, malformed, empty, and unknown default stacks", () => {
+  it("rejects colliding, malformed, empty, and unknown default stacks", () => {
     const cases = {
-      reserved: "stacks:\n  default:\n    model: a/b",
       collision: "stacks:\n  Fast:\n    model: a/b\n  fast:\n    model: c/d",
       malformed: "stacks:\n  fast:\n    model: sonnet",
       empty: 'default_stack: ""',
@@ -364,7 +372,7 @@ Review.`,
     const diagnostics: string[] = [];
     const result = loadCustomAgents(tmpDir, (diagnostic) => diagnostics.push(diagnostic.message));
     expect(result.size).toBe(0);
-    expect(diagnostics).toHaveLength(5);
+    expect(diagnostics).toHaveLength(4);
   });
 
   it("honors PI_CODING_AGENT_DIR for global custom agent discovery", () => {

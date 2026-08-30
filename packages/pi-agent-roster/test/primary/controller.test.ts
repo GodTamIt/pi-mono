@@ -280,6 +280,11 @@ describe("PrimaryController", () => {
     await h.controller.handleStackCommand("lead light", commandCtx);
 
     expect(h.overrides.get(lead)).toBe("light");
+    expect(h.controller.getPropagatedStack()).toEqual({
+      stack: "light",
+      fallbackModel: baseModel,
+      fallbackThinking: undefined,
+    });
     expect(h.calls.slice(-3)).toEqual([
       "model:base",
       "thinking:off",
@@ -288,6 +293,31 @@ describe("PrimaryController", () => {
 
     await h.controller.handleStackCommand("lead auto", commandCtx);
     expect(h.overrides.get(lead)).toBeUndefined();
+    expect(h.controller.getPropagatedStack()).toEqual({
+      stack: "default",
+      fallbackModel: primaryModel,
+      fallbackThinking: "high",
+    });
+  });
+
+  it("rejects subagent stack overrides while a primary stack is active", async () => {
+    const h = harness(config(), { [PRIMARY_AGENT_FLAG]: "lead" });
+    await h.controller.handleSessionStart(h.ctx);
+    const commandCtx = {
+      ...h.ctx,
+      waitForIdle: vi.fn(async () => undefined),
+    } as unknown as ExtensionCommandContext;
+
+    await h.controller.handleStackCommand("worker default", commandCtx);
+
+    expect(h.notify).toHaveBeenLastCalledWith(
+      'Subagent "Worker" cannot override active primary "Lead" stack "default".',
+      "error",
+    );
+    expect(h.controller.getStackArgumentCompletions("")?.map((item) => item.label)).toEqual([
+      "Lead",
+    ]);
+    expect(h.controller.getStackArgumentCompletions("worker ")).toBeNull();
   });
 
   it("refreshes command discovery before resolving an agent or stack", async () => {
@@ -389,6 +419,33 @@ describe("PrimaryController", () => {
     expect(lines).toContain("Pi default · Default");
     expect(lines).toContain("Lead · Current");
     expect(lines).toContain("stack: default · model: anthropic/primary · thinking: high");
+  });
+
+  it("completes stack command agents and their available stacks", () => {
+    const lead = config({
+      stacks: new Map([
+        ["default", { model: "anthropic/primary", thinking: "high" }],
+        ["light", { model: "anthropic/base", thinking: "low" }],
+      ]),
+    });
+    const h = harness(lead);
+
+    expect(h.controller.getStackArgumentCompletions("l")).toEqual([
+      { value: "Lead ", label: "Lead", description: "Lead" },
+    ]);
+    expect(h.controller.getStackArgumentCompletions("lead ")?.map((item) => item.label)).toEqual([
+      "auto",
+      "default",
+      "light",
+    ]);
+    expect(h.controller.getStackArgumentCompletions("lead d")).toEqual([
+      {
+        value: "Lead default",
+        label: "default",
+        description: "Use the named default stack, or the synthetic fallback.",
+      },
+    ]);
+    expect(h.controller.getStackArgumentCompletions("missing ")).toBeNull();
   });
 
   it("uses the missing-argument stack pickers and waits only after both selections", async () => {
