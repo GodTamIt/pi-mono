@@ -47,6 +47,7 @@ function makePi() {
         tools.set(tool.name, tool);
       }),
       registerCommand: vi.fn(),
+      registerShortcut: vi.fn(),
       getFlag: vi.fn(),
       getThinkingLevel: vi.fn(() => "off"),
       setThinkingLevel: vi.fn(),

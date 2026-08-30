@@ -10,7 +10,7 @@
 
   <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">
     <text x="42" y="106" fill="#67e8f9">$</text>
-    <text x="62" y="106" fill="#e7ecf3">pi --agent lead --stack balanced</text>
+    <text x="62" y="106" fill="#e7ecf3">pi --agent lead --stack default</text>
     <text x="42" y="136" fill="#7ee787">✓ Primary agent set to lead.</text>
 
     <text x="42" y="182" fill="#c4b5fd">›</text>
@@ -19,7 +19,7 @@
 
     <text x="42" y="254" fill="#e7ecf3" font-weight="700">Subagent · Reviewer ·</text>
     <text x="252" y="254" fill="#67e8f9">running</text>
-    <text x="42" y="282" fill="#9aa8b8">Background · stack: balanced</text>
+    <text x="42" y="282" fill="#9aa8b8">Background · stack: default</text>
     <text x="42" y="308" fill="#9aa8b8">model: provider/code-large</text>
     <text x="42" y="334" fill="#9aa8b8">thinking: high · elapsed: 8.4s</text>
 
@@ -28,7 +28,7 @@
     <text x="74" y="420" fill="#67e8f9">⠹</text>
     <text x="100" y="420" fill="#e7ecf3" font-weight="700">Reviewer</text>
     <text x="42" y="450" fill="#9aa8b8">   [Background · running]</text>
-    <text x="42" y="484" fill="#9aa8b8">   stack: balanced</text>
+    <text x="42" y="484" fill="#9aa8b8">   stack: default</text>
     <text x="42" y="510" fill="#9aa8b8">   model: provider/code-large</text>
     <text x="42" y="536" fill="#9aa8b8">   thinking: high · turn 3</text>
     <text x="42" y="570" fill="#9aa8b8">   7 tool uses · 18.2k token</text>

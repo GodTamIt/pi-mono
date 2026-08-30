@@ -14,12 +14,14 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   type ExtensionAPI,
+  type ExtensionContext,
   getAgentDir,
   type ModelRuntime,
   type ResourceLoader,
   SettingsManager as SdkSettingsManager,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { Key } from "@earendil-works/pi-tui";
 import { AgentTypeRegistry } from "./config/agent-types.ts";
 import { loadCustomAgents } from "./config/custom-agents.ts";
 import { InterruptHandler, SessionLifecycleHandler, ToolStartHandler } from "./handlers/index.ts";
@@ -285,6 +287,16 @@ export default function (pi: ExtensionAPI) {
     handler: (args, ctx) => primary.handleStackCommand(args, ctx),
   });
 
+  pi.registerShortcut(Key.ctrlAlt("a"), {
+    description: "Open the primary agent selector",
+    handler: (ctx) => dispatchSelector(pi, ctx, "/agent", "primary"),
+  });
+
+  pi.registerShortcut(Key.ctrlAlt("s"), {
+    description: "Open the stack selector for the active primary",
+    handler: (ctx) => dispatchSelector(pi, ctx, "/stack", "stack"),
+  });
+
   pi.registerCommand("agents:reload", {
     description: "Reload agent definitions",
     handler: (_args, ctx) => primary.reload(ctx),
@@ -317,6 +329,22 @@ export default function (pi: ExtensionAPI) {
       });
     },
   });
+}
+
+function dispatchSelector(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  command: "/agent" | "/stack",
+  selection: "primary" | "stack",
+): void {
+  if (!ctx.isIdle()) {
+    ctx.ui.notify(
+      `Wait for the current agent run to finish before selecting a ${selection}.`,
+      "warning",
+    );
+    return;
+  }
+  pi.sendUserMessage(command, { expandPromptTemplates: true });
 }
 
 function registerPrimaryFlags(pi: ExtensionAPI): void {

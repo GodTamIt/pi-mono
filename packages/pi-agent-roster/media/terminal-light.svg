@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="680" viewBox="0 0 1200 680" role="img" aria-labelledby="title desc">
   <title id="title">Pi Agent Roster running parallel background agents in a light terminal</title>
-  <desc id="desc">A sanitized terminal view shows a lead profile on the balanced stack, a live subagent summary, and a responsive background-agent tree with two running agents and one queued agent.</desc>
+  <desc id="desc">A sanitized terminal view shows a lead profile on the default stack, a live subagent summary, and a responsive background-agent tree with two running agents and one queued agent.</desc>
   <rect width="1200" height="680" fill="#eef2f6"/>
   <rect x="34" y="28" width="1132" height="624" rx="16" fill="#fbfcfe" stroke="#c7d1df" stroke-width="2"/>
   <path d="M50 28h1100a16 16 0 0 1 16 16v48H34V44a16 16 0 0 1 16-16Z" fill="#e9eef5"/>
@@ -10,7 +10,7 @@
 
   <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">
     <text x="64" y="126" fill="#087e8b">$</text>
-    <text x="86" y="126" fill="#172033">pi --agent lead --stack balanced</text>
+    <text x="86" y="126" fill="#172033">pi --agent lead --stack default</text>
     <text x="64" y="158" fill="#177245">✓ Primary agent set to lead.</text>
 
     <text x="64" y="206" fill="#6d4cc4">›</text>
@@ -21,7 +21,7 @@
     <text x="176" y="250" fill="#172033">Reviewer</text>
     <text x="262" y="250" fill="#8090a4">·</text>
     <text x="284" y="250" fill="#087e8b">running</text>
-    <text x="64" y="280" fill="#607086">Background · stack: balanced · model: provider/code-large · thinking: high · elapsed: 8.4s</text>
+    <text x="64" y="280" fill="#607086">Background · stack: default · model: provider/code-large · thinking: high · elapsed: 8.4s</text>
 
     <text x="64" y="326" fill="#087e8b" font-weight="700">● Background agents — 2 running, 1 queued</text>
     <text x="64" y="362" fill="#8090a4">├─</text>
@@ -30,7 +30,7 @@
     <text x="218" y="362" fill="#607086">(twin)</text>
     <text x="286" y="362" fill="#087e8b">[Background · running]</text>
     <text x="64" y="392" fill="#8090a4">│</text>
-    <text x="98" y="392" fill="#607086">stack: balanced · model: provider/code-large · thinking: high · turn 3</text>
+    <text x="98" y="392" fill="#607086">stack: default · model: provider/code-large · thinking: high · turn 3</text>
     <text x="64" y="422" fill="#8090a4">│</text>
     <text x="98" y="422" fill="#607086">7 tool uses · 18.2k token · context: 31% · compactions: 0 · elapsed: 8.4s</text>
     <text x="64" y="452" fill="#8090a4">│</text>

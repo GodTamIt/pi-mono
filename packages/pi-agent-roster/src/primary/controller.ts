@@ -181,8 +181,12 @@ export class PrimaryController {
       return;
     }
 
-    const rawAgent =
-      parts[0] ?? (await showRosterPicker(ctx.ui, "Select agent", this.stackAgentItems()));
+    if (!parts[0] && !this.selected) {
+      ctx.ui.notify("No roster primary is active. Select one with /agent first.", "warning");
+      return;
+    }
+
+    const rawAgent = parts[0] ?? this.selected?.name;
     if (!rawAgent) return;
     if (!parts[1]) {
       const canonical = this.options.registry.resolveType(rawAgent);
@@ -308,22 +312,6 @@ export class PrimaryController {
       });
     }
     return items;
-  }
-
-  private stackAgentItems(): RosterPickerItem[] {
-    return this.stackCommandAgentTypes().map((canonical) => {
-      const agent = this.options.registry.resolveAgentConfig(canonical);
-      const stack = this.resolveStack(agent);
-      return {
-        value: canonical,
-        label: agent.displayName ?? agent.name,
-        description: agent.description,
-        secondary:
-          typeof stack === "string"
-            ? stack
-            : `stack: ${stack.stack} · model: ${formatModel(stack.model)} · thinking: ${stack.thinking ?? "off"}`,
-      };
-    });
   }
 
   private stackCommandAgentTypes(): string[] {
@@ -566,7 +554,9 @@ export class PrimaryController {
 
     ctx.ui.setStatus(
       PRIMARY_AGENT_STATUS_KEY,
-      next ? `Primary: ${next.agent.displayName ?? next.agent.name}` : undefined,
+      next
+        ? `Primary: ${next.agent.displayName ?? next.agent.name} · stack: ${next.stack}`
+        : undefined,
     );
   }
 

@@ -138,7 +138,10 @@ describe("PrimaryController", () => {
     expect(h.controller.beforeAgentStart({ systemPrompt: "Turn prompt" } as never)).toEqual({
       systemPrompt: "Baseline prompt\n\nLead the work.",
     });
-    expect(h.setStatus).toHaveBeenLastCalledWith("primary-agent", "Primary: Lead");
+    expect(h.setStatus).toHaveBeenLastCalledWith(
+      "primary-agent",
+      "Primary: Lead · stack: default",
+    );
     expect(h.controller.authorizeTarget("WORKER")).toBeUndefined();
   });
 
@@ -148,7 +151,10 @@ describe("PrimaryController", () => {
     await h.controller.handleSessionStart(h.ctx);
 
     expect(h.setStatus).toHaveBeenNthCalledWith(1, "primary-agent", undefined);
-    expect(h.setStatus).toHaveBeenLastCalledWith("primary-agent", "Primary: Lead");
+    expect(h.setStatus).toHaveBeenLastCalledWith(
+      "primary-agent",
+      "Primary: Lead · stack: default",
+    );
 
     h.controller.dispose();
 
@@ -290,6 +296,10 @@ describe("PrimaryController", () => {
       "thinking:off",
       `tools:read,${MANAGED_SUBAGENT_TOOLS.join(",")}`,
     ]);
+    expect(h.setStatus).toHaveBeenLastCalledWith(
+      "primary-agent",
+      "Primary: Lead · stack: light",
+    );
 
     await h.controller.handleStackCommand("lead auto", commandCtx);
     expect(h.overrides.get(lead)).toBeUndefined();
@@ -448,13 +458,13 @@ describe("PrimaryController", () => {
     expect(h.controller.getStackArgumentCompletions("missing ")).toBeNull();
   });
 
-  it("uses the missing-argument stack pickers and waits only after both selections", async () => {
+  it("opens the active primary stack picker directly and waits only after selection", async () => {
     const lead = config({
       stacks: new Map([["light", { model: "anthropic/base", thinking: "low" }]]),
     });
-    const h = harness(lead);
+    const h = harness(lead, { [PRIMARY_AGENT_FLAG]: "lead" });
     await h.controller.handleSessionStart(h.ctx);
-    h.custom.mockResolvedValueOnce("lead").mockResolvedValueOnce("light");
+    h.custom.mockResolvedValueOnce("light");
     const waitForIdle = vi.fn(async () => undefined);
 
     await h.controller.handleStackCommand("", {
@@ -462,16 +472,17 @@ describe("PrimaryController", () => {
       waitForIdle,
     } as unknown as ExtensionCommandContext);
 
-    expect(h.custom).toHaveBeenCalledTimes(2);
+    expect(h.custom).toHaveBeenCalledOnce();
+    const lines = renderPickerFactory(h.custom.mock.calls[0]![0], 120).join("\n");
+    expect(lines).toContain("Select stack for Lead");
+    expect(lines).not.toContain("Select agent");
     expect(waitForIdle).toHaveBeenCalledOnce();
     expect(h.overrides.get(lead)).toBe("light");
   });
 
-  it("cancels the stack picker without waiting or changing the override", async () => {
-    const lead = config({ stacks: new Map([["light", { model: "anthropic/base" }]]) });
-    const h = harness(lead);
+  it("requires a roster primary before opening the no-argument stack picker", async () => {
+    const h = harness();
     await h.controller.handleSessionStart(h.ctx);
-    h.custom.mockResolvedValueOnce("lead").mockResolvedValueOnce(undefined);
     const waitForIdle = vi.fn(async () => undefined);
 
     await h.controller.handleStackCommand("", {
@@ -479,9 +490,29 @@ describe("PrimaryController", () => {
       waitForIdle,
     } as unknown as ExtensionCommandContext);
 
+    expect(h.custom).not.toHaveBeenCalled();
+    expect(waitForIdle).not.toHaveBeenCalled();
+    expect(h.notify).toHaveBeenLastCalledWith(
+      "No roster primary is active. Select one with /agent first.",
+      "warning",
+    );
+  });
+
+  it("cancels the active primary stack picker without waiting or changing the override", async () => {
+    const lead = config({ stacks: new Map([["light", { model: "anthropic/base" }]]) });
+    const h = harness(lead, { [PRIMARY_AGENT_FLAG]: "lead" });
+    await h.controller.handleSessionStart(h.ctx);
+    h.custom.mockResolvedValueOnce(undefined);
+    const waitForIdle = vi.fn(async () => undefined);
+
+    await h.controller.handleStackCommand("", {
+      ...h.ctx,
+      waitForIdle,
+    } as unknown as ExtensionCommandContext);
+
+    expect(h.custom).toHaveBeenCalledOnce();
     expect(waitForIdle).not.toHaveBeenCalled();
     expect(h.overrides.get(lead)).toBeUndefined();
-    expect(h.notify).not.toHaveBeenCalled();
   });
 
   it("shows auto, synthetic default, frontmatter stacks, and the current override", async () => {
