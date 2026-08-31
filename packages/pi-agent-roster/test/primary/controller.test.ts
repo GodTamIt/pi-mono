@@ -13,6 +13,7 @@ import {
 } from "../../src/primary/controller.ts";
 import { AgentStackOverrides } from "../../src/stacks/stack-resolver.ts";
 import type { AgentConfig } from "../../src/types.ts";
+import { FooterStatus } from "../../src/ui/footer-status.ts";
 import { makeModel } from "../helpers/make-model.ts";
 
 const baseModel = makeModel({ id: "base" });
@@ -92,7 +93,13 @@ function harness(
     ui: { notify, setStatus, custom },
   } as unknown as ExtensionContext;
   const overrides = new AgentStackOverrides();
-  const controller = new PrimaryController({ pi, registry, stackOverrides: overrides });
+  const footerStatus = new FooterStatus();
+  const controller = new PrimaryController({
+    pi,
+    registry,
+    stackOverrides: overrides,
+    footerStatus,
+  });
   return {
     controller,
     ctx,
@@ -135,10 +142,13 @@ describe("PrimaryController", () => {
       "thinking:high",
       `tools:read,${MANAGED_SUBAGENT_TOOLS.join(",")}`,
     ]);
-    expect(h.controller.beforeAgentStart({ systemPrompt: "Turn prompt" } as never)).toEqual({
+    expect(h.controller.beforeAgentStart({ prompt: "Turn prompt" } as never)).toEqual({
       systemPrompt: "Baseline prompt\n\nLead the work.",
     });
-    expect(h.setStatus).toHaveBeenLastCalledWith("primary-agent", "Primary: Lead · stack: default");
+    expect(h.setStatus).toHaveBeenLastCalledWith(
+      "subagents",
+      "Turn prompt · Lead · stack: default",
+    );
     expect(h.controller.authorizeTarget("WORKER")).toBeUndefined();
   });
 
@@ -148,11 +158,15 @@ describe("PrimaryController", () => {
     await h.controller.handleSessionStart(h.ctx);
 
     expect(h.setStatus).toHaveBeenNthCalledWith(1, "primary-agent", undefined);
-    expect(h.setStatus).toHaveBeenLastCalledWith("primary-agent", "Primary: Lead · stack: default");
+    expect(h.setStatus).toHaveBeenLastCalledWith("subagents", "Lead · stack: default");
 
     h.controller.dispose();
 
-    expect(h.setStatus).toHaveBeenLastCalledWith("primary-agent", undefined);
+    expect(h.setStatus).toHaveBeenLastCalledWith("subagents", undefined);
+    expect(h.setStatus).not.toHaveBeenCalledWith(
+      "primary-agent",
+      expect.stringContaining("Primary:"),
+    );
   });
 
   it("does not re-enable managed tools denied by primary permissions", async () => {
@@ -228,10 +242,10 @@ describe("PrimaryController", () => {
       "thinking:medium",
       `tools:read,bash,${MANAGED_SUBAGENT_TOOLS.join(",")}`,
     ]);
-    expect(h.controller.beforeAgentStart({ systemPrompt: "mutated prompt" } as never)).toEqual({
+    expect(h.controller.beforeAgentStart({ prompt: "mutated prompt" } as never)).toEqual({
       systemPrompt: "Baseline prompt",
     });
-    expect(h.setStatus).toHaveBeenLastCalledWith("primary-agent", undefined);
+    expect(h.setStatus).toHaveBeenLastCalledWith("subagents", "mutated prompt");
   });
 
   it("uses an empty replacement body instead of the captured baseline", async () => {
@@ -239,7 +253,7 @@ describe("PrimaryController", () => {
       [PRIMARY_AGENT_FLAG]: "lead",
     });
     await h.controller.handleSessionStart(h.ctx);
-    expect(h.controller.beforeAgentStart({ systemPrompt: "ignored" } as never)).toEqual({
+    expect(h.controller.beforeAgentStart({ prompt: "ignored" } as never)).toEqual({
       systemPrompt: "",
     });
   });
@@ -254,14 +268,14 @@ describe("PrimaryController", () => {
     } as unknown as ExtensionCommandContext;
 
     await h.controller.handleAgentCommand("lead", commandCtx);
-    expect(h.controller.beforeAgentStart({ systemPrompt: "ambient mutation" } as never)).toEqual({
+    expect(h.controller.beforeAgentStart({ prompt: "ambient mutation" } as never)).toEqual({
       systemPrompt: "Baseline prompt\n\nLead the work.",
     });
 
     lead.promptMode = "replace";
     lead.systemPrompt = "Fresh replacement.";
     await h.controller.handleAgentCommand("lead", commandCtx);
-    expect(h.controller.beforeAgentStart({ systemPrompt: "another mutation" } as never)).toEqual({
+    expect(h.controller.beforeAgentStart({ prompt: "another mutation" } as never)).toEqual({
       systemPrompt: "Fresh replacement.",
     });
   });
@@ -290,7 +304,7 @@ describe("PrimaryController", () => {
       "thinking:off",
       `tools:read,${MANAGED_SUBAGENT_TOOLS.join(",")}`,
     ]);
-    expect(h.setStatus).toHaveBeenLastCalledWith("primary-agent", "Primary: Lead · stack: light");
+    expect(h.setStatus).toHaveBeenLastCalledWith("subagents", "Lead · stack: light");
 
     await h.controller.handleStackCommand("lead auto", commandCtx);
     expect(h.overrides.get(lead)).toBeUndefined();

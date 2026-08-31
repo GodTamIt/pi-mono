@@ -16,11 +16,11 @@ import {
 import type { AgentStackOverrides } from "../stacks/stack-resolver.ts";
 import { resolveAgentStack } from "../stacks/stack-resolver.ts";
 import type { AgentConfig } from "../types.ts";
+import type { FooterStatus } from "../ui/footer-status.ts";
 import { type RosterPickerItem, showRosterPicker } from "../ui/roster-picker.ts";
 
 export const PRIMARY_AGENT_FLAG = "agent";
 export const PRIMARY_STACK_FLAG = "stack";
-const PRIMARY_AGENT_STATUS_KEY = "primary-agent";
 export const MANAGED_SUBAGENT_TOOLS = [
   "subagent",
   "get_subagent_result",
@@ -49,6 +49,7 @@ export interface PrimaryControllerOptions {
   pi: ExtensionAPI;
   registry: AgentTypeRegistry;
   stackOverrides: AgentStackOverrides;
+  footerStatus: FooterStatus;
 }
 
 export class PrimaryController {
@@ -61,10 +62,11 @@ export class PrimaryController {
 
   async handleSessionStart(ctx: ExtensionContext): Promise<void> {
     this.options.registry.reload();
+    this.options.footerStatus.reset();
+    this.options.footerStatus.attach(ctx.ui);
     this.ctx = ctx;
     this.selected = undefined;
     this.delegationDenied = undefined;
-    ctx.ui.setStatus(PRIMARY_AGENT_STATUS_KEY, undefined);
     this.options.stackOverrides.reset();
     this.baseline = {
       model: ctx.model,
@@ -109,7 +111,8 @@ export class PrimaryController {
     }
   }
 
-  beforeAgentStart(_event: BeforeAgentStartEvent): BeforeAgentStartEventResult | void {
+  beforeAgentStart(event: BeforeAgentStartEvent): BeforeAgentStartEventResult | void {
+    this.options.footerStatus.setTaskPrompt(event.prompt);
     const baseline = this.baseline?.systemPrompt;
     if (baseline === undefined) return;
     const prompt = this.selected?.agent.systemPrompt.trim();
@@ -402,6 +405,7 @@ export class PrimaryController {
       } else {
         this.selected = next;
         this.delegationDenied = undefined;
+        this.options.footerStatus.setPrimary(next.agent.displayName ?? next.agent.name, next.stack);
       }
     }
     this.reconcileToolVisibility();
@@ -552,16 +556,11 @@ export class PrimaryController {
         : message;
     }
 
-    ctx.ui.setStatus(
-      PRIMARY_AGENT_STATUS_KEY,
-      next
-        ? `Primary: ${next.agent.displayName ?? next.agent.name} · stack: ${next.stack}`
-        : undefined,
-    );
+    this.options.footerStatus.setPrimary(next?.agent.displayName ?? next?.agent.name, next?.stack);
   }
 
   dispose(): void {
-    this.ctx?.ui.setStatus(PRIMARY_AGENT_STATUS_KEY, undefined);
+    this.options.footerStatus.dispose();
     this.ctx = undefined;
   }
 

@@ -50,6 +50,7 @@ import { GetResultTool } from "./tools/get-result-tool.ts";
 import { InvocationRowRegistry } from "./tools/invocation-row.ts";
 import { SteerTool } from "./tools/steer-tool.ts";
 import { AgentWidget } from "./ui/agent-widget.ts";
+import { FooterStatus } from "./ui/footer-status.ts";
 import { SessionNavigatorHandler } from "./ui/session-navigator.ts";
 import { SubagentsSettingsHandler } from "./ui/subagents-settings.ts";
 
@@ -188,10 +189,12 @@ export default function (pi: ExtensionAPI) {
   const invocationRows = new InvocationRowRegistry((id) => manager.getRecord(id));
   observer.add(invocationRows);
 
+  const footerStatus = new FooterStatus();
   const primary = new PrimaryController({
     pi,
     registry,
     stackOverrides: runtime.stackOverrides,
+    footerStatus,
   });
 
   // Typed service published via Symbol.for() for cross-extension access.
@@ -234,7 +237,7 @@ export default function (pi: ExtensionAPI) {
 
   // Live widget: constructed after the manager (it polls listAgents()) and
   // registered as a lifecycle observer so it self-drives its update timer.
-  widget = new AgentWidget(manager, registry);
+  widget = new AgentWidget(manager, registry, footerStatus);
   observer.add(widget);
 
   // Grab UI context from first tool execution + clear lingering widget on new turn

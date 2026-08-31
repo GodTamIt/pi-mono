@@ -10,6 +10,7 @@ import type { Subagent } from "../lifecycle/subagent.ts";
 import type { SubagentManager, SubagentManagerObserver } from "../lifecycle/subagent-manager.ts";
 import type { CompactionInfo } from "../types.ts";
 import { ERROR_STATUSES, type Theme } from "./display.ts";
+import type { FooterStatus } from "./footer-status.ts";
 import { renderWidgetLines, type WidgetAgent } from "./widget-renderer.ts";
 
 // ---- Types ----
@@ -87,12 +88,10 @@ export class AgentWidget implements SubagentManagerObserver {
   private widgetRegistered = false;
   /** Cached TUI reference from widget factory callback, used for fullscreen animation. */
   private tui: TuiSurface | undefined;
-  /** Last status bar text, used to avoid redundant setStatus calls. */
-  private lastStatusText: string | undefined;
-
   constructor(
     private manager: SubagentManager,
     private registry: AgentTypeRegistry,
+    private footerStatus: FooterStatus,
   ) {}
 
   /** Set the UI context (grabbed from first tool execution). */
@@ -103,7 +102,6 @@ export class AgentWidget implements SubagentManagerObserver {
       this.uiCtx = ctx;
       this.widgetRegistered = false;
       this.tui = undefined;
-      this.lastStatusText = undefined;
     }
   }
 
@@ -217,7 +215,7 @@ export class AgentWidget implements SubagentManagerObserver {
   }
 
   /**
-   * Unregister the widget, clear the status bar, stop the interval timer, and
+   * Unregister the widget, clear active-agent counts, stop the interval timer, and
    * purge stale `finishedTurnAge` entries for agents no longer in `backgroundAgents`.
    * Called only from `update`'s idle path — not from `dispose`.
    */
@@ -227,10 +225,7 @@ export class AgentWidget implements SubagentManagerObserver {
       this.widgetRegistered = false;
       this.tui = undefined;
     }
-    if (this.lastStatusText !== undefined) {
-      this.uiCtx?.setStatus("subagents", undefined);
-      this.lastStatusText = undefined;
-    }
+    this.footerStatus.setAgentCounts(0, 0);
     if (this.widgetInterval) {
       clearInterval(this.widgetInterval);
       this.widgetInterval = undefined;
@@ -240,23 +235,8 @@ export class AgentWidget implements SubagentManagerObserver {
     }
   }
 
-  /**
-   * Compute the status bar text from the current widget state and call
-   * `setStatus` only when it differs from the last cached value.
-   */
   private updateStatusBar(state: WidgetState): void {
-    let newStatusText: string | undefined;
-    if (state.hasActive) {
-      const statusParts: string[] = [];
-      if (state.runningCount > 0) statusParts.push(`${state.runningCount} running`);
-      if (state.queuedCount > 0) statusParts.push(`${state.queuedCount} queued`);
-      const total = state.runningCount + state.queuedCount;
-      newStatusText = `${statusParts.join(", ")} agent${total === 1 ? "" : "s"}`;
-    }
-    if (newStatusText !== this.lastStatusText) {
-      this.uiCtx?.setStatus("subagents", newStatusText);
-      this.lastStatusText = newStatusText;
-    }
+    this.footerStatus.setAgentCounts(state.runningCount, state.queuedCount);
   }
 
   /**
@@ -325,13 +305,10 @@ export class AgentWidget implements SubagentManagerObserver {
       clearInterval(this.widgetInterval);
       this.widgetInterval = undefined;
     }
-    if (this.uiCtx) {
-      this.uiCtx.setWidget("agents", undefined);
-      this.uiCtx.setStatus("subagents", undefined);
-    }
+    if (this.uiCtx) this.uiCtx.setWidget("agents", undefined);
+    this.footerStatus.setAgentCounts(0, 0);
     this.widgetRegistered = false;
     this.tui = undefined;
-    this.lastStatusText = undefined;
     this.finishedTurnAge.clear();
   }
 }

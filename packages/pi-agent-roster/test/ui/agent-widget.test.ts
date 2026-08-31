@@ -4,6 +4,7 @@ import type { Subagent } from "../../src/lifecycle/subagent.ts";
 import type { SubagentManager } from "../../src/lifecycle/subagent-manager.ts";
 import type { CompactionInfo } from "../../src/types.ts";
 import { AgentWidget, assembleWidgetState, type UICtx } from "../../src/ui/agent-widget.ts";
+import { FooterStatus } from "../../src/ui/footer-status.ts";
 import { createTestSubagent } from "../helpers/make-subagent.ts";
 
 // Minimal agent fixture — only the three fields AgentSummary requires.
@@ -40,7 +41,7 @@ function makeWidget(
     listAgents: () => agents.map((a) => ({ invocation: { runInBackground: true }, ...a })),
   } as unknown as SubagentManager;
   const registry = new AgentTypeRegistry(() => new Map());
-  const widget = new AgentWidget(manager, registry);
+  const widget = new AgentWidget(manager, registry, new FooterStatus());
   const setWidgetCalls: unknown[] = [];
   const ui: UICtx = {
     setStatus: () => {},
@@ -219,6 +220,33 @@ describe("assembleWidgetState", () => {
   });
 });
 
+describe("AgentWidget — footer counts", () => {
+  it("removes idle counts without erasing task and primary state", () => {
+    const agents = [
+      { id: "a1", status: "running", invocation: { runInBackground: true } },
+      { id: "a2", status: "queued", invocation: { runInBackground: true } },
+    ];
+    const manager = { listAgents: () => agents } as unknown as SubagentManager;
+    const footer = new FooterStatus();
+    const setStatus = vi.fn();
+    footer.attach({ setStatus });
+    footer.setTaskPrompt("Current task");
+    footer.setPrimary("Lead", "deep");
+    const widget = new AgentWidget(manager, new AgentTypeRegistry(() => new Map()), footer);
+    widget.setUICtx({ setStatus, setWidget: vi.fn() });
+
+    widget.update();
+    expect(setStatus).toHaveBeenLastCalledWith(
+      "subagents",
+      "Current task · Lead · stack: deep · agents: 1 running, 1 queued",
+    );
+
+    agents.splice(0);
+    widget.update();
+    expect(setStatus).toHaveBeenLastCalledWith("subagents", "Current task · Lead · stack: deep");
+  });
+});
+
 describe("AgentWidget — projection reads activity off Subagent records", () => {
   it("surfaces activity and resolved invocation metadata via renderWidget", () => {
     const record = createTestSubagent({
@@ -238,7 +266,7 @@ describe("AgentWidget — projection reads activity off Subagent records", () =>
     });
     const manager = { listAgents: () => [record] } as unknown as SubagentManager;
     const registry = new AgentTypeRegistry(() => new Map());
-    const widget = new AgentWidget(manager, registry);
+    const widget = new AgentWidget(manager, registry, new FooterStatus());
 
     let renderFn: ((tui: unknown, theme: unknown) => { render(): string[] }) | undefined;
     const ui: UICtx = {
@@ -419,6 +447,7 @@ describe("AgentWidget — theme changes", () => {
     const widget = new AgentWidget(
       { listAgents: () => [record] } as unknown as SubagentManager,
       new AgentTypeRegistry(() => new Map()),
+      new FooterStatus(),
     );
     const factories: Array<Exclude<Parameters<UICtx["setWidget"]>[1], undefined>> = [];
     const ui: UICtx = {
@@ -464,7 +493,7 @@ describe("AgentWidget — background-only filtering", () => {
   function setup(records: Subagent[]) {
     const manager = { listAgents: () => records } as unknown as SubagentManager;
     const registry = new AgentTypeRegistry(() => new Map());
-    const widget = new AgentWidget(manager, registry);
+    const widget = new AgentWidget(manager, registry, new FooterStatus());
     const setWidgetCalls: unknown[] = [];
     let renderFn: ((tui: unknown, theme: unknown) => { render(): string[] }) | undefined;
     const ui: UICtx = {

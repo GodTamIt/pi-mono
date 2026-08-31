@@ -97,6 +97,7 @@ const sourceFiles = new Set([
   "src/types.ts",
   "src/ui/agent-widget.ts",
   "src/ui/display.ts",
+  "src/ui/footer-status.ts",
   "src/ui/glyphs.ts",
   "src/ui/roster-picker.ts",
   "src/ui/session-navigation.ts",
