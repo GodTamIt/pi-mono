@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0
+
+### Minor Changes
+
+- 8554999: Add a unified one-line footer for the current task, selected primary and stack, and active background counts.
+
 ## 0.1.0
 
 ### Minor Changes
