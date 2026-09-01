@@ -4,13 +4,10 @@ import { stripTerminalSequences, truncateToWidth, visibleWidth } from "@earendil
 import type { AgentConfigLookup } from "../config/agent-types.ts";
 import { isActiveStatus, type SubagentStatus } from "../lifecycle/subagent-state.ts";
 import type { LifetimeUsage } from "../lifecycle/usage.ts";
-import { getLifetimeTotal } from "../lifecycle/usage.ts";
 import type { SubagentType } from "../types.ts";
 import {
-  describeActivity,
   formatContextPercent,
   formatMs,
-  formatTokens,
   getDisplayName,
   getPromptModeLabel,
   sanitizeTerminalText,
@@ -81,20 +78,31 @@ function identity(
   return `${theme.fg(status.color, prefix)} ${theme.bold(name)}${modeText}  ${theme.fg("dim", "Background · ")}${theme.fg(status.color, status.text)}`.trimStart();
 }
 
-function activeMetadata(agent: WidgetAgent, now: number): string[] {
-  const tokens = getLifetimeTotal(agent.lifetimeUsage);
+function shortModel(model: string | undefined): string {
+  const safe = sanitizeTerminalText(model ?? "—");
+  const name = safe.split("/").at(-1) ?? safe;
+  return name
+    .replace(/^claude-/, "")
+    .replace(/-\d{8}$/, "")
+    .replace(/-\d+(?:-\d+)*$/, "");
+}
+
+function activeMetadata(agent: WidgetAgent, now: number, compact: boolean): string[] {
+  const elapsed = formatMs(now - agent.startedAt);
+  const turns = `${agent.turnCount}/${agent.maxTurns ?? "∞"}`;
+  const context = agent.contextPercent == null ? "?" : formatContextPercent(agent.contextPercent);
+  const stack = sanitizeTerminalText(agent.stack ?? "—");
+  const model = shortModel(agent.model);
+  if (compact) {
+    return [elapsed, `${GLYPHS.turns}${turns}`, `${agent.toolUses}t`, context, `${stack}/${model}`];
+  }
   return [
-    `stack: ${sanitizeTerminalText(agent.stack ?? "unavailable")}`,
-    `model: ${sanitizeTerminalText(agent.model ?? "unavailable")}`,
-    `thinking: ${sanitizeTerminalText(agent.thinking ?? "unavailable")}`,
-    `${GLYPHS.turns} turn ${agent.turnCount}`,
-    `max ${agent.maxTurns ?? "unlimited"}`,
-    `grace ${agent.graceTurns ?? "unlimited"}`,
-    `${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`,
-    formatTokens(tokens),
-    `context: ${agent.contextPercent == null ? "unavailable" : formatContextPercent(agent.contextPercent)}`,
-    `${GLYPHS.compactions} compactions: ${agent.compactionCount}`,
-    `elapsed: ${formatMs(now - agent.startedAt)}`,
+    `elapsed: ${elapsed}`,
+    `turns: ${turns}`,
+    `tools: ${agent.toolUses}`,
+    `context: ${context}`,
+    `stack: ${stack}`,
+    `model: ${sanitizeTerminalText(agent.model ?? "—")}`,
   ];
 }
 
@@ -117,22 +125,6 @@ function packParts(parts: readonly string[], width: number): string[] {
   return rows;
 }
 
-function activeActivity(agent: WidgetAgent): string {
-  if (agent.status === "queued") return "waiting for a background slot";
-  return sanitizeTerminalText(describeActivity(agent.activeTools, agent.responseText));
-}
-
-function detailLine(
-  label: "task" | "activity" | "error",
-  value: string,
-  theme: Theme,
-  color: StatusColor,
-): string {
-  const paddedLabel = `${label}:`.padEnd(10);
-  const marker = label === "activity" ? `${GLYPHS.toolCall} ` : "";
-  return theme.fg("dim", paddedLabel) + theme.fg(color, `${marker}${value}`);
-}
-
 /** Legacy single-agent formatter retained for focused consumers and tests. */
 export function renderFinishedLine(
   agent: WidgetAgent,
@@ -147,7 +139,7 @@ export function renderFinishedLine(
   return `${identity(agent, registry, theme, "")} · duration: ${duration} · ${sanitizeTerminalText(agent.description)}${error}`;
 }
 
-/** Legacy two-line formatter; the widget itself wraps metadata semantically. */
+/** Legacy two-line formatter retained for focused consumers and tests. */
 export function renderRunningLines(
   agent: WidgetAgent,
   registry: AgentConfigLookup,
@@ -155,8 +147,11 @@ export function renderRunningLines(
   theme: Theme,
 ): [header: string, activity: string] {
   const frame = SPINNER[spinnerFrame % SPINNER.length] ?? "";
-  const header = `${identity(agent, registry, theme, frame)} · ${activeMetadata(agent, Date.now()).join(" · ")} · ${theme.fg("muted", sanitizeTerminalText(agent.description))}`;
-  return [header, theme.fg("dim", `${GLYPHS.subLine} activity: ${activeActivity(agent)}`)];
+  const header = `${identity(agent, registry, theme, frame)} · ${activeMetadata(agent, Date.now(), false).join(" · ")}`;
+  return [
+    header,
+    theme.fg("muted", `${GLYPHS.subLine} ${sanitizeTerminalText(agent.description)}`),
+  ];
 }
 
 interface RenderBlock {
@@ -176,19 +171,29 @@ function activeBlock(
   const frame =
     agent.status === "running" ? (SPINNER[spinnerFrame % SPINNER.length] ?? "") : GLYPHS.queued;
   const first = identity(agent, registry, theme, frame);
-  const metadata = packParts(activeMetadata(agent, now), contentWidth).map((line) =>
-    theme.fg("dim", line),
-  );
-  const description = detailLine("task", sanitizeTerminalText(agent.description), theme, "muted");
-  const activity = detailLine(
-    "activity",
-    activeActivity(agent),
-    theme,
-    statusPresentation(agent.status).color,
-  );
+  const separator = theme.fg("dim", " · ");
+  const withFacts = (facts: readonly string[]): string =>
+    facts.length ? `${first}${separator}${theme.fg("dim", facts.join(" · "))}` : first;
+  const wide = withFacts(activeMetadata(agent, now, false));
+  let header = wide;
+  if (visibleWidth(wide) > contentWidth) {
+    const compact = activeMetadata(agent, now, true);
+    // Drop trailing facts first so narrow rows retain the leading operational state.
+    const dropOrder = [4, 3, 2, 1, 0];
+    const dropped = new Set<number>();
+    header = withFacts(compact);
+    for (const index of dropOrder) {
+      if (visibleWidth(header) <= contentWidth) break;
+      dropped.add(index);
+      header = withFacts(compact.filter((_fact, factIndex) => !dropped.has(factIndex)));
+    }
+  }
   return {
     status: agent.status,
-    lines: [first, description, activity, ...metadata],
+    lines: [
+      clipToWidth(header, contentWidth),
+      clipToWidth(theme.fg("muted", sanitizeTerminalText(agent.description)), contentWidth),
+    ],
   };
 }
 
@@ -200,19 +205,12 @@ function finishedBlock(
 ): RenderBlock {
   const contentWidth = Math.max(1, width - 4);
   const duration = formatMs((agent.completedAt ?? Date.now()) - agent.startedAt);
-  const required = `${identity(agent, registry, theme, "")} · duration: ${duration}`;
+  const required = `${identity(agent, registry, theme, "")} · ${duration}`;
   const hasError = agent.status === "error" && Boolean(agent.error);
   const detail = sanitizeTerminalText(hasError ? (agent.error ?? "") : agent.description);
-  const detailColor = hasError ? "error" : "muted";
   return {
     status: agent.status,
-    lines: [
-      clipToWidth(required, contentWidth),
-      clipToWidth(
-        detailLine(hasError ? "error" : "task", detail, theme, detailColor),
-        contentWidth,
-      ),
-    ],
+    lines: [clipToWidth(`${required} · ${detail}`, contentWidth)],
   };
 }
 

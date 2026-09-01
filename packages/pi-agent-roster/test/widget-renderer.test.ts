@@ -78,37 +78,11 @@ describe("background widget statuses", () => {
       ]),
     );
 
-    expect(baseline).toMatchInlineSnapshot(`
-      {
-        "aborted": "○ Background agents  1 recent
-      └─ ✗ Agent  Background · aborted · duration: 5.0s
-         task:     inspect Unicode café 🚀 and report progress",
-        "completed": "○ Background agents  1 recent
-      └─ ✓ Agent  Background · completed · duration: 5.0s
-         task:     inspect Unicode café 🚀 and report progress",
-        "error": "○ Background agents  1 recent
-      └─ ✗ Agent  Background · failed · duration: 5.0s
-         error:    provider unavailable",
-        "queued": "● Background agents  1 queued
-      └─ ◦ Agent  Background · queued
-         task:     inspect Unicode café 🚀 and report progress
-         activity: ▸ waiting for a background slot
-         stack: deep · model: anthropic/claude-opus · thinking: high · ↻ turn 3 · max 10 · grace 2
-         0 tool uses · 0 tokens · context: unavailable · ⇊ compactions: 0 · elapsed: 5.0s",
-        "running": "● Background agents  1 running
-      └─ ⠋ Agent  Background · running
-         task:     inspect Unicode café 🚀 and report progress
-         activity: ▸ thinking…
-         stack: deep · model: anthropic/claude-opus · thinking: high · ↻ turn 3 · max 10 · grace 2
-         0 tool uses · 0 tokens · context: unavailable · ⇊ compactions: 0 · elapsed: 5.0s",
-        "steered": "○ Background agents  1 recent
-      └─ ✓ Agent  Background · steered (turn limit) · duration: 5.0s
-         task:     inspect Unicode café 🚀 and report progress",
-        "stopped": "○ Background agents  1 recent
-      └─ ■ Agent  Background · stopped · duration: 5.0s
-         task:     inspect Unicode café 🚀 and report progress",
-      }
-    `);
+    expect(baseline.running?.split("\n")).toHaveLength(3);
+    expect(baseline.queued?.split("\n")).toHaveLength(3);
+    expect(baseline.completed?.split("\n")).toHaveLength(2);
+    expect(baseline.error).toContain("provider unavailable");
+    expect(baseline.running).toContain("inspect Unicode café 🚀 and report progress");
     expect(Object.values(baseline).every((value) => !value.includes("\u001b"))).toBe(true);
   });
 
@@ -144,52 +118,43 @@ describe("background widget statuses", () => {
 });
 
 describe("active-agent details", () => {
-  it("shows background identity, invocation, budgets, usage, timing, and activity", () => {
-    const text = render([
-      makeAgent({
-        toolUses: 4,
-        lifetimeUsage: { input: 5000, output: 2000, cacheWrite: 1000 },
-        compactionCount: 2,
-        contextPercent: 45.678,
-        activeTools: new Map([["read-1", "read"]]),
-      }),
-    ]).join("\n");
-    for (const required of [
-      "Background · running",
-      "stack: deep",
-      "model: anthropic/claude-opus",
-      "thinking: high",
-      "turn 3",
-      "max 10",
-      "grace 2",
-      "4 tool uses",
-      "8.0k tokens",
-      "context: 45.7%",
-      "compactions: 2",
-      "elapsed:",
-      "activity: ▸ reading",
-    ]) {
-      expect(text).toContain(required);
-    }
+  it("shows ordered operational facts and the concise child summary in two lines", () => {
+    const text = render(
+      [
+        makeAgent({
+          toolUses: 4,
+          lifetimeUsage: { input: 5000, output: 2000, cacheWrite: 1000 },
+          compactionCount: 2,
+          contextPercent: 45.678,
+          activeTools: new Map([["read-1", "read"]]),
+        }),
+      ],
+      160,
+    ).join("\n");
+    const lines = text.split("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toMatch(/running.*elapsed:.*turns:.*tools:.*context:.*stack:.*model:/);
+    expect(lines[2]).toContain("inspect Unicode café 🚀 and report progress");
+    expect(text).not.toContain("thinking:");
+    expect(text).not.toContain("activity:");
   });
 
-  it("labels unlimited budgets and unavailable context while retaining zero usage", () => {
-    const text = render([
-      makeAgent({ maxTurns: undefined, graceTurns: undefined, contextPercent: null }),
-    ]).join("\n");
-    expect(text).toContain("max unlimited");
-    expect(text).toContain("grace unlimited");
-    expect(text).toContain("0 tool uses");
-    expect(text).toContain("0 tokens");
-    expect(text).toContain("context: unavailable");
-    expect(text).toContain("compactions: 0");
+  it("labels unlimited turn budgets and unavailable context while retaining zero usage", () => {
+    const text = render(
+      [makeAgent({ maxTurns: undefined, graceTurns: undefined, contextPercent: null })],
+      160,
+    ).join("\n");
+    expect(text).toContain("turns: 3/∞");
+    expect(text).toContain("tools: 0");
+    expect(text).toContain("context: ?");
   });
 
-  it("gives queued agents explicit waiting activity and the same metadata", () => {
-    const text = render([makeAgent({ status: "queued" })]).join("\n");
+  it("keeps queued agents compact with the same two-line shape", () => {
+    const text = render([makeAgent({ status: "queued" })], 160).join("\n");
     expect(text).toContain("Background · queued");
+    expect(text.split("\n")).toHaveLength(3);
     expect(text).toContain("stack: deep");
-    expect(text).toContain("activity: ▸ waiting for a background slot");
+    expect(text).toContain("inspect Unicode café 🚀 and report progress");
   });
 
   it("sanitizes every untrusted detail without flattening the hierarchy", () => {
@@ -203,8 +168,7 @@ describe("active-agent details", () => {
       }),
     ]);
 
-    expect(lines.some((line) => line.includes("task:"))).toBe(true);
-    expect(lines.some((line) => line.includes("activity:"))).toBe(true);
+    expect(lines.some((line) => line.includes("inspectlink forged row"))).toBe(true);
     expect(
       lines.every((line) =>
         [...line].every((character) => {
@@ -232,23 +196,10 @@ describe("width and row budgets", () => {
     const lines = render([makeAgent()], width, ansiTheme);
     expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
     const text = lines.join("\n");
-    for (const required of [
-      "running",
-      "stack:",
-      "model:",
-      "thinking:",
-      "turn 3",
-      "max 10",
-      "grace 2",
-      "0 tool uses",
-      "0 tokens",
-      "context:",
-      "compactions:",
-      "elapsed:",
-      "activity:",
-    ]) {
-      expect(text).toContain(required);
-    }
+    expect(lines).toHaveLength(3);
+    expect(text).toContain("running");
+    expect(text).toContain("inspect Unicode");
+    if (width >= 60) expect(text).toContain("↻3/10");
   });
 
   it("handles ANSI and wide Unicode without horizontal overflow", () => {
@@ -278,21 +229,11 @@ describe("width and row budgets", () => {
     const text = lines.join("\n");
     expect(lines.length).toBeLessThanOrEqual(12);
     expect(text).toContain("RUN-FIRST");
-    expect(text).toContain("hidden:");
-    expect(text).toMatch(/\d+ queued/);
-    expect(text).toMatch(/\d+ failed/);
-    expect(text).toMatch(/\d+ completed/);
-    expect(text).toMatchInlineSnapshot(`
-      "● Background agents  1 running · 1 queued
-      ├─ ⠋ Agent  Background · running
-      │  task:     RUN-FIRST
-      │  activity: ▸ thinking…
-      │  stack: deep · model: anthropic/claude-opus
-      │  thinking: high · ↻ turn 3 · max 10 · grace 2
-      │  0 tool uses · 0 tokens · context: unavailable
-      │  ⇊ compactions: 0 · elapsed: 5.0s
-      └─ hidden: 1 queued · 1 failed · 1 completed"
-    `);
+    expect(text).toContain("QUEUE-SECOND");
+    expect(text).toContain("FAIL-THIRD");
+    expect(text).toContain("DONE-LAST");
+    expect(text).not.toContain("hidden:");
+    expect(lines.length).toBeLessThanOrEqual(7);
   });
 
   it("remains width-safe down to a one-column render surface", () => {
@@ -304,10 +245,7 @@ describe("width and row budgets", () => {
     }
     const minimumBaseline = render([makeAgent()], 16).join("\n");
     expect(minimumBaseline).not.toContain("\u001b");
-    expect(minimumBaseline).toMatchInlineSnapshot(`
-      "● Background ...
-      └─ hidden: 1 ..."
-    `);
+    expect(minimumBaseline.split("\n")).toHaveLength(3);
   });
 
   it("filters expired terminal agents", () => {

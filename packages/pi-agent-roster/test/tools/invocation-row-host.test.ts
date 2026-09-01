@@ -165,31 +165,11 @@ describe("native subagent invocation row", () => {
       statuses.map((status) => [status, baseline(standaloneHost({ status }))]),
     );
 
-    expect(rows).toMatchInlineSnapshot(`
-      {
-        "aborted": "Subagent
-      Architect 🧭 · ✗ aborted (max turns)
-      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
-        "completed": "Subagent
-      Architect 🧭 · ✓ completed
-      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
-        "error": "Subagent
-      Architect 🧭 · ✗ failed
-      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
-        "queued": "Subagent
-      Architect 🧭 · ◦ queued
-      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s elapsed",
-        "running": "Subagent
-      Architect 🧭 · ▸ running
-      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s elapsed",
-        "steered": "Subagent
-      Architect 🧭 · ✓ completed (turn limit)
-      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
-        "stopped": "Subagent
-      Architect 🧭 · ■ stopped
-      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
-      }
-    `);
+    expect(rows.running).toContain("Architect 🧭 · ▸ running");
+    expect(rows.running).toContain("Summary: inspect lifecycle");
+    expect(rows.running).toContain("Activity: thinking…");
+    expect(rows.completed).toContain("Activity: completed");
+    expect(rows.error).toContain("Activity: failed");
   });
 
   it("uses the host-owned Ctrl+O expansion state for the native detail view", () => {
@@ -212,33 +192,10 @@ describe("native subagent invocation row", () => {
     host.setExpanded(true);
     const expanded = baseline(host, 76);
 
-    expect({ collapsed, expanded }).toMatchInlineSnapshot(`
-      {
-        "collapsed": "Subagent
-      Architect 🧭 · ✓ completed
-      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration",
-        "expanded": "Subagent
-      Architect 🧭 · ✓ completed
-      ⎿ Background · stack deep · model sonnet · thinking high · 0.3s duration
-
-      Task
-        Inspect the child lifecycle exactly.
-      Run details
-        completed · Background
-        Turns: 7/20 · grace: 2 · tool uses: 4
-        Usage: 12.3k tokens · context unknown · 1 compaction
-        Started: not available · duration: 0.3s
-      Identifiers
-        Agent ID: agent-restored
-        Child session ID: child-restored
-      Activity
-        ⎿ No child activity yet.
-      Current/final output
-        A compact final answer.
-
-      Read-only transcript · /subagents:sessions",
-      }
-    `);
+    expect(collapsed).toContain("Summary: inspect lifecycle");
+    expect(collapsed).toContain("Activity: completed");
+    expect(expanded).toContain("Task\n  Inspect the child lifecycle exactly.");
+    expect(expanded).toContain("Current/final output\n  A compact final answer.");
     expect(expanded).toContain("Turns: 7/20 · grace: 2 · tool uses: 4");
     expect(collapsed).not.toContain("\nTask\n");
   });
@@ -265,6 +222,7 @@ describe("native subagent invocation row", () => {
       ],
     });
     const firstSession = createSubagentSessionStub(child, "/tmp/child.jsonl", "child-1");
+    firstSession.getConversation.mockReturnValue("[User]: hidden background transcript");
     const record = createTestSubagent({
       status: "running",
       startedAt: Date.now() - 250,
@@ -335,6 +293,7 @@ describe("native subagent invocation row", () => {
     expect(expanded).toContain("Child session ID: child-1");
     expect(expanded).toContain("⎿ tool · read");
     expect(expanded).toContain("Read-only transcript · /subagents:sessions");
+    expect(expanded).not.toContain("hidden background transcript");
     host.setExpanded(false);
     expect(text(host)).not.toContain("\nTask\n");
 
@@ -362,6 +321,72 @@ describe("native subagent invocation row", () => {
     rows.dispose();
     replacement.emit({ type: "tool_execution_start", toolName: "write", toolCallId: "shutdown" });
     expect(requestRender).toHaveBeenCalledTimes(afterCompletion);
+  });
+
+  it("inlines a retained foreground conversation only after completion", () => {
+    const session = createSubagentSessionStub(
+      createMockSession(),
+      "/tmp/foreground.jsonl",
+      "child-foreground",
+    );
+    session.getConversation.mockReturnValue(
+      "[User]: inspect the implementation\n[Assistant]: verified \x1b[31mthe behavior\x1b[0m",
+    );
+    const record = createTestSubagent({
+      status: "running",
+      toolCallId: "tc-inline",
+      description: "verify implementation",
+      execution: {
+        ...createTestSubagent().execution,
+        task: "Inspect every implementation detail.",
+        isBackground: false,
+        parentSession: { toolCallId: "tc-inline" },
+      },
+    });
+    record.subagentSession = toSubagentSession(session);
+
+    const deps = createToolDeps();
+    deps.manager.getRecord = vi.fn((id: string) => (id === record.id ? record : undefined));
+    const rows = new InvocationRowRegistry((id) => deps.manager.getRecord(id));
+    const definition = new AgentTool(
+      deps.manager,
+      deps.runtime,
+      deps.settings,
+      deps.registry,
+      deps.agentDir,
+      {},
+      rows,
+    ).toToolDefinition();
+    const host = new ToolExecutionComponent(
+      "subagent",
+      "tc-inline",
+      { task: record.task, description: record.description, subagent_type: "Architect" },
+      {},
+      definition,
+      { requestRender: vi.fn() } as never,
+      process.cwd(),
+    );
+    host.updateResult({
+      content: [{ type: "text", text: "Agent completed.\n\nfinal output" }],
+      details: details({
+        status: "running",
+        isBackground: false,
+        agentId: record.id,
+        description: record.description,
+      }),
+      isError: false,
+    });
+    host.setExpanded(true);
+    expect(baseline(host)).not.toContain("Child conversation");
+
+    record.markCompleted("final output", Date.now());
+    rows.onSubagentCompleted(record);
+    const expanded = baseline(host);
+    expect(expanded).toContain("Child conversation");
+    expect(expanded).toContain("[User]: inspect the implementation");
+    expect(expanded).toContain("[Assistant]: verified the behavior");
+    expect(expanded).not.toContain("\u001b");
+    expect(expanded).toContain("Task\n  Inspect every implementation detail.");
   });
 
   it("caps retained bindings at 128 and evicts the oldest row", () => {
@@ -543,13 +568,8 @@ describe("native subagent invocation row", () => {
     for (const width of [40, 60, 80, 120]) {
       for (const line of host.render(width)) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }
-    expect(baseline(host, 40)).toMatchInlineSnapshot(`
-      "Subagent
-      Architect 🧭 · ✓ completed
-      ⎿ Background · stack deep
-        model sonnet · thinking high
-        0.3s duration"
-    `);
+    expect(baseline(host, 40)).toContain("Summary: inspect lifecycle");
+    expect(baseline(host, 40)).toContain("Activity: completed");
     host.setExpanded(true);
     expect(text(host)).toContain("Agent ID: missing");
     expect(text(host)).toContain("Child session ID: not available");

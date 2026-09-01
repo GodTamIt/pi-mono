@@ -247,8 +247,8 @@ describe("AgentWidget — footer counts", () => {
   });
 });
 
-describe("AgentWidget — projection reads activity off Subagent records", () => {
-  it("surfaces activity and resolved invocation metadata via renderWidget", () => {
+describe("AgentWidget — projection reads progress off Subagent records", () => {
+  it("surfaces compact progress and resolved invocation metadata via renderWidget", () => {
     const record = createTestSubagent({
       status: "running",
       completedAt: undefined,
@@ -287,15 +287,13 @@ describe("AgentWidget — projection reads activity off Subagent records", () =>
     const stubTheme = { fg: (_: string, t: string) => t, bold: (t: string) => t };
     const lines = renderFn!(stubTui, stubTheme).render();
     const allText = lines.join("\n");
-    // Turn state and both finite budgets come from the record.
-    expect(allText).toContain("turn 3");
-    expect(allText).toContain("max 6");
-    expect(allText).toContain("grace 0");
+    expect(allText).toContain("turns: 3/6");
+    expect(allText).toContain("tools: 3");
     expect(allText).toContain("stack: deep");
     expect(allText).toContain("model: anthropic/claude-opus");
-    expect(allText).toContain("thinking: high");
-    // Active tool "read" → "reading…"
-    expect(allText).toContain("reading");
+    expect(allText).not.toContain("grace");
+    expect(allText).not.toContain("thinking");
+    expect(allText).not.toContain("reading");
   });
 });
 

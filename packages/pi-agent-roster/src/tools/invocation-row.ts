@@ -5,6 +5,7 @@ import type { SubagentManagerObserver } from "../lifecycle/subagent-manager.ts";
 import type { CompactionInfo, SessionMessage, Subagent } from "../types.ts";
 import {
   type AgentDetails,
+  describeActivity,
   formatContextPercent,
   formatMs,
   sanitizeTerminalText,
@@ -292,7 +293,16 @@ function collapsedLines(details: AgentDetails, theme: Theme, width: number): str
     ],
     width,
   );
-  return [first, ...metadata.map((line) => theme.fg("dim", line))];
+  const summary = `${GLYPHS.subLine} Summary: ${sanitizeTerminalText(details.description)}`;
+  const activity = `${GLYPHS.subLine} Activity: ${sanitizeTerminalText(
+    details.activity ?? (isActive(details.status) ? "thinking…" : status.label),
+  )}`;
+  return [
+    first,
+    ...metadata.map((line) => theme.fg("dim", line)),
+    theme.fg("muted", summary),
+    theme.fg(isActive(details.status) ? "accent" : "dim", activity),
+  ];
 }
 
 /** Wrap compact metadata only between facts, never before an orphaned separator. */
@@ -348,7 +358,7 @@ function expandedLines(
         : [];
   lines.push(
     ...(activity.length
-      ? activity.map((item) => `  ${GLYPHS.subLine} ${item}`)
+      ? activity.map((item) => `  ${GLYPHS.subLine} ${sanitizeTerminalText(item)}`)
       : [`  ${GLYPHS.subLine} No child activity yet.`]),
   );
   lines.push(heading("Current/final output"));
@@ -359,6 +369,17 @@ function expandedLines(
     Math.max(1, width - 2),
   );
   lines.push(...outputLines.map((line) => `  ${line}`));
+
+  const conversation =
+    !details.isBackground && !isActive(details.status) ? record?.getConversation() : undefined;
+  if (conversation) {
+    lines.push("", heading("Child conversation"));
+    const conversationLines = wrapTextWithAnsi(
+      sanitizeTerminalText(conversation, true),
+      Math.max(1, width - 2),
+    );
+    lines.push(...conversationLines.map((line) => `  ${line}`));
+  }
   lines.push("", theme.fg("dim", "Read-only transcript · /subagents:sessions"));
   return lines;
 }
@@ -367,6 +388,10 @@ function detailsFromRecord(base: AgentDetails, record: Subagent): AgentDetails {
   return {
     ...base,
     status: record.status,
+    description: record.description,
+    activity: isActive(record.status)
+      ? describeActivity(record.activeTools, record.responseText)
+      : statusText(record.status),
     agentId: record.id,
     childSessionId: record.childSessionId,
     task: record.task,
