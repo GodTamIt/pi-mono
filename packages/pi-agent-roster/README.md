@@ -14,13 +14,13 @@ Requirements: Node `>=22.22.2`, Pi `>=0.84.3 <0.85.0`, and authentication for ev
 For a persistent installation:
 
 ```sh
-pi install npm:pi-agent-roster@0.2.0
+pi install npm:pi-agent-roster@0.3.0
 ```
 
 For a single run without changing Pi's saved package list:
 
 ```sh
-pi -e npm:pi-agent-roster@0.2.0
+pi -e npm:pi-agent-roster@0.3.0
 ```
 
 Pi packages execute with full system access. Review the extension and any child-loaded extensions before enabling them.

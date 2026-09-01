@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+### Minor Changes
+
+- f99cad6: Enrich subagent progress displays with compact two-line Background agents blocks, richer tool-call summary and activity details, and UI-only inline foreground child conversations.
+
 ## 0.2.0
 
 ### Minor Changes
