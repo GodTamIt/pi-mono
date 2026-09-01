@@ -16,7 +16,13 @@ const childWorkDir = join(root, "child-work");
 const parentSessionDir = join(root, "parent-sessions");
 const observerDir = join(root, "observer");
 const observerLog = join(root, "observer.jsonl");
-const npmArgs = ["--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock"];
+const npmArgs = [
+  "--prefer-online",
+  "--ignore-scripts",
+  "--no-audit",
+  "--no-fund",
+  "--no-package-lock",
+];
 const children = new Set();
 
 function assert(condition, message) {
