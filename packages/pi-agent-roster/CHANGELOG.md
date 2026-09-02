@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+### Patch Changes
+
+- Preserve explicit primary stacks across resumed sessions, support direct active-stack selection, and harden subagent invocation rendering against duplicate rows and terminal-output leakage.
+
 ## 0.3.0
 
 ### Minor Changes

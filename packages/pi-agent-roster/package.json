@@ -1,6 +1,6 @@
 {
   "name": "pi-agent-roster",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Primary-agent profiles and subagent orchestration for Pi",
   "repository": {
     "type": "git",
