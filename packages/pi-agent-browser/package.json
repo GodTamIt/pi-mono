@@ -1,0 +1,66 @@
+{
+  "name": "@godtamit/pi-agent-browser",
+  "version": "0.1.0",
+  "description": "Lean native agent-browser tools for Pi",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GodTamIt/pi-mono.git",
+    "directory": "packages/pi-agent-browser"
+  },
+  "homepage": "https://github.com/GodTamIt/pi-mono/tree/master/packages/pi-agent-browser#readme",
+  "bugs": {
+    "url": "https://github.com/GodTamIt/pi-mono/issues"
+  },
+  "license": "MIT",
+  "type": "module",
+  "keywords": ["pi-package", "agent-browser", "browser-automation"],
+  "engines": { "node": ">=22.22.2" },
+  "bin": {
+    "pi-agent-browser-config": "scripts/config.mjs",
+    "pi-agent-browser-doctor": "scripts/doctor.mjs"
+  },
+  "files": [
+    "dist",
+    "scripts/config.mjs",
+    "scripts/doctor.mjs",
+    "scripts/agent-browser-capability-baseline.mjs",
+    "scripts/agent-browser-target.mjs",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "docs/ARCHITECTURE.md",
+    "docs/COMMAND_REFERENCE.md",
+    "docs/ELECTRON.md",
+    "docs/REQUIREMENTS.md",
+    "docs/SUPPORT_MATRIX.md",
+    "docs/TOOL_CONTRACT.md"
+  ],
+  "pi": { "extensions": ["./dist/extensions/agent-browser/index.js"] },
+  "scripts": {
+    "typecheck": "tsc --noEmit --declaration false",
+    "unit": "tsx --test --test-concurrency=1 test/agent-browser.upstream-version.test.ts test/doctor.test.ts test/agent-browser.managed-session-policy-lock.test.ts test/agent-browser.prompt-policy.test.ts && tsx --test --test-name-pattern='process start identity discovery' test/agent-browser.process.test.ts && tsx --test --test-name-pattern='compact essential browser prompt' test/agent-browser.extension-validation.test.ts",
+    "test": "npm run unit",
+    "build": "node ./scripts/build.mjs",
+    "declarations": "npm run build",
+    "prepack": "npm run build",
+    "pack:inspect": "node ./scripts/inspect-package.mjs",
+    "smoke:installed": "node ./test/installed/smoke.mjs",
+    "doctor": "node ./scripts/doctor.mjs"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.84.3 <0.85.0",
+    "@earendil-works/pi-coding-agent": ">=0.84.3 <0.85.0",
+    "@earendil-works/pi-tui": ">=0.84.3 <0.85.0",
+    "typebox": "^1.3.7"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.84.3",
+    "@earendil-works/pi-coding-agent": "0.84.3",
+    "@earendil-works/pi-tui": "0.84.3",
+    "@types/node": "22.19.19",
+    "tsx": "4.21.0",
+    "typebox": "1.3.7",
+    "typescript": "5.9.3"
+  }
+}

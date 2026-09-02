@@ -1,7 +1,8 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.11/schema.json",
   "files": {
-    "includes": ["**", "!**/dist", "!**/*.tgz", "!!**/.direnv"]
+    // packages/pi-agent-browser stays aligned with its pinned donor fork, so repo-wide format/lint does not apply to it.
+    "includes": ["**", "!**/dist", "!**/*.tgz", "!!**/.direnv", "!packages/pi-agent-browser/**"]
   },
   "formatter": {
     "enabled": true,

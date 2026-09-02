@@ -1,5 +1,11 @@
 # Third-Party Notices
 
+## pi-agent-browser donor
+
+`packages/pi-agent-browser` is a partial fork of [`pi-agent-browser-native`](https://github.com/fitchmultz/pi-agent-browser-native) pinned at commit [`5460058d7544c6c8b67e039780801539d20440fd`](https://github.com/fitchmultz/pi-agent-browser-native/tree/5460058d7544c6c8b67e039780801539d20440fd), by Mitch Fultz under the MIT License. Adapted paths are `packages/pi-agent-browser/extensions/agent-browser/**`, selected `scripts/**`, selected `docs/**`, tests/fixtures/helpers, and TypeScript build config. The retained donor MIT text and detailed path inventory are published in [`packages/pi-agent-browser/THIRD_PARTY_NOTICES.md`](packages/pi-agent-browser/THIRD_PARTY_NOTICES.md).
+
+## pi-agent-roster donors
+
 This project adapts the in-process subagent implementation from
 `@gotgenes/pi-subagents`. The notices and provenance below apply to the
 adapted source and behavioral tests.
