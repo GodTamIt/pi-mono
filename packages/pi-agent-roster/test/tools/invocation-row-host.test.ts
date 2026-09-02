@@ -168,8 +168,8 @@ describe("native subagent invocation row", () => {
     expect(rows.running).toContain("Architect 🧭 · ▸ running");
     expect(rows.running).toContain("Summary: inspect lifecycle");
     expect(rows.running).toContain("Activity: thinking…");
-    expect(rows.completed).toContain("Activity: completed");
-    expect(rows.error).toContain("Activity: failed");
+    expect(rows.completed).not.toContain("Activity:");
+    expect(rows.error).not.toContain("Activity:");
   });
 
   it("uses the host-owned Ctrl+O expansion state for the native detail view", () => {
@@ -185,6 +185,7 @@ describe("native subagent invocation row", () => {
       toolUses: 4,
       tokens: "12.3k tokens",
       compactions: 1,
+      contextPercent: 35,
       output: "A compact final answer.",
     });
 
@@ -193,7 +194,9 @@ describe("native subagent invocation row", () => {
     const expanded = baseline(host, 76);
 
     expect(collapsed).toContain("Summary: inspect lifecycle");
-    expect(collapsed).toContain("Activity: completed");
+    expect(collapsed).toContain("↻7≤20 · 4 tools");
+    expect(collapsed).toContain("35% context");
+    expect(collapsed).not.toContain("Activity:");
     expect(expanded).toContain("Task\n  Inspect the child lifecycle exactly.");
     expect(expanded).toContain("Current/final output\n  A compact final answer.");
     expect(expanded).toContain("Turns: 7/20 · grace: 2 · tool uses: 4");
@@ -321,6 +324,75 @@ describe("native subagent invocation row", () => {
     rows.dispose();
     replacement.emit({ type: "tool_execution_start", toolName: "write", toolCallId: "shutdown" });
     expect(requestRender).toHaveBeenCalledTimes(afterCompletion);
+  });
+
+  it("keeps the first active host row live and permanently hides duplicate hosts", () => {
+    const record = createTestSubagent({
+      status: "running",
+      toolCallId: "tc-duplicate",
+      turnCount: 7,
+      toolUses: 4,
+      maxTurns: 20,
+      invocation: { maxTurns: 20 },
+    });
+    vi.spyOn(record, "getContextPercent").mockReturnValue(35);
+    const deps = createToolDeps();
+    deps.manager.getRecord = vi.fn((id: string) => (id === record.id ? record : undefined));
+    const rows = new InvocationRowRegistry((id) => deps.manager.getRecord(id));
+    const definition = new AgentTool(
+      deps.manager,
+      deps.runtime,
+      deps.settings,
+      deps.registry,
+      deps.agentDir,
+      {},
+      rows,
+    ).toToolDefinition();
+    const makeHost = () =>
+      new ToolExecutionComponent(
+        "subagent",
+        "tc-duplicate",
+        { task: record.task, subagent_type: "Architect" },
+        {},
+        definition,
+        { requestRender: vi.fn() } as never,
+        process.cwd(),
+      );
+    const first = makeHost();
+    const duplicate = makeHost();
+    const staleDetails = details({ agentId: record.id, turnCount: 0, toolUses: 0 });
+    for (const host of [first, duplicate]) {
+      host.updateResult({
+        content: [{ type: "text", text: "launch metadata" }],
+        details: staleDetails,
+        isError: false,
+      });
+    }
+
+    expect(baseline(first)).toContain("↻7≤20 · 4 tools · 35% context");
+    expect(baseline(duplicate)).not.toContain("Architect 🧭");
+    expect(`${baseline(first)}\n${baseline(duplicate)}`.match(/Architect 🧭/g)).toHaveLength(1);
+
+    record.markCompleted("done", Date.now());
+    rows.onSubagentCompleted(record);
+    expect(baseline(first)).toContain("Architect 🧭");
+    expect(baseline(duplicate)).not.toContain("Architect 🧭");
+    expect(`${baseline(first)}\n${baseline(duplicate)}`.match(/Architect 🧭/g)).toHaveLength(1);
+  });
+
+  it("uses singular tool grammar and packs unknown context at narrow widths", () => {
+    const host = standaloneHost({
+      status: "completed",
+      turnCount: 1,
+      maxTurns: 20,
+      toolUses: 1,
+      contextPercent: null,
+    });
+
+    expect(baseline(host, 120)).toContain("↻1≤20 · 1 tool · ? context");
+    for (const width of [24, 40, 60]) {
+      expect(host.render(width).every((line) => visibleWidth(line) <= width)).toBe(true);
+    }
   });
 
   it("inlines a retained foreground conversation only after completion", () => {
@@ -569,7 +641,8 @@ describe("native subagent invocation row", () => {
       for (const line of host.render(width)) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }
     expect(baseline(host, 40)).toContain("Summary: inspect lifecycle");
-    expect(baseline(host, 40)).toContain("Activity: completed");
+    expect(baseline(host, 40)).toContain("? context");
+    expect(baseline(host, 40)).not.toContain("Activity:");
     host.setExpanded(true);
     expect(text(host)).toContain("Agent ID: missing");
     expect(text(host)).toContain("Child session ID: not available");

@@ -29,7 +29,7 @@ import {
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import type { AgentSessionEvent, SessionMessage } from "../types.ts";
-import { describeActivity } from "./display.ts";
+import { describeActivity, sanitizeTerminalText } from "./display.ts";
 import { GLYPHS } from "./glyphs.ts";
 import type { TranscriptSource } from "./session-navigation.ts";
 
@@ -164,7 +164,9 @@ export class TranscriptContent {
     const rows = [...this.inFlightRendered(width)];
     const streaming = this.options.source.streaming();
     if (streaming) {
-      const activity = `${GLYPHS.streaming} ${describeActivity(streaming.activeTools, streaming.responseText)}`;
+      const responseText = sanitizeTerminalText(streaming.responseText ?? "", true);
+      const description = describeActivity(streaming.activeTools, responseText);
+      const activity = `${GLYPHS.streaming} ${sanitizeTerminalText(description)}`;
       rows.push("", ...wrapTextWithAnsi(activity, width));
     }
     return rows;

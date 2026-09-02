@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { TypeListRegistry } from "../../src/tools/helpers.ts";
 import {
   buildAgentGuidelines,
@@ -321,12 +321,13 @@ describe("buildDetails", () => {
     expect(details.agentId).toBe("agent-42");
   });
 
-  it("reads turnCount and maxTurns from the record", () => {
-    // Use createTestSubagent to get a record with the live-activity getters
+  it("reads live counters and context from the record", () => {
     const recordWithActivity = createTestSubagent({ turnCount: 7, maxTurns: 10 });
+    vi.spyOn(recordWithActivity, "getContextPercent").mockReturnValue(35);
     const details = buildDetails(base, recordWithActivity);
     expect(details.turnCount).toBe(7);
     expect(details.maxTurns).toBe(10);
+    expect(details.contextPercent).toBe(35);
   });
 
   it("leaves turnCount/maxTurns undefined when the record has no such fields", () => {
@@ -334,6 +335,7 @@ describe("buildDetails", () => {
     const details = buildDetails(base, record);
     expect(details.turnCount).toBeUndefined();
     expect(details.maxTurns).toBeUndefined();
+    expect(details.contextPercent).toBeNull();
   });
 
   it("applies overrides on top of computed fields", () => {

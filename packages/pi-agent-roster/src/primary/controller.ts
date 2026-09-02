@@ -1,5 +1,4 @@
 import type { Model, ThinkingLevel } from "@earendil-works/pi-ai";
-import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import type {
   BeforeAgentStartEvent,
   BeforeAgentStartEventResult,
@@ -7,6 +6,7 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import type { AgentTypeRegistry } from "../config/agent-types.ts";
 import { normalizeAgentId } from "../config/custom-agents.ts";
 import {
@@ -56,6 +56,7 @@ export class PrimaryController {
   private baseline: BaselineState | undefined;
   private selected: Selection | undefined;
   private delegationDenied: string | undefined;
+  private startupStack: { agent: string; stack: string } | undefined;
   private ctx: ExtensionContext | undefined;
 
   constructor(private readonly options: PrimaryControllerOptions) {}
@@ -77,6 +78,10 @@ export class PrimaryController {
 
     const requestedAgent = clean(this.options.pi.getFlag(PRIMARY_AGENT_FLAG));
     const requestedStack = clean(this.options.pi.getFlag(PRIMARY_STACK_FLAG));
+    this.startupStack =
+      requestedAgent && requestedStack
+        ? { agent: requestedAgent, stack: requestedStack }
+        : undefined;
     if (requestedStack && !requestedAgent) {
       ctx.ui.notify(
         `--${PRIMARY_STACK_FLAG} requires --${PRIMARY_AGENT_FLAG} naming an enabled primary agent.`,
@@ -98,7 +103,7 @@ export class PrimaryController {
       return;
     }
 
-    const resolved = this.resolveSelection(requestedAgent, requestedStack);
+    const resolved = this.resolveSelection(requestedAgent);
     if (typeof resolved === "string") {
       ctx.ui.notify(`Unable to apply startup agent: ${resolved}`, "error");
       this.reconcileToolVisibility();
@@ -140,7 +145,16 @@ export class PrimaryController {
     const firstSpace = argumentPrefix.search(/\s/);
     if (firstSpace === -1) {
       const query = normalizeAgentId(argumentPrefix);
-      const items = this.stackCommandAgentTypes()
+      const stackItems = this.selected
+        ? this.availableStackNames(this.selected.agent)
+            .filter((stack) => normalizeAgentId(stack).startsWith(query))
+            .map((stack) => ({
+              value: stack,
+              label: stack,
+              description: `Select for active primary ${this.selected?.name}.`,
+            }))
+        : [];
+      const agentItems = this.stackCommandAgentTypes()
         .filter((canonical) => normalizeAgentId(canonical).startsWith(query))
         .map((canonical) => {
           const agent = this.options.registry.resolveAgentConfig(canonical);
@@ -150,6 +164,7 @@ export class PrimaryController {
             description: agent.description,
           };
         });
+      const items = [...stackItems, ...agentItems];
       return items.length ? items : null;
     }
 
@@ -189,9 +204,14 @@ export class PrimaryController {
       return;
     }
 
-    const rawAgent = parts[0] ?? this.selected?.name;
+    let rawAgent = parts[0] ?? this.selected?.name;
+    let rawStack = parts[1];
     if (!rawAgent) return;
-    if (!parts[1]) {
+
+    if (!rawStack && this.selected && this.hasStack(this.selected.agent, rawAgent)) {
+      rawStack = rawAgent;
+      rawAgent = this.selected.name;
+    } else if (!rawStack) {
       const canonical = this.options.registry.resolveType(rawAgent);
       if (!canonical) {
         ctx.ui.notify(`Unknown agent ${JSON.stringify(rawAgent)}.`, "error");
@@ -201,14 +221,12 @@ export class PrimaryController {
         ctx.ui.notify(`Agent ${JSON.stringify(canonical)} is disabled.`, "error");
         return;
       }
-    }
-    const rawStack =
-      parts[1] ??
-      (await showRosterPicker(
+      rawStack = await showRosterPicker(
         ctx.ui,
         `Select stack for ${this.agentDisplayName(rawAgent)}`,
         this.stackItems(rawAgent),
-      ));
+      );
+    }
     if (!rawStack) return;
     await this.selectStack(rawAgent, rawStack, ctx);
   }
@@ -444,7 +462,7 @@ export class PrimaryController {
     return `Primary agent ${JSON.stringify(this.selected.name)} is not authorized to delegate to ${JSON.stringify(canonical)}.`;
   }
 
-  private resolveSelection(name: string, explicitStack?: string): Selection | undefined | string {
+  private resolveSelection(name: string): Selection | undefined | string {
     if (normalizeAgentId(name) === "default") return undefined;
     const canonical = this.options.registry.resolveType(name);
     if (!canonical) return `Unknown primary agent ${JSON.stringify(name)}.`;
@@ -453,7 +471,12 @@ export class PrimaryController {
     if (agent.enabled === false || (mode !== "primary" && mode !== "all")) {
       return `Agent ${JSON.stringify(canonical)} is not an enabled primary/all agent.`;
     }
-    const stack = this.resolveStack(agent, explicitStack);
+    // The CLI --stack flag stays authoritative ahead of session /stack overrides.
+    const effectiveExplicitStack =
+      this.startupStack && this.options.registry.resolveType(this.startupStack.agent) === canonical
+        ? this.startupStack.stack
+        : undefined;
+    const stack = this.resolveStack(agent, effectiveExplicitStack);
     if (typeof stack === "string") return stack;
     if (stack.notice) this.ctx?.ui.notify(stack.notice.message, "warning");
     if (!stack.model) return `No available model resolved for agent ${JSON.stringify(canonical)}.`;
@@ -479,6 +502,12 @@ export class PrimaryController {
 
   private resolveStack(agent: AgentConfig, explicitStack?: string) {
     return this.previewStack(agent, explicitStack, this.options.stackOverrides.get(agent));
+  }
+
+  private hasStack(agent: AgentConfig, value: string): boolean {
+    return this.availableStackNames(agent).some(
+      (stack) => normalizeAgentId(stack) === normalizeAgentId(value),
+    );
   }
 
   private availableStackNames(agent: AgentConfig): string[] {

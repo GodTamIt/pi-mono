@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
@@ -51,6 +54,39 @@ describe("pi-agent-roster extension", () => {
       description: expect.any(String),
       type: "string",
     });
+  });
+
+  it("routes registry diagnostics through session UI once across reloads", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-roster-extension-"));
+    mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
+    writeFileSync(join(cwd, ".pi", "agents", "broken.md"), "---\ntools: [read]\n---\nBroken.");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const pi = loadInteractiveExtension();
+      const handlers = new Map<string, any>(vi.mocked(pi.on).mock.calls as any);
+      const commands = new Map<string, any>(vi.mocked(pi.registerCommand).mock.calls as any);
+      const notify = vi.fn();
+      const ctx = {
+        cwd,
+        model: undefined,
+        ui: { notify, setStatus: vi.fn() },
+        getSystemPrompt: () => "system prompt",
+        waitForIdle: async () => undefined,
+      } as any;
+
+      await handlers.get("session_start")?.({}, ctx);
+      await commands.get("agents:reload")?.handler("", ctx);
+      await commands.get("agents:reload")?.handler("", ctx);
+
+      const diagnostics = notify.mock.calls.filter(([message]) =>
+        String(message).includes("tools is unsupported"),
+      );
+      expect(diagnostics).toHaveLength(1);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   it("registers idle-gated shortcuts that dispatch the agent and stack commands", () => {

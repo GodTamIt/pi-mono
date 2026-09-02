@@ -49,6 +49,25 @@ describe("AgentTool", () => {
     expect(def.promptSnippet).toBe("Delegate complex, multi-step tasks to a specialized agent.");
   });
 
+  it("neutralizes terminal controls in the no-details result fallback", () => {
+    const def = makeTool(createToolDeps()).toToolDefinition();
+    const hostile =
+      "npm WARN \u001b[31mdeprecated\u001b[0m\u001b]0;npm install\u0007" +
+      "\u001b[3Aoverwrite\rprogress\b!";
+    const component = def.renderResult!(
+      { content: [{ type: "text", text: hostile }], details: undefined },
+      {} as never,
+      { fg: (_color: string, text: string) => text, bold: (text: string) => text } as any,
+      {} as never,
+    );
+    const text = component.render(120).join("\n");
+
+    expect(text).toContain("npm WARN deprecatedoverwriteprogress!");
+    for (const control of ["\u001b", "\r", "\b", "\u009b"]) {
+      expect(text).not.toContain(control);
+    }
+  });
+
   it("exposes only the documented snake_case invocation schema", () => {
     const def = makeTool(createToolDeps()).toToolDefinition();
     expect(Object.keys(def.parameters.properties).sort()).toEqual(

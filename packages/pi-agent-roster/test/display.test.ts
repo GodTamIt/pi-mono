@@ -8,10 +8,36 @@ import {
   formatTokens,
   getDisplayName,
   getPromptModeLabel,
+  sanitizeTerminalText,
 } from "../src/ui/display.ts";
 import { TEST_AGENTS } from "./helpers/test-agents.ts";
 
 const testRegistry = new AgentTypeRegistry(() => TEST_AGENTS);
+
+const HOSTILE_OUTPUT =
+  "npm WARN \u001b[31mdeprecated\u001b[0m \u001b]8;;https://example.test\u0007package\u001b]8;;\u0007 " +
+  "\u001b[2Aoverwrite\rprogress\b!\u001b_hidden\u001b\\ done";
+
+describe("sanitizeTerminalText", () => {
+  it("removes ANSI, OSC, cursor movement, control strings, and control bytes", () => {
+    const sanitized = sanitizeTerminalText(HOSTILE_OUTPUT, true);
+
+    expect(sanitized).toContain("npm WARN deprecated package overwriteprogress! done");
+    for (const control of ["\u001b", "\r", "\b", "\u009b"]) {
+      expect(sanitized).not.toContain(control);
+    }
+  });
+
+  it("preserves newlines only when requested", () => {
+    expect(sanitizeTerminalText("one\ntwo", true)).toBe("one\ntwo");
+    expect(sanitizeTerminalText("one\ntwo")).toBe("one two");
+  });
+
+  it("restarts aborted sequences instead of leaking their payload", () => {
+    expect(sanitizeTerminalText("\x1b[1\x1b[2Jhide")).toBe("hide");
+    expect(sanitizeTerminalText("\x1b\x1b[mrest")).toBe("rest");
+  });
+});
 
 describe("getDisplayName", () => {
   it("returns displayName when set", () => {

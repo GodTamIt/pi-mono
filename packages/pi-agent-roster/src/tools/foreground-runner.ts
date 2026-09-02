@@ -42,6 +42,8 @@ export async function runForeground(
 
   const streamUpdate = () => {
     const toolUses = recordRef?.toolUses ?? 0;
+    const status = recordRef?.status ?? "running";
+    const active = status === "queued" || status === "running";
     const details: AgentDetails = {
       ...presentation.detailBase,
       toolUses,
@@ -49,14 +51,16 @@ export async function runForeground(
       // Read activity off the record; fall back to safe defaults before onSessionCreated fires
       turnCount: recordRef?.turnCount ?? 1,
       maxTurns: recordRef?.maxTurns ?? execution.effectiveMaxTurns,
-      durationMs: Date.now() - startedAt,
-      status: "running",
+      contextPercent: recordRef?.getContextPercent() ?? null,
+      durationMs: recordRef
+        ? (recordRef.completedAt ?? Date.now()) - recordRef.startedAt
+        : Date.now() - startedAt,
+      status,
       agentId: recordRef?.id,
       childSessionId: recordRef?.childSessionId,
-      activity: describeActivity(
-        recordRef?.activeTools ?? new Map(),
-        recordRef?.responseText ?? "",
-      ),
+      activity: active
+        ? describeActivity(recordRef?.activeTools ?? new Map(), recordRef?.responseText ?? "")
+        : undefined,
       spinnerFrame: spinnerFrame % SPINNER.length,
     };
     onUpdate?.({
@@ -69,6 +73,10 @@ export async function runForeground(
   const spinnerInterval = setInterval(() => {
     spinnerFrame++;
     streamUpdate();
+    // Stream one settled snapshot, then stop ticking while spawnAndWait unwinds.
+    if (recordRef && recordRef.status !== "queued" && recordRef.status !== "running") {
+      clearInterval(spinnerInterval);
+    }
   }, 80);
 
   streamUpdate();

@@ -194,6 +194,22 @@ describe("TranscriptContent", () => {
     it("omits the streaming-activity row when the agent is not running", () => {
       expect(rendered(makeContent())).not.toContain("◍");
     });
+
+    it("neutralizes terminal controls in response-text activity", () => {
+      const hostile =
+        "npm WARN \u001b[31mdeprecated\u001b[0m\u001b]8;;https://example.test\u0007 pkg\u001b]8;;\u0007" +
+        "\u001b[4Aoverwrite\rprogress\b!";
+      const source = fakeSource({
+        streaming: () => ({ activeTools: new Map(), responseText: hostile }),
+      });
+      const out = stripTerminalSequences(rendered(makeContent(source)));
+
+      expect(out).toContain("npm WARN deprecated pkgoverwriteprogress!");
+      expect(out).not.toContain("[31m");
+      for (const control of ["\u001b", "\r", "\b", "\u009b"]) {
+        expect(out).not.toContain(control);
+      }
+    });
   });
 
   describe("source changes", () => {

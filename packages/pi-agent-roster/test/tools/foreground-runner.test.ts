@@ -115,6 +115,40 @@ describe("runForeground", () => {
     await runPromise;
   });
 
+  it("does not stream running metadata after the live record settles", async () => {
+    let resolve!: (record: ReturnType<typeof createTestSubagent>) => void;
+    const pending = new Promise<ReturnType<typeof createTestSubagent>>((done) => {
+      resolve = done;
+    });
+    const record = createTestSubagent({ status: "running", startedAt: 1000, turnCount: 7 });
+    vi.spyOn(record, "getContextPercent").mockReturnValue(35);
+    const spawnAndWait = vi.fn((_baseline, _type, _task, options) => {
+      options.observer?.onSessionCreated?.(record);
+      return pending;
+    });
+    const deps = createToolDeps({
+      manager: { ...createToolDeps().manager, spawnAndWait },
+    });
+    const onUpdate = vi.fn();
+    const runPromise = runForeground(deps.manager, makeParams(), undefined, onUpdate);
+
+    record.markCompleted("done", 2000);
+    await vi.advanceTimersByTimeAsync(100);
+
+    const streamed = onUpdate.mock.calls.at(-1)?.[0].details;
+    expect(streamed.status).toBe("completed");
+    expect(streamed.durationMs).toBe(1000);
+    expect(streamed.contextPercent).toBe(35);
+
+    // One settled update is streamed, then the interval stops ticking
+    const settledCalls = onUpdate.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(400);
+    expect(onUpdate.mock.calls.length).toBe(settledCalls);
+
+    resolve(record);
+    await runPromise;
+  });
+
   it("clears spinner interval on error and does not leave it running", async () => {
     const deps = createToolDeps({
       manager: {

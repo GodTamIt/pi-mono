@@ -43,6 +43,7 @@ export function buildDetails(
     /** Live-activity counters exposed as getters on Subagent. */
     turnCount?: number | undefined;
     maxTurns?: number | undefined;
+    getContextPercent?: (() => number | null) | undefined;
   },
   overrides?: Partial<AgentDetails> | undefined,
 ): AgentDetails {
@@ -52,6 +53,7 @@ export function buildDetails(
     tokens: formatLifetimeTokens(record),
     turnCount: record.turnCount,
     maxTurns: record.maxTurns,
+    contextPercent: record.getContextPercent?.() ?? null,
     durationMs: (record.completedAt ?? Date.now()) - record.startedAt,
     status: record.status as AgentDetails["status"],
     agentId: record.id,

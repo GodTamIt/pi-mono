@@ -1,20 +1,26 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../src/config/custom-agents.ts", () => ({
-  loadCustomAgents: () =>
-    new Map([
-      [
-        "general-purpose",
-        {
-          name: "general-purpose",
-          description: "Test agent",
-          systemPrompt: "",
-          promptMode: "append",
-          enabled: true,
-        },
-      ],
-    ]),
-}));
+vi.mock("../src/config/custom-agents.ts", async () => {
+  const actual = await vi.importActual<typeof import("../src/config/custom-agents.ts")>(
+    "../src/config/custom-agents.ts",
+  );
+  return {
+    ...actual,
+    loadCustomAgents: () =>
+      new Map([
+        [
+          "general-purpose",
+          {
+            name: "general-purpose",
+            description: "Test agent",
+            systemPrompt: "",
+            promptMode: "append",
+            enabled: true,
+          },
+        ],
+      ]),
+  };
+});
 
 vi.mock("../src/lifecycle/create-subagent-session.ts", async () => {
   const actual = await vi.importActual<

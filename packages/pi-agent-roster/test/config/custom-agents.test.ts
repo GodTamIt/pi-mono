@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadCustomAgents } from "../../src/config/custom-agents.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CustomAgentDiagnosticReporter, loadCustomAgents } from "../../src/config/custom-agents.ts";
 
 describe("loadCustomAgents", () => {
   let tmpDir: string;
@@ -80,6 +80,39 @@ You are a security auditor.`,
     const result = loadCustomAgents(tmpDir, (diagnostic) => diagnostics.push(diagnostic.message));
     expect(result.has("legacy")).toBe(false);
     expect(diagnostics).toContainEqual(expect.stringContaining("tools is unsupported"));
+  });
+
+  it("does not write to stderr when the production-style callback consumes diagnostics", () => {
+    writeAgent("legacy", "---\ntools: [read]\n---\nLegacy.");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    loadCustomAgents(tmpDir, () => undefined);
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("buffers and de-duplicates diagnostics for each session UI", () => {
+    const reporter = new CustomAgentDiagnosticReporter();
+    const diagnostic = {
+      path: "/tmp/agent.md",
+      message: "npm WARN \u001b[31mbroken\u001b[0m\rretry",
+      source: "project" as const,
+    };
+    const firstNotify = vi.fn();
+    reporter.reportScan([diagnostic, diagnostic]);
+    reporter.beginSession({ notify: firstNotify });
+    reporter.reportScan([diagnostic]);
+    reporter.reportScan([diagnostic]);
+
+    expect(firstNotify).toHaveBeenCalledOnce();
+    for (const control of ["\u001b", "\r", "\b", "\u009b"]) {
+      expect(firstNotify.mock.calls[0]?.[0]).not.toContain(control);
+    }
+
+    const recreatedNotify = vi.fn();
+    reporter.beginSession({ notify: recreatedNotify });
+    expect(recreatedNotify).toHaveBeenCalledOnce();
   });
 
   it.each([

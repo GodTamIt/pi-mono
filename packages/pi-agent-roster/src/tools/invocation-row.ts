@@ -8,6 +8,7 @@ import {
   describeActivity,
   formatContextPercent,
   formatMs,
+  formatTurns,
   sanitizeTerminalText,
   type Theme,
 } from "../ui/display.ts";
@@ -32,6 +33,7 @@ type Binding = {
   invalidate: () => void;
   unsubscribe?: (() => void) | undefined;
   activity: string[];
+  owner?: object | undefined;
 };
 
 /** Keeps settled native tool rows connected to their child while work continues. */
@@ -41,11 +43,17 @@ export class InvocationRowRegistry implements SubagentManagerObserver {
 
   constructor(private readonly getRecord: (id: string) => Subagent | undefined) {}
 
-  bind(toolCallId: string, agentId: string, invalidate: () => void): Binding {
+  bind(
+    toolCallId: string,
+    agentId: string,
+    invalidate: () => void,
+    owner?: object,
+    active = this.getRecord(agentId)?.isActive() ?? true,
+  ): Binding {
     const key = bindingKey(toolCallId, agentId);
     const record = this.getRecord(agentId);
     let binding = this.bindings.get(key);
-    if (record && !record.isActive()) {
+    if (!active) {
       binding?.unsubscribe?.();
       this.bindings.delete(key);
       const settled = {
@@ -53,23 +61,29 @@ export class InvocationRowRegistry implements SubagentManagerObserver {
         agentId,
         invalidate,
         activity: [...(binding?.activity ?? this.activitySnapshots.get(key) ?? [])],
+        owner,
       };
-      if (settled.activity.length === 0) this.rebuild(settled, record);
+      if (record && settled.activity.length === 0) this.rebuild(settled, record);
       this.activitySnapshots.set(key, settled.activity);
       this.trim();
       return settled;
     }
     if (!binding) {
-      binding = { key, agentId, invalidate, activity: [] };
+      binding = { key, agentId, invalidate, activity: [], owner };
       this.bindings.set(key, binding);
       this.trim();
-    } else {
+    } else if (binding.owner === owner) {
       binding.invalidate = invalidate;
       this.bindings.delete(key);
       this.bindings.set(key, binding);
     }
-    if (record) this.attachSession(binding, record);
+    if (record && binding.owner === owner) this.attachSession(binding, record);
     return binding;
+  }
+
+  owns(toolCallId: string, agentId: string, owner: object): boolean {
+    const binding = this.bindings.get(bindingKey(toolCallId, agentId));
+    return !binding || binding.owner === undefined || binding.owner === owner;
   }
 
   getActivity(toolCallId: string, agentId: string): readonly string[] {
@@ -134,9 +148,9 @@ export class InvocationRowRegistry implements SubagentManagerObserver {
     binding.unsubscribe?.();
     binding.unsubscribe = undefined;
     this.activitySnapshots.set(binding.key, [...binding.activity]);
+    this.bindings.delete(binding.key);
     this.trim();
     binding.invalidate();
-    this.bindings.delete(binding.key);
   }
 
   private find(record: Subagent): Binding | undefined {
@@ -209,6 +223,7 @@ export class InvocationRowRegistry implements SubagentManagerObserver {
 /** Width-aware native component retained by ToolExecutionComponent after settlement. */
 export class InvocationRowComponent implements Component {
   private expanded = false;
+  private suppressed = false;
 
   constructor(
     private readonly toolCallId: string,
@@ -232,6 +247,18 @@ export class InvocationRowComponent implements Component {
     if (width <= 0) return [];
     const record = this.details.agentId ? this.getRecord(this.details.agentId) : undefined;
     const details = record ? detailsFromRecord(this.details, record) : this.details;
+    if (
+      !this.suppressed &&
+      isActive(details.status) &&
+      details.agentId &&
+      this.registry &&
+      !this.registry.owns(this.toolCallId, details.agentId, this)
+    ) {
+      // Duplicate host for a live invocation: stay hidden permanently so two
+      // identical rows never both appear once the record settles.
+      this.suppressed = true;
+    }
+    if (this.suppressed) return [];
     const lines = collapsedLines(details, this.theme, width);
     if (this.expanded) {
       lines.push(
@@ -258,7 +285,6 @@ export function renderInvocationRow(
   registry: InvocationRowRegistry | undefined,
   getRecord: (id: string) => Subagent | undefined,
 ): InvocationRowComponent {
-  if (details.agentId) registry?.bind(context.toolCallId, details.agentId, context.invalidate);
   const component =
     context.lastComponent instanceof InvocationRowComponent
       ? context.lastComponent
@@ -271,6 +297,16 @@ export function renderInvocationRow(
           getRecord,
         );
   component.update(details, resultText, context.expanded, theme);
+  if (details.agentId) {
+    const record = getRecord(details.agentId);
+    registry?.bind(
+      context.toolCallId,
+      details.agentId,
+      context.invalidate,
+      component,
+      record ? record.isActive() : isActive(details.status),
+    );
+  }
   context.state.invocationRow = component;
   return component;
 }
@@ -289,20 +325,28 @@ function collapsedLines(details: AgentDetails, theme: Theme, width: number): str
       `stack ${sanitizeTerminalText(details.stack ?? "—")}`,
       `model ${sanitizeTerminalText(details.modelName ?? "—")}`,
       `thinking ${sanitizeTerminalText(details.thinking ?? "—")}`,
+      formatTurns(details.turnCount ?? 0, details.maxTurns),
+      `${details.toolUses} ${details.toolUses === 1 ? "tool" : "tools"}`,
+      formatContext(details.contextPercent),
       timing,
     ],
     width,
   );
   const summary = `${GLYPHS.subLine} Summary: ${sanitizeTerminalText(details.description)}`;
-  const activity = `${GLYPHS.subLine} Activity: ${sanitizeTerminalText(
-    details.activity ?? (isActive(details.status) ? "thinking…" : status.label),
-  )}`;
-  return [
+  const lines = [
     first,
     ...metadata.map((line) => theme.fg("dim", line)),
     theme.fg("muted", summary),
-    theme.fg(isActive(details.status) ? "accent" : "dim", activity),
   ];
+  if (isActive(details.status)) {
+    lines.push(
+      theme.fg(
+        "accent",
+        `${GLYPHS.subLine} Activity: ${sanitizeTerminalText(details.activity ?? "thinking…")}`,
+      ),
+    );
+  }
+  return lines;
 }
 
 /** Wrap compact metadata only between facts, never before an orphaned separator. */
@@ -343,7 +387,7 @@ function expandedLines(
     heading("Run details"),
     `  ${status.label} · ${execution}`,
     `  Turns: ${details.turnCount ?? 0}/${details.maxTurns ?? "unlimited"} · grace: ${details.graceTurns ?? "unlimited"} · tool uses: ${details.toolUses}`,
-    `  Usage: ${details.tokens || "0 tokens"} · ${formatContext(record?.getContextPercent())} · ${compactions} compaction${compactions === 1 ? "" : "s"}`,
+    `  Usage: ${details.tokens || "0 tokens"} · ${formatContext(record ? record.getContextPercent() : details.contextPercent)} · ${compactions} compaction${compactions === 1 ? "" : "s"}`,
     `  Started: ${record ? new Date(record.startedAt).toISOString() : "not available"} · ${isActive(details.status) ? "elapsed" : "duration"}: ${formatMs(details.durationMs)}`,
     heading("Identifiers"),
     `  Agent ID: ${sanitizeTerminalText(details.agentId ?? "unknown")}`,
@@ -403,6 +447,7 @@ function detailsFromRecord(base: AgentDetails, record: Subagent): AgentDetails {
     maxTurns: record.maxTurns,
     graceTurns: record.graceTurns,
     toolUses: record.toolUses,
+    contextPercent: record.getContextPercent(),
     tokens: formatLifetimeTokens(record),
     compactions: record.compactionCount,
     output: record.result ?? record.error ?? record.responseText,
@@ -458,7 +503,7 @@ function isActive(status: string): boolean {
 }
 
 function formatContext(percent: number | null | undefined): string {
-  return percent == null ? "context unknown" : `${formatContextPercent(percent)} context`;
+  return percent == null ? "? context" : `${formatContextPercent(percent)} context`;
 }
 
 function bindingKey(toolCallId: string, agentId: string): string {

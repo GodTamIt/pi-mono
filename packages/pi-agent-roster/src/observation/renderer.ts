@@ -5,6 +5,7 @@ import {
   formatMs,
   formatTokens,
   formatTurns,
+  sanitizeTerminalText,
 } from "../ui/display.ts";
 import { GLYPHS } from "../ui/glyphs.ts";
 import type { NotificationDetails } from "./notification.ts";
@@ -85,21 +86,29 @@ export function createNotificationRenderer() {
     const { iconGlyph, iconStyle, statusText } = resolveStatusPresentation(d.status);
 
     // Collapsed view stays a compact summary; expanded view adds the audit details below.
-    let line = `${theme.fg(iconStyle, iconGlyph)} ${theme.bold(d.description)} ${theme.fg("dim", statusText)}`;
-    line += ` ${theme.fg("dim", `ID: ${d.id}`)}`;
+    const description = sanitizeTerminalText(d.description);
+    const id = sanitizeTerminalText(d.id);
+    let line = `${theme.fg(iconStyle, iconGlyph)} ${theme.bold(description)} ${theme.fg("dim", statusText)}`;
+    line += ` ${theme.fg("dim", `ID: ${id}`)}`;
 
     if (expanded) {
-      const invocationParts = buildInvocationMetadataParts(d);
+      const invocationParts = buildInvocationMetadataParts(d).map((part) =>
+        sanitizeTerminalText(part),
+      );
       if (invocationParts.length) line += renderDetailLine(invocationParts, theme);
 
       const parts = buildStatsParts(d);
       if (parts.length) line += renderDetailLine(parts, theme);
 
-      const previewLines = buildPreviewLines(d.resultPreview, true);
+      const preview = sanitizeTerminalText(d.resultPreview, true);
+      const previewLines = buildPreviewLines(preview, true);
       for (const l of previewLines) line += "\n" + theme.fg("dim", `  ${l}`);
 
       // Output file link (if present)
-      if (d.outputFile) line += "\n  " + theme.fg("muted", `transcript: ${d.outputFile}`);
+      if (d.outputFile) {
+        const outputFile = sanitizeTerminalText(d.outputFile);
+        line += "\n  " + theme.fg("muted", `transcript: ${outputFile}`);
+      }
     }
 
     return new Text(line, 0, 0);

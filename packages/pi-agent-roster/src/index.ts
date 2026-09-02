@@ -23,7 +23,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
 import { AgentTypeRegistry } from "./config/agent-types.ts";
-import { loadCustomAgents } from "./config/custom-agents.ts";
+import { CustomAgentDiagnosticReporter, loadCustomAgents } from "./config/custom-agents.ts";
 import { InterruptHandler, SessionLifecycleHandler, ToolStartHandler } from "./handlers/index.ts";
 import { createChildLifecyclePublisher } from "./lifecycle/child-lifecycle.ts";
 import { ConcurrencyLimiter } from "./lifecycle/concurrency-limiter.ts";
@@ -49,6 +49,7 @@ import { AgentTool } from "./tools/agent-tool.ts";
 import { GetResultTool } from "./tools/get-result-tool.ts";
 import { InvocationRowRegistry } from "./tools/invocation-row.ts";
 import { SteerTool } from "./tools/steer-tool.ts";
+import type { AgentDiagnostic } from "./types.ts";
 import { AgentWidget } from "./ui/agent-widget.ts";
 import { FooterStatus } from "./ui/footer-status.ts";
 import { SessionNavigatorHandler } from "./ui/session-navigator.ts";
@@ -64,7 +65,14 @@ export default function (pi: ExtensionAPI) {
     createNotificationRenderer(),
   );
 
-  const registry = new AgentTypeRegistry(() => loadCustomAgents(process.cwd()));
+  let rosterCwd = process.cwd();
+  const diagnosticReporter = new CustomAgentDiagnosticReporter();
+  const registry = new AgentTypeRegistry(() => {
+    const diagnostics: AgentDiagnostic[] = [];
+    const agents = loadCustomAgents(rosterCwd, (diagnostic) => diagnostics.push(diagnostic));
+    diagnosticReporter.reportScan(diagnostics);
+    return agents;
+  });
 
   // ---- Runtime: all mutable extension state in one place ----
   const runtime = createSubagentRuntime();
@@ -225,14 +233,21 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (event, ctx) => {
     invocationRows.clear();
+    const reportBufferedDiagnostics = rosterCwd === ctx.cwd;
+    rosterCwd = ctx.cwd;
+    diagnosticReporter.beginSession(ctx.ui, reportBufferedDiagnostics);
     await lifecycle.handleSessionStart(event, ctx);
     await primary.handleSessionStart(ctx);
   });
   pi.on("session_before_switch", () => {
     invocationRows.clear();
+    diagnosticReporter.endSession();
     return lifecycle.handleSessionBeforeSwitch();
   });
-  pi.on("session_shutdown", () => lifecycle.handleSessionShutdown());
+  pi.on("session_shutdown", () => {
+    diagnosticReporter.endSession();
+    return lifecycle.handleSessionShutdown();
+  });
   pi.on("before_agent_start", (event) => primary.beforeAgentStart(event));
 
   // Live widget: constructed after the manager (it polls listAgents()) and

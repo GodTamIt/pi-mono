@@ -299,4 +299,32 @@ describe("createNotificationRenderer", () => {
     expect(text).toContain("7 tool uses");
     expect(text).toContain("5.0k tokens");
   });
+
+  it("neutralizes terminal controls in every untrusted notification field", () => {
+    const hostile =
+      "npm WARN \u001b[31mdeprecated\u001b[0m \u001b]8;;https://example.test\u0007pkg\u001b]8;;\u0007" +
+      "\u001b[2Aoverwrite\rprogress\b!\u001b_payload\u001b\\";
+    const result = createNotificationRenderer()(
+      {
+        details: makeDetails({
+          id: hostile,
+          description: hostile,
+          stack: hostile,
+          model: hostile,
+          thinking: hostile as NotificationDetails["thinking"],
+          resultPreview: `${hostile}\nsecond line`,
+          outputFile: `/tmp/${hostile}`,
+        }),
+      },
+      { expanded: true },
+      stubTheme(),
+    );
+    const text = renderText(result);
+
+    expect(text).toContain("npm WARN deprecated pkgoverwriteprogress!");
+    expect(text).toContain("second line");
+    for (const control of ["\u001b", "\r", "\b", "\u009b"]) {
+      expect(text).not.toContain(control);
+    }
+  });
 });

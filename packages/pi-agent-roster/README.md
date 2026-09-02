@@ -156,13 +156,14 @@ Useful commands:
 /agent lead                # select a primary directly (case-insensitive)
 /agent default             # restore Pi's captured startup state
 /stack                     # choose a stack for the active roster primary
-/stack lead fast           # set a session-local override directly
+/stack fast                # set the active primary's stack directly
+/stack lead fast           # set an agent's session-local override directly
 /stack lead default        # force the named default, or synthetic fallback
 /stack lead auto           # clear the override; resume configured selection
 /agents:reload             # rescan definitions and reapply the selected primary
 ```
 
-With a roster primary active, `/stack` opens that primary's stack picker directly; it never opens an agent picker. Without an active roster primary it asks you to select one with `/agent`. The explicit `/stack <agent> <stack>` form remains available, including for child overrides while Pi's default primary is active. Command completion lists matching agents first and that agent's `auto`, `default`, and named stacks second. When a roster primary is active, completion and explicit stack changes are restricted to that primary because child stack overrides are disabled.
+With a roster primary active, `/stack` opens that primary's stack picker directly, and `/stack <stack>` selects one of its stacks without a picker. `/stack <agent>` still opens that agent's picker when the name is not also an active-primary stack. Without an active roster primary, select an agent with `/agent` or use `/stack <agent> <stack>`. Command completion includes direct active-primary stacks and the compatible agent-first forms. When a roster primary is active, stack changes are restricted to that primary because child stack overrides are disabled.
 
 Names are case-insensitive. A stale session override falls back to the configured default with a warning. Overrides reset at the next Pi session start. `/agents:reload` waits for the parent to become idle; if the current primary disappeared or became ineligible, it restores Pi's default profile.
 
@@ -175,7 +176,7 @@ pi --agent lead --stack default
 ```
 
 - `--agent <name>` selects an enabled `primary` or `all` profile at session start.
-- `--stack <name>` requires a non-default `--agent`; it cannot select a stack by itself.
+- `--stack <name>` requires a non-default `--agent`; it cannot select a stack by itself. It remains authoritative across session replacement and extension reload, ahead of `/stack` overrides and configured defaults.
 
 Authenticate models through Pi (for example, `/login`) before selecting a profile. A missing model or unavailable authentication produces an error and preserves the current model, thinking level, prompt, and tools.
 

@@ -152,6 +152,50 @@ describe("PrimaryController", () => {
     expect(h.controller.authorizeTarget("WORKER")).toBeUndefined();
   });
 
+  it("retains an explicit startup stack across overrides, reconciliation, and repeated starts", async () => {
+    const lead = config({
+      stacks: new Map([
+        ["openai", { model: "anthropic/base", thinking: "low" }],
+        ["light", { model: "anthropic/primary", thinking: "high" }],
+      ]),
+    });
+    const h = harness(lead, {
+      [PRIMARY_AGENT_FLAG]: "lead",
+      [PRIMARY_STACK_FLAG]: "openai",
+    });
+    const commandCtx = {
+      ...h.ctx,
+      waitForIdle: vi.fn(async () => undefined),
+    } as unknown as ExtensionCommandContext;
+
+    await h.controller.handleSessionStart(h.ctx);
+    await h.controller.handleStackCommand("light", commandCtx);
+    h.controller.reconcileBeforeDelegation();
+
+    expect(h.overrides.get(lead)).toBe("light");
+    expect(h.controller.getPropagatedStack()).toEqual({
+      stack: "openai",
+      fallbackModel: baseModel,
+      fallbackThinking: undefined,
+    });
+    expect(h.setStatus).toHaveBeenLastCalledWith("subagents", "Lead · stack: openai");
+
+    await h.controller.handleSessionStart(h.ctx);
+
+    expect(h.overrides.get(lead)).toBeUndefined();
+    expect(h.controller.getPropagatedStack()).toEqual({
+      stack: "openai",
+      fallbackModel: baseModel,
+      fallbackThinking: undefined,
+    });
+    expect(h.calls.slice(-3)).toEqual([
+      "model:base",
+      "thinking:off",
+      `tools:read,${MANAGED_SUBAGENT_TOOLS.join(",")}`,
+    ]);
+    expect(h.setStatus).toHaveBeenLastCalledWith("subagents", "Lead · stack: openai");
+  });
+
   it("clears the primary status at session start and disposal", async () => {
     const h = harness(config(), { [PRIMARY_AGENT_FLAG]: "lead" });
 
@@ -330,6 +374,8 @@ describe("PrimaryController", () => {
       "error",
     );
     expect(h.controller.getStackArgumentCompletions("")?.map((item) => item.label)).toEqual([
+      "auto",
+      "default",
       "Lead",
     ]);
     expect(h.controller.getStackArgumentCompletions("worker ")).toBeNull();
@@ -461,6 +507,35 @@ describe("PrimaryController", () => {
       },
     ]);
     expect(h.controller.getStackArgumentCompletions("missing ")).toBeNull();
+  });
+
+  it("accepts an active primary stack as the first argument", async () => {
+    const lead = config({
+      stacks: new Map([
+        ["openai", { model: "anthropic/base", thinking: "low" }],
+        ["light", { model: "anthropic/primary", thinking: "high" }],
+      ]),
+    });
+    const h = harness(lead, { [PRIMARY_AGENT_FLAG]: "lead" });
+    await h.controller.handleSessionStart(h.ctx);
+    const waitForIdle = vi.fn(async () => undefined);
+
+    await h.controller.handleStackCommand("openai", {
+      ...h.ctx,
+      waitForIdle,
+    } as unknown as ExtensionCommandContext);
+
+    expect(waitForIdle).toHaveBeenCalledOnce();
+    expect(h.custom).not.toHaveBeenCalled();
+    expect(h.overrides.get(lead)).toBe("openai");
+    expect(h.controller.getPropagatedStack()?.stack).toBe("openai");
+    expect(h.controller.getStackArgumentCompletions("op")).toEqual([
+      {
+        value: "openai",
+        label: "openai",
+        description: "Select for active primary Lead.",
+      },
+    ]);
   });
 
   it("opens the active primary stack picker directly and waits only after selection", async () => {

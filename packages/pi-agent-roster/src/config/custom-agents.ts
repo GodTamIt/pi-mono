@@ -14,6 +14,7 @@ import type {
   ThinkingLevel,
   ToolPermissions,
 } from "../types.ts";
+import { sanitizeTerminalText } from "../ui/display.ts";
 
 const THINKING_LEVELS = new Set<ThinkingLevel>([
   "minimal",
@@ -29,6 +30,49 @@ const MODEL_PATTERN = /^[^/\s]+\/[^/\s]+$/;
 export interface CustomAgentDiscovery {
   agents: Map<string, AgentConfig>;
   diagnostics: AgentDiagnostic[];
+}
+
+interface DiagnosticUi {
+  notify(message: string, level: "warning"): void;
+}
+
+/** Routes each discovery diagnostic through the current session UI at most once. */
+export class CustomAgentDiagnosticReporter {
+  private latest = new Map<string, AgentDiagnostic>();
+  private reported = new Set<string>();
+  private ui: DiagnosticUi | undefined;
+
+  reportScan(diagnostics: readonly AgentDiagnostic[]): void {
+    this.latest = new Map(diagnostics.map((diagnostic) => [diagnosticKey(diagnostic), diagnostic]));
+    this.flush();
+  }
+
+  beginSession(ui: DiagnosticUi, reportBuffered = true): void {
+    this.ui = ui;
+    this.reported.clear();
+    if (!reportBuffered) this.latest.clear();
+    this.flush();
+  }
+
+  endSession(): void {
+    this.ui = undefined;
+  }
+
+  private flush(): void {
+    if (!this.ui) return;
+    for (const [key, diagnostic] of this.latest) {
+      if (this.reported.has(key)) continue;
+      this.reported.add(key);
+      this.ui.notify(
+        sanitizeTerminalText(`[pi-agent-roster] ${diagnostic.path}: ${diagnostic.message}`),
+        "warning",
+      );
+    }
+  }
+}
+
+function diagnosticKey(diagnostic: AgentDiagnostic): string {
+  return `${diagnostic.source}\0${diagnostic.path}\0${diagnostic.message}`;
 }
 
 /** Discover project definitions over global definitions without allowing one bad file to stop the scan. */

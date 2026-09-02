@@ -5,7 +5,6 @@
  * Consumed by the widget, the menu, tool modules, and the notification renderer.
  */
 
-import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import type { AgentConfigLookup } from "../config/agent-types.ts";
 import type { AgentInvocation, SubagentType, ThinkingLevel } from "../types.ts";
 import { GLYPHS } from "./glyphs.ts";
@@ -19,14 +18,66 @@ export type Theme = {
 
 /** Remove terminal controls from untrusted text before adding theme sequences. */
 export function sanitizeTerminalText(text: string, preserveNewlines = false): string {
-  return [...stripTerminalSequences(text)]
-    .map((character) => {
-      const code = character.charCodeAt(0);
-      if (character === "\n") return preserveNewlines ? character : " ";
-      if (character === "\t") return " ";
-      return code >= 32 && code !== 127 && (code < 128 || code > 159) ? character : "";
-    })
-    .join("");
+  let result = "";
+  for (let index = 0; index < text.length; ) {
+    const code = text.charCodeAt(index);
+    if (code === 0x1b) {
+      index = skipEscapeSequence(text, index);
+      continue;
+    }
+    if (code === 0x9b) {
+      index = skipCsi(text, index + 1);
+      continue;
+    }
+    if (code === 0x90 || code === 0x98 || code === 0x9d || code === 0x9e || code === 0x9f) {
+      index = skipControlString(text, index + 1, code === 0x9d);
+      continue;
+    }
+    if (code === 0x0a) result += preserveNewlines ? "\n" : " ";
+    else if (code === 0x09) result += " ";
+    else if (code >= 0x20 && code !== 0x7f && (code < 0x80 || code > 0x9f)) {
+      result += text[index];
+    }
+    index++;
+  }
+  return result;
+}
+
+function skipEscapeSequence(text: string, start: number): number {
+  const kind = text.charCodeAt(start + 1);
+  if (kind === 0x1b) return start + 1; // restart on doubled ESC, as terminals do
+  if (kind === 0x5b) return skipCsi(text, start + 2);
+  if (kind === 0x5d) return skipControlString(text, start + 2, true);
+  if (kind === 0x50 || kind === 0x58 || kind === 0x5e || kind === 0x5f) {
+    return skipControlString(text, start + 2, false);
+  }
+
+  let index = start + 1;
+  while (index < text.length && text.charCodeAt(index) >= 0x20 && text.charCodeAt(index) <= 0x2f) {
+    index++;
+  }
+  return index < text.length ? index + 1 : index;
+}
+
+function skipCsi(text: string, start: number): number {
+  let index = start;
+  while (index < text.length) {
+    const code = text.charCodeAt(index++);
+    if (code === 0x1b) return index - 1; // aborted CSI: reprocess the new ESC
+    if (code >= 0x40 && code <= 0x7e) break;
+  }
+  return index;
+}
+
+function skipControlString(text: string, start: number, bellTerminates: boolean): number {
+  let index = start;
+  while (index < text.length) {
+    const code = text.charCodeAt(index);
+    if ((bellTerminates && code === 0x07) || code === 0x9c) return index + 1;
+    if (code === 0x1b && text.charCodeAt(index + 1) === 0x5c) return index + 2;
+    index++;
+  }
+  return index;
 }
 
 /** Metadata attached to Agent tool results for custom rendering. */
@@ -58,6 +109,8 @@ export interface AgentDetails {
   turnCount?: number | undefined;
   /** Effective max turns (undefined = unlimited). */
   maxTurns?: number | undefined;
+  /** Current context-window utilization, or null when unavailable. */
+  contextPercent?: number | null | undefined;
   agentId?: string | undefined;
   childSessionId?: string | undefined;
   task?: string | undefined;

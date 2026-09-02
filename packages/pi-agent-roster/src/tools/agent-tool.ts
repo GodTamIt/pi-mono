@@ -12,7 +12,7 @@ import type { ChildRuntimeBaseline } from "../lifecycle/child-runtime-baseline.t
 import type { AgentSpawnConfig } from "../lifecycle/subagent-manager.ts";
 import type { AgentStackOverrides } from "../stacks/stack-resolver.ts";
 import type { ParentSessionInfo, Subagent } from "../types.ts";
-import type { AgentDetails, Theme } from "../ui/display.ts";
+import { type AgentDetails, sanitizeTerminalText, type Theme } from "../ui/display.ts";
 import { spawnBackground } from "./background-spawner.ts";
 import { runForeground } from "./foreground-runner.ts";
 import { buildAgentGuidelines, buildTypeListText, textResult } from "./helpers.ts";
@@ -22,8 +22,8 @@ import {
   renderInvocationRow,
 } from "./invocation-row.ts";
 import {
-  type PropagatedStackSelection,
   type ModelInfo,
+  type PropagatedStackSelection,
   resolveInvocationForAgent,
   resolveResumeConfig,
   resolveSpawnConfig,
@@ -336,7 +336,7 @@ ${guidelines}
         const details = result.details;
         if (!details) {
           const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-          return new Text(text, 0, 0);
+          return new Text(sanitizeTerminalText(text, true), 0, 0);
         }
         const resultText = result.content[0]?.type === "text" ? result.content[0].text : "";
         return renderInvocationRow(details, resultText, theme, context, invocationRows, getRecord);
