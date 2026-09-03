@@ -915,7 +915,7 @@ function findPackageRoot(startDir: string): string {
 		const packageJsonPath = join(currentDir, "package.json");
 		if (existsSync(packageJsonPath)) {
 			const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { name?: unknown };
-			if (packageJson.name === "@godtamit/pi-agent-browser" || packageJson.name === "pi-agent-browser") return currentDir;
+			if (packageJson.name === "@ohgodtamit/pi-agent-browser" || packageJson.name === "pi-agent-browser") return currentDir;
 		}
 		const parentDir = dirname(currentDir);
 		if (parentDir === currentDir) return startDir;

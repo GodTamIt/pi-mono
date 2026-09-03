@@ -4,7 +4,7 @@ import { join } from "node:path";
 const DIRECT_AGENT_BROWSER_BASH_BYPASS_ENV = "PI_AGENT_BROWSER_ALLOW_DIRECT_BASH";
 const DIRECT_AGENT_BROWSER_EXECUTABLE_PATTERN = /^(?:[.~]|\.\.?|\/)?(?:[^\s;&|]+\/)?agent-browser$/;
 const HARMLESS_AGENT_BROWSER_INSPECTION_PATTERN = /^\s*(?:command\s+-v|which|type\s+-P)\s+agent-browser\s*$/;
-const PACKAGE_NAMES = new Set(["@godtamit/pi-agent-browser", "pi-agent-browser"]);
+const PACKAGE_NAMES = new Set(["@ohgodtamit/pi-agent-browser", "pi-agent-browser"]);
 
 type ShellQuoteState = "double" | "single" | undefined;
 

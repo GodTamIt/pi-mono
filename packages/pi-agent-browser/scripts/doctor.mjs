@@ -3,7 +3,7 @@
  * Purpose: Diagnose first-run pi-agent-browser setup without mutating Pi or agent-browser state.
  * Responsibilities: Check upstream agent-browser PATH/version, inspect Pi settings for duplicate package/checkout sources, and print actionable remediation.
  * Scope: Read-only package diagnostics only; upstream browser runtime health remains the responsibility of upstream `agent-browser doctor`.
- * Usage: Run via `pi-agent-browser-doctor`, `npm exec --package @godtamit/pi-agent-browser -- pi-agent-browser-doctor`, or `npm run doctor` from this repository.
+ * Usage: Run via `pi-agent-browser-doctor`, `npm exec --package @ohgodtamit/pi-agent-browser -- pi-agent-browser-doctor`, or `npm run doctor` from this repository.
  * Invariants/Assumptions: The wrapper recommends TARGET_AGENT_BROWSER_VERSION without blocking other versions, does not bundle agent-browser, and must not edit Pi settings or run fixing commands.
  */
 
@@ -19,7 +19,7 @@ import { CAPABILITY_BASELINE_SOURCE } from "./agent-browser-capability-baseline.
 import { TARGET_AGENT_BROWSER_SOURCE, TARGET_AGENT_BROWSER_VERSION } from "./agent-browser-target.mjs";
 
 const execFile = promisify(execFileCallback);
-const PACKAGE_NAME = "@godtamit/pi-agent-browser";
+const PACKAGE_NAME = "@ohgodtamit/pi-agent-browser";
 const REPO_URL_FRAGMENT = "github.com/GodTamIt/pi-mono/tree/master/packages/pi-agent-browser";
 const EXTENSION_ENTRYPOINTS = Object.freeze([
 	"extensions/agent-browser/index.ts",
@@ -76,7 +76,7 @@ Checks:
 
 Examples:
   pi-agent-browser-doctor
-  npm exec --package @godtamit/pi-agent-browser -- pi-agent-browser-doctor
+  npm exec --package @ohgodtamit/pi-agent-browser -- pi-agent-browser-doctor
   npm run doctor
   pi-agent-browser-doctor --cwd /path/to/project --settings /tmp/pi-settings.json
 
@@ -161,7 +161,7 @@ function isPathLikeSource(source) {
 function sourceLooksLikeThisPackage(source, cwd, sourceBaseDir = cwd) {
 	const text = String(source ?? "").trim();
 	if (text.length === 0) return false;
-	if (/^npm:@godtamit\/pi-agent-browser(?:@|$)/.test(text)) return true;
+	if (/^npm:@ohgodtamit\/pi-agent-browser(?:@|$)/.test(text)) return true;
 	if (text === PACKAGE_NAME) return true;
 	if (text.includes(REPO_URL_FRAGMENT)) return true;
 
@@ -392,7 +392,7 @@ async function checkPiSources({ cwd, agentDir, settingsPaths, readText, pathExis
 				"Detected sources:",
 				...sources.map((source) => `- ${source.source} from ${source.location}`),
 				"Keep exactly one active source:",
-				"- for normal use: keep `pi install npm:@godtamit/pi-agent-browser` and remove/disable checkout paths from Pi settings",
+				"- for normal use: keep `pi install npm:@ohgodtamit/pi-agent-browser` and remove/disable checkout paths from Pi settings",
 				"- for temporary package or checkout trials: use `pi --approve --no-extensions -e <source>` when you intentionally trust the current project, or omit `--approve` to let Pi prompt in interactive mode",
 				"- for configured-source lifecycle validation: keep exactly one checkout or package source, then launch plain `pi`",
 			],
@@ -411,7 +411,7 @@ async function checkPiSources({ cwd, agentDir, settingsPaths, readText, pathExis
 		status: "warn",
 		title: "No configured pi-agent-browser source was found in inspected Pi settings.",
 		lines: [
-			"This is OK for isolated runs such as `pi --no-extensions -e npm:@godtamit/pi-agent-browser`, but normal package use should install exactly one source with `pi install npm:@godtamit/pi-agent-browser`.",
+			"This is OK for isolated runs such as `pi --no-extensions -e npm:@ohgodtamit/pi-agent-browser`, but normal package use should install exactly one source with `pi install npm:@ohgodtamit/pi-agent-browser`.",
 		],
 		warnings,
 	};

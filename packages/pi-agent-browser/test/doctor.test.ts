@@ -118,7 +118,7 @@ test("doctor warns instead of failing when Pi version cannot be inspected", asyn
 
 test("doctor reports duplicate package and checkout sources with remediation", async () => {
 	const settingsByPath = new Map([
-		["/agent/settings.json", JSON.stringify({ packages: ["npm:@godtamit/pi-agent-browser"] })],
+		["/agent/settings.json", JSON.stringify({ packages: ["npm:@ohgodtamit/pi-agent-browser"] })],
 		["/repo/.pi/settings.json", JSON.stringify({ extensions: ["/repo/extensions/agent-browser/index.ts"] })],
 	]);
 	const report = await evaluateDoctorWithPi({
@@ -133,14 +133,14 @@ test("doctor reports duplicate package and checkout sources with remediation", a
 	assert.equal(report.failures.length, 1);
 	assert.match(text, /Duplicate pi-agent-browser sources detected/);
 	assert.match(text, /`agent_browser`/);
-	assert.match(text, /npm:@godtamit\/pi-agent-browser/);
+	assert.match(text, /npm:@ohgodtamit\/pi-agent-browser/);
 	assert.match(text, /extensions\/agent-browser\/index\.ts/);
 	assert.match(text, /pi --approve --no-extensions -e <source>/);
 	assert.match(text, /keep exactly one active source/i);
 });
 
 test("doctor passes the source check when exactly one configured source is active", async () => {
-	const settingsByPath = new Map([["/agent/settings.json", JSON.stringify({ packages: ["npm:@godtamit/pi-agent-browser"] })]]);
+	const settingsByPath = new Map([["/agent/settings.json", JSON.stringify({ packages: ["npm:@ohgodtamit/pi-agent-browser"] })]]);
 	const report = await evaluateDoctorWithPi({
 		agentDir: "/agent",
 		cwd: "/repo",
@@ -152,7 +152,7 @@ test("doctor passes the source check when exactly one configured source is activ
 
 	assert.equal(report.failures.length, 0);
 	assert.match(text, /No duplicate pi-agent-browser sources detected/);
-	assert.match(text, /Detected source: npm:@godtamit\/pi-agent-browser/);
+	assert.match(text, /Detected source: npm:@ohgodtamit\/pi-agent-browser/);
 });
 
 test("doctor resolves relative package sources from their settings file directory", async () => {
@@ -224,7 +224,7 @@ test("doctor treats no configured source as an informational warning, not a fail
 
 test("doctor remains read-only through injected I/O", async () => {
 	const calls: string[] = [];
-	const settingsByPath = new Map([["/agent/settings.json", JSON.stringify({ packages: ["npm:@godtamit/pi-agent-browser"] })]]);
+	const settingsByPath = new Map([["/agent/settings.json", JSON.stringify({ packages: ["npm:@ohgodtamit/pi-agent-browser"] })]]);
 	const report = await evaluateDoctorWithPi({
 		agentDir: "/agent",
 		cwd: "/repo",

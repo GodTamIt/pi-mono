@@ -22,7 +22,7 @@ Primary-agent profiles and in-process subagent orchestration for Pi.
 
 [Package guide](./packages/pi-agent-roster/README.md)
 
-### [`@godtamit/pi-agent-browser`](./packages/pi-agent-browser/README.md)
+### [`@ohgodtamit/pi-agent-browser`](./packages/pi-agent-browser/README.md)
 
 Native `agent_browser` and `agent_browser_web_search` tools for Pi, packaged as a lean partial fork.
 

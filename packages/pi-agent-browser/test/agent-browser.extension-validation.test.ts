@@ -2108,7 +2108,7 @@ test("agentBrowserExtension blocks direct and wrapped agent-browser bash unless 
 	});
 
 	const packageDevDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-package-dev-"));
-	await writeFile(join(packageDevDir, "package.json"), JSON.stringify({ name: "@godtamit/pi-agent-browser" }), "utf8");
+	await writeFile(join(packageDevDir, "package.json"), JSON.stringify({ name: "@ohgodtamit/pi-agent-browser" }), "utf8");
 	const packageDevHarness = createExtensionHarness({ cwd: packageDevDir, prompt: "Open a page and summarize it." });
 	const packageDevAllowed = await runExtensionEventResults(
 		packageDevHarness.handlers,

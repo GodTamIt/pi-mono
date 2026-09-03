@@ -49,7 +49,7 @@ Define the product requirements and constraints for `pi-agent-browser`.
 ### Install priority
 
 - Prioritize the package install path first.
-- User-facing install docs should lead with `pi install npm:@godtamit/pi-agent-browser`; ephemeral package trials and validation should use `pi --no-extensions -e npm:@godtamit/pi-agent-browser[@<version>]` so configured checkout or global sources cannot duplicate `agent_browser`, adding `--approve` in Pi 0.84.0+ automation when the current project is intentionally trusted.
+- User-facing install docs should lead with `pi install npm:@ohgodtamit/pi-agent-browser`; ephemeral package trials and validation should use `pi --no-extensions -e npm:@ohgodtamit/pi-agent-browser[@<version>]` so configured checkout or global sources cannot duplicate `agent_browser`, adding `--approve` in Pi 0.84.0+ automation when the current project is intentionally trusted.
 - Preserve donor repository URLs in provenance and attribution rather than presenting them as the fork's install source.
 - Provide a read-only package-level doctor command that checks upstream `agent-browser` PATH/version and duplicate Pi package/checkout sources before first use. It must not mutate Pi settings and must remain distinct from upstream `agent-browser doctor`.
 - Keep the current local-checkout path documented as the practical pre-release and development flow.

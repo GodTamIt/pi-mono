@@ -905,7 +905,7 @@ When these commands are invoked through the native `agent_browser` tool, structu
 
 Get an Exa API key from the [Exa dashboard](https://dashboard.exa.ai/api-keys) or a Brave Search API key from the [Brave Search API dashboard](https://api-dashboard.search.brave.com/). If both keys are available, `agent_browser_web_search` prefers Exa by default because its `/search` endpoint returns token-efficient highlights and agent-oriented search modes; set `webSearch.preferredProvider` to `"brave"` when Brave Search is preferred. You can also disable this package's search tool with `webSearch.enabled: false` when another search tool should win. Config merges global → project → `PI_AGENT_BROWSER_CONFIG` override, so `enabled` is read from the final loaded config: a global disable can be re-enabled by project or override config, while an override file with `enabled: false` is the highest-priority hard disable for that run. Under Pi 0.84.0+, globally installed or CLI-loaded extensions are developer-trusted code, so this extension reads project-local config under `.pi/config/...` by default and skips that project layer when Pi reports the project is untrusted or when launched with `--no-approve`.
 
-`pi install npm:@godtamit/pi-agent-browser` loads the extension, but it does **not** usually put the package helper on your shell `PATH`. The clearest setup is to write the config file directly and keep actual keys in the environment that launches `pi`:
+`pi install npm:@ohgodtamit/pi-agent-browser` loads the extension, but it does **not** usually put the package helper on your shell `PATH`. The clearest setup is to write the config file directly and keep actual keys in the environment that launches `pi`:
 
 ```bash
 mkdir -p ~/.pi/config/pi-agent-browser
@@ -926,18 +926,18 @@ JSON
 `pi install` does not add package helper binaries to your shell `PATH`. Use direct JSON config edits, or run the helper only through `npm exec`:
 
 ```bash
-npm exec --yes --package @godtamit/pi-agent-browser@latest -- pi-agent-browser-config paths
-npm exec --yes --package @godtamit/pi-agent-browser@latest -- pi-agent-browser-config show
-npm exec --yes --package @godtamit/pi-agent-browser@latest -- pi-agent-browser-config web-search set-env EXA_API_KEY --global
-npm exec --yes --package @godtamit/pi-agent-browser@latest -- pi-agent-browser-config web-search set-env BRAVE_API_KEY --global
-npm exec --yes --package @godtamit/pi-agent-browser@latest -- pi-agent-browser-config web-search set-env EXA_API_KEY --project
-npm exec --yes --package @godtamit/pi-agent-browser@latest -- pi-agent-browser-config web-search prefer brave --global
-npm exec --yes --package @godtamit/pi-agent-browser@latest -- pi-agent-browser-config web-search disable --global
-npm exec --yes --package @godtamit/pi-agent-browser@latest -- pi-agent-browser-config web-search disable --project
-npm exec --yes --package @godtamit/pi-agent-browser@latest -- pi-agent-browser-config web-search set-command "op read 'op://Private/Brave Search/API Key'" --provider brave --global
-printf '%s' "$EXA_API_KEY" | npm exec --yes --package @godtamit/pi-agent-browser@latest -- pi-agent-browser-config web-search set-key --provider exa --stdin
-npm exec --yes --package @godtamit/pi-agent-browser@latest -- pi-agent-browser-config browser profile set "Profile 1" --policy authenticated-only
-npm exec --yes --package @godtamit/pi-agent-browser@latest -- pi-agent-browser-config browser executable set "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+npm exec --yes --package @ohgodtamit/pi-agent-browser@latest -- pi-agent-browser-config paths
+npm exec --yes --package @ohgodtamit/pi-agent-browser@latest -- pi-agent-browser-config show
+npm exec --yes --package @ohgodtamit/pi-agent-browser@latest -- pi-agent-browser-config web-search set-env EXA_API_KEY --global
+npm exec --yes --package @ohgodtamit/pi-agent-browser@latest -- pi-agent-browser-config web-search set-env BRAVE_API_KEY --global
+npm exec --yes --package @ohgodtamit/pi-agent-browser@latest -- pi-agent-browser-config web-search set-env EXA_API_KEY --project
+npm exec --yes --package @ohgodtamit/pi-agent-browser@latest -- pi-agent-browser-config web-search prefer brave --global
+npm exec --yes --package @ohgodtamit/pi-agent-browser@latest -- pi-agent-browser-config web-search disable --global
+npm exec --yes --package @ohgodtamit/pi-agent-browser@latest -- pi-agent-browser-config web-search disable --project
+npm exec --yes --package @ohgodtamit/pi-agent-browser@latest -- pi-agent-browser-config web-search set-command "op read 'op://Private/Brave Search/API Key'" --provider brave --global
+printf '%s' "$EXA_API_KEY" | npm exec --yes --package @ohgodtamit/pi-agent-browser@latest -- pi-agent-browser-config web-search set-key --provider exa --stdin
+npm exec --yes --package @ohgodtamit/pi-agent-browser@latest -- pi-agent-browser-config browser profile set "Profile 1" --policy authenticated-only
+npm exec --yes --package @ohgodtamit/pi-agent-browser@latest -- pi-agent-browser-config browser executable set "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
 ```
 
 The optional `agent_browser_web_search` tool is available when Exa or Brave credentials are visible from startup config or trusted session config and the runtime config has not set `webSearch.enabled` to `false`. It is a separate custom tool, not an `agent_browser` input mode, and does not launch a browser. Prefer it for current/live external web facts and URL discovery; use `agent_browser` for browser interaction, screenshots, authenticated/profile pages, and DOM inspection after you have a target URL. Prefer it over driving public search-engine forms such as Google with browser `job`/`type` flows, which can redirect headless automation to anti-bot or CAPTCHA pages; do not attempt CAPTCHA bypass. Disable scope is explicit: `web-search disable --global` sets the normal user default, `web-search disable --project` disables it for one repo, and a `PI_AGENT_BROWSER_CONFIG` override containing `{ "version": 1, "webSearch": { "enabled": false } }` wins over both for a hard per-run disable. Loaded config may use plaintext, custom env aliases, interpolation literals, malformed-or-late-bound `$` values, and command-backed web-search keys; the resolved secret reaches the provider request while model-facing tool output and status text stay redacted. `web-search set-key`, `set-command`, and `clear` require `--provider`; `set-env` infers Exa/Brave from `EXA_API_KEY` or `BRAVE_API_KEY` unless you pass `--provider`.

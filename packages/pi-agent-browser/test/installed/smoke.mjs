@@ -16,7 +16,7 @@ try {
   if (!packed) throw new Error("npm pack output did not contain a filename");
   writeFileSync(join(installDir, "package.json"), "{\"private\":true,\"type\":\"module\"}\n");
   execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock", join(packDir, packed.filename), "@earendil-works/pi-coding-agent@0.84.3", "@earendil-works/pi-ai@0.84.3", "@earendil-works/pi-tui@0.84.3", "typebox@1.3.7"], { cwd: installDir, stdio: "inherit" });
-  const installed = join(installDir, "node_modules", "@godtamit", "pi-agent-browser");
+  const installed = join(installDir, "node_modules", "@ohgodtamit", "pi-agent-browser");
   const manifest = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"));
   if (manifest.version !== "0.1.0") throw new Error(`Unexpected version ${manifest.version}`);
   if (!existsSync(join(installDir, "node_modules", ".bin", process.platform === "win32" ? "pi-agent-browser-doctor.cmd" : "pi-agent-browser-doctor"))) throw new Error("Doctor bin was not installed");

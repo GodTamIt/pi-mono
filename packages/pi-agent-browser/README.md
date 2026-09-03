@@ -1,4 +1,4 @@
-# @godtamit/pi-agent-browser
+# @ohgodtamit/pi-agent-browser
 
 A lean native [agent-browser](https://agent-browser.dev/) integration for Pi. This package is a partial fork of [`pi-agent-browser-native`](https://github.com/fitchmultz/pi-agent-browser-native) and retains the public tools `agent_browser` and `agent_browser_web_search`, plus the `pi-agent-browser-doctor` and `pi-agent-browser-config` bins.
 
@@ -11,7 +11,7 @@ A lean native [agent-browser](https://agent-browser.dev/) integration for Pi. Th
 ## Install
 
 ```sh
-pi install npm:@godtamit/pi-agent-browser
+pi install npm:@ohgodtamit/pi-agent-browser
 npm install -g agent-browser
 pi-agent-browser-doctor
 ```
@@ -35,10 +35,10 @@ Configuration is stored under `.pi/config/pi-agent-browser/config.json` or `~/.p
 ## Development
 
 ```sh
-npm run typecheck --workspace @godtamit/pi-agent-browser
-npm run unit --workspace @godtamit/pi-agent-browser
-npm run pack:inspect --workspace @godtamit/pi-agent-browser
-npm run smoke:installed --workspace @godtamit/pi-agent-browser
+npm run typecheck --workspace @ohgodtamit/pi-agent-browser
+npm run unit --workspace @ohgodtamit/pi-agent-browser
+npm run pack:inspect --workspace @ohgodtamit/pi-agent-browser
+npm run smoke:installed --workspace @ohgodtamit/pi-agent-browser
 ```
 
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for pinned donor provenance and retained MIT attribution.
