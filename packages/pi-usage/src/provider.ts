@@ -393,20 +393,51 @@ async function fetchZaiPlanQuota(
   return classifyZaiLimits(payload.data.limits, payload.data.level ?? "");
 }
 
+const CODEX_FIVE_HOUR_SECONDS = 5 * 60 * 60;
+const CODEX_WEEK_SECONDS = 7 * 24 * 60 * 60;
+
+type PlanQuotaWindow = NonNullable<NonNullable<ProviderQuota["planQuota"]>["session5h"]>;
+
+interface CodexQuotaWindow {
+  usedPct?: number;
+  resetAtSeconds?: number;
+  windowSeconds?: number;
+}
+
+function classifyCodexWindows(
+  primary?: CodexQuotaWindow | null,
+  secondary?: CodexQuotaWindow | null,
+): { session5h?: PlanQuotaWindow; weekly?: PlanQuotaWindow } {
+  const windows = [primary, secondary].filter((window): window is CodexQuotaWindow => !!window);
+  const fiveHour = windows.find((window) => window.windowSeconds === CODEX_FIVE_HOUR_SECONDS);
+  const weekly = windows.find((window) => window.windowSeconds === CODEX_WEEK_SECONDS);
+
+  // Older responses omitted durations and consistently used primary for 5h and
+  // secondary for weekly. Only use that positional fallback for an unclassified window.
+  const sessionSource = fiveHour ?? (primary?.windowSeconds == null ? primary : undefined);
+  const weeklySource = weekly ?? (secondary?.windowSeconds == null ? secondary : undefined);
+  const materialize = (window?: CodexQuotaWindow | null): PlanQuotaWindow | undefined =>
+    window?.usedPct != null && window.resetAtSeconds != null
+      ? { usedPct: window.usedPct, resetMs: window.resetAtSeconds * 1000 }
+      : undefined;
+
+  return {
+    session5h: materialize(sessionSource),
+    weekly: materialize(weeklySource),
+  };
+}
+
 /**
  * Parse OpenAI Codex subscription quota from response headers captured via
- * `after_provider_response`. This is the reliable path: the headers come fresh
- * from pi's own authenticated Codex request, so there is no token/refresh
- * management (unlike the `/wham/usage` REST endpoint, whose OAuth token in
- * `~/.codex/auth.json` is frequently stale/rotated).
+ * `after_provider_response`. Window durations determine the labels because
+ * OpenAI may report a weekly-only quota in the primary slot.
  *
  * Header families (authoritative: openai/codex rate_limits.rs):
- *   x-codex-primary-used-percent        — 5h rolling window used % (0-100)
- *   x-codex-primary-reset-at            — unix SECONDS of next reset
- *   x-codex-secondary-used-percent      — 7-day rolling window used %
- *   x-codex-secondary-reset-at          — unix SECONDS
+ *   x-codex-{primary,secondary}-used-percent    — window used % (0-100)
+ *   x-codex-{primary,secondary}-window-minutes  — window duration
+ *   x-codex-{primary,secondary}-reset-at        — unix seconds of next reset
  *   x-codex-credits-has-credits / -unlimited / -balance  — purchased credits
- *   x-codex-limit-name                  — plan/limit display name
+ *   x-codex-limit-name                          — plan/limit display name
  *
  * Returns the planQuota shape (shared with ZAI) when any Codex window is present.
  */
@@ -425,8 +456,10 @@ export function parseCodexQuota(
 
   const pctPrimary = num(get("x-codex-primary-used-percent"));
   const pctSecondary = num(get("x-codex-secondary-used-percent"));
-  const resetPrimary = num(get("x-codex-primary-reset-at")); // unix seconds
+  const resetPrimary = num(get("x-codex-primary-reset-at"));
   const resetSecondary = num(get("x-codex-secondary-reset-at"));
+  const minutesPrimary = num(get("x-codex-primary-window-minutes"));
+  const minutesSecondary = num(get("x-codex-secondary-window-minutes"));
   const limitName = get("x-codex-limit-name");
 
   if (pctPrimary == null && pctSecondary == null) return undefined;
@@ -441,35 +474,40 @@ export function parseCodexQuota(
     credits = { balance, unlimited };
   }
 
+  const windows = classifyCodexWindows(
+    {
+      usedPct: pctPrimary,
+      resetAtSeconds: resetPrimary,
+      windowSeconds: minutesPrimary == null ? undefined : minutesPrimary * 60,
+    },
+    {
+      usedPct: pctSecondary,
+      resetAtSeconds: resetSecondary,
+      windowSeconds: minutesSecondary == null ? undefined : minutesSecondary * 60,
+    },
+  );
+
   return {
     plan: limitName ?? "codex",
-    session5h:
-      pctPrimary != null && resetPrimary != null
-        ? { usedPct: pctPrimary, resetMs: resetPrimary * 1000 }
-        : undefined,
-    weekly:
-      pctSecondary != null && resetSecondary != null
-        ? { usedPct: pctSecondary, resetMs: resetSecondary * 1000 }
-        : undefined,
+    ...windows,
     credits,
   };
 }
 
 const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 
+interface CodexUsageWindow {
+  used_percent?: number;
+  reset_at?: number;
+  limit_window_seconds?: number;
+}
+
 interface CodexUsage {
   plan_type?: string;
   rate_limit?: {
-    primary_window?: {
-      used_percent?: number;
-      reset_at?: number;
-      limit_window_seconds?: number;
-    };
-    secondary_window?: {
-      used_percent?: number;
-      reset_at?: number;
-      limit_window_seconds?: number;
-    };
+    limit_name?: string;
+    primary_window?: CodexUsageWindow | null;
+    secondary_window?: CodexUsageWindow | null;
   };
   credits?: {
     has_credits?: boolean;
@@ -561,23 +599,24 @@ export async function fetchCodexQuota(
   const rl = json.rate_limit;
   const primary = rl?.primary_window;
   const secondary = rl?.secondary_window;
-  const plan: string =
-    (rl && (rl as { limit_name?: string }).limit_name) || json.plan_type || "codex";
+  const plan = rl?.limit_name || json.plan_type || "codex";
+  const windows = classifyCodexWindows(
+    primary && {
+      usedPct: primary.used_percent,
+      resetAtSeconds: primary.reset_at,
+      windowSeconds: primary.limit_window_seconds,
+    },
+    secondary && {
+      usedPct: secondary.used_percent,
+      resetAtSeconds: secondary.reset_at,
+      windowSeconds: secondary.limit_window_seconds,
+    },
+  );
 
   return {
     quota: {
       plan,
-      session5h:
-        primary?.used_percent != null && primary.reset_at != null
-          ? { usedPct: primary.used_percent, resetMs: primary.reset_at * 1000 }
-          : undefined,
-      weekly:
-        secondary?.used_percent != null && secondary.reset_at != null
-          ? {
-              usedPct: secondary.used_percent,
-              resetMs: secondary.reset_at * 1000,
-            }
-          : undefined,
+      ...windows,
       credits: json.credits
         ? {
             balance: Number(json.credits.balance ?? 0),

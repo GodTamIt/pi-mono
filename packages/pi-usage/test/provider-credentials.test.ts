@@ -1,7 +1,12 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { detectActiveProvider, fetchCodexQuota, resolveApiKey } from "../src/provider.ts";
+import {
+  detectActiveProvider,
+  fetchCodexQuota,
+  parseCodexQuota,
+  resolveApiKey,
+} from "../src/provider.ts";
 
 function registry(methods: Partial<ModelRegistry>): ModelRegistry {
   return methods as ModelRegistry;
@@ -73,5 +78,49 @@ describe("model registry credential access", () => {
       Authorization: `Bearer ${accessToken}`,
       "ChatGPT-Account-Id": "account-from-fresh-token",
     });
+  });
+
+  it("recognizes a weekly-only Pro quota reported in the primary REST window", async () => {
+    const getApiKeyForProvider = vi.fn().mockResolvedValue("fresh-access-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            plan_type: "pro",
+            rate_limit: {
+              primary_window: {
+                used_percent: 37,
+                reset_at: 1_800_000_000,
+                limit_window_seconds: 604_800,
+              },
+              secondary_window: null,
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
+
+    const result = await fetchCodexQuota(registry({ getApiKeyForProvider }));
+
+    expect(result?.quota?.session5h).toBeUndefined();
+    expect(result?.quota?.weekly).toEqual({ usedPct: 37, resetMs: 1_800_000_000_000 });
+  });
+});
+
+describe("Codex quota response headers", () => {
+  it("classifies windows by duration rather than primary/secondary position", () => {
+    const quota = parseCodexQuota({
+      "x-codex-primary-used-percent": "71",
+      "x-codex-primary-window-minutes": "10080",
+      "x-codex-primary-reset-at": "1800000000",
+      "x-codex-secondary-used-percent": "23",
+      "x-codex-secondary-window-minutes": "300",
+      "x-codex-secondary-reset-at": "1799500000",
+    });
+
+    expect(quota?.session5h).toEqual({ usedPct: 23, resetMs: 1_799_500_000_000 });
+    expect(quota?.weekly).toEqual({ usedPct: 71, resetMs: 1_800_000_000_000 });
   });
 });
