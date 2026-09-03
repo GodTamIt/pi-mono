@@ -178,4 +178,14 @@ describe("UsageView rendering", () => {
     expect(visibleWidth(footer)).toBeLessThanOrEqual(40);
     expect(footer).toContain("q");
   });
+
+  it("shares semantic actions with terminal key handling without changing TUI controls", () => {
+    const view = makeView(report, "overview");
+    view.applyAction({ type: "view", view: "models" });
+    expect(view.render(100).join("\n")).toContain("Models");
+    view.handleInput("7");
+    expect(view.activeView).toBe("providers");
+    view.applyAction({ type: "providerSort", sort: "name" });
+    expect(view.render(100).join("\n")).toContain("sort: name");
+  });
 });

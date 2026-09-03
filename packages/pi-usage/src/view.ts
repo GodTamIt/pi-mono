@@ -10,14 +10,14 @@ import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
+  type AttributionMaps,
   agentStats,
   agentTopModel,
-  type AttributionMaps,
   availableYears,
   type Bucket,
   bucketTokens,
-  computeStats,
   type ContribGraph,
+  computeStats,
   contributionGraph,
   dailyStats,
   dayTopModel,
@@ -27,17 +27,17 @@ import {
   hourTopModel,
   metricValue,
   naturalMetric,
-  ranked,
+  type Report,
   rangeLabel,
   rangeSince,
-  type Report,
+  ranked,
   type StatsRange,
   tokensPerSecond,
-  type WrappedStats,
-  wrappedStats,
   type WindowedReport,
   type WindowKey,
+  type WrappedStats,
   windowize,
+  wrappedStats,
 } from "./aggregate.ts";
 import {
   formatCost,
@@ -58,10 +58,10 @@ import {
   renderMascot,
   renderWrappedMascot,
   toolGlyph,
-  wrappedMascotCaption,
   VIEW_ORDER,
   VIEW_TABS,
   type ViewKey,
+  wrappedMascotCaption,
 } from "./mascot.ts";
 import type { ProviderQuota } from "./provider.ts";
 
@@ -73,6 +73,20 @@ type SortKey = "value" | "name";
 /** Sort field + direction for the Daily table. */
 type DailySortField = "tokens" | "cost" | "date";
 type SortDir = "asc" | "desc";
+
+/** Semantic controls shared by terminal key handling and portable UI clients. */
+export type UsageAction =
+  | { type: "view"; view: ViewKey }
+  | { type: "window"; window: WindowKey }
+  | { type: "modelSort"; sort: SortKey }
+  | { type: "dailySort"; sort: DailySortField }
+  | { type: "statsRange"; range: StatsRange }
+  | { type: "providerSort"; sort: SortKey }
+  | { type: "wrappedYear"; year: number }
+  | { type: "wrappedYearDelta"; delta: number }
+  | { type: "refresh" }
+  | { type: "configure" }
+  | { type: "close" };
 
 export interface UsageViewDeps {
   theme: Theme;
@@ -114,6 +128,7 @@ interface ViewState {
 
 export class UsageView {
   private readonly deps: UsageViewDeps;
+  private portableRendering = false;
   private state: ViewState = {
     report: undefined,
     windowKey: "24h",
@@ -136,8 +151,62 @@ export class UsageView {
 
   /** Set the initial view (used by /usage-models, /usage-daily, … shortcuts). */
   setInitialView(view: ViewKey): void {
-    this.state.view = view;
-    this.deps.tui?.requestRender();
+    this.applyAction({ type: "view", view });
+  }
+
+  get activeView(): ViewKey {
+    return this.state.view;
+  }
+
+  get wrappedYears(): number[] {
+    return this.state.report ? availableYears(this.state.report) : [];
+  }
+
+  /** Apply a UI-independent dashboard action. */
+  applyAction(action: UsageAction): void {
+    switch (action.type) {
+      case "view":
+        this.setView(action.view);
+        break;
+      case "window":
+        this.setWindow(action.window);
+        break;
+      case "modelSort":
+        this.state.sortKey = action.sort;
+        this.state.scroll = 0;
+        this.deps.tui?.requestRender();
+        break;
+      case "dailySort":
+        this.setDailySort(action.sort);
+        break;
+      case "statsRange":
+        this.setStatsRange(action.range);
+        break;
+      case "providerSort":
+        this.state.agentSortKey = action.sort;
+        this.state.scroll = 0;
+        this.deps.tui?.requestRender();
+        break;
+      case "wrappedYear":
+        if (this.wrappedYears.includes(action.year)) {
+          this.state.wrappedYear = action.year;
+          this.state.scroll = 0;
+          this.deps.tui?.requestRender();
+        }
+        break;
+      case "wrappedYearDelta":
+        this.cycleWrappedYear(action.delta);
+        break;
+      case "refresh":
+        this.deps.onRefresh();
+        break;
+      case "configure":
+        this.deps.onConfigure();
+        break;
+      case "close":
+        this.deps.onClose();
+        break;
+    }
   }
 
   /** Re-bind the TUI/theme/close callback once pi's custom() factory runs. */
@@ -180,7 +249,7 @@ export class UsageView {
 
   handleInput(data: string): void {
     if (matchesKey(data, "q") || matchesKey(data, Key.escape)) {
-      this.deps.onClose();
+      this.applyAction({ type: "close" });
       return;
     }
     // View navigation: Tab / Shift+Tab + arrows + number keys.
@@ -193,66 +262,64 @@ export class UsageView {
       return;
     }
     if (data === "1") {
-      this.setView("overview");
+      this.applyAction({ type: "view", view: "overview" });
       return;
     }
     if (data === "2") {
-      this.setView("models");
+      this.applyAction({ type: "view", view: "models" });
       return;
     }
     if (data === "3") {
-      this.setView("delegation");
+      this.applyAction({ type: "view", view: "delegation" });
       return;
     }
     if (data === "4") {
-      this.setView("daily");
+      this.applyAction({ type: "view", view: "daily" });
       return;
     }
     if (data === "6") {
-      this.setView("hourly");
+      this.applyAction({ type: "view", view: "hourly" });
       return;
     }
     if (data === "7") {
-      this.setView("providers");
+      this.applyAction({ type: "view", view: "providers" });
       return;
     }
     if (data === "8") {
-      this.setView("wrapped");
+      this.applyAction({ type: "view", view: "wrapped" });
       return;
     }
     if (data === "5") {
       if (this.state.view === "overview" || this.state.view === "models") {
-        this.setWindow("5h");
+        this.applyAction({ type: "window", window: "5h" });
         return;
       }
-      this.setView("stats");
+      this.applyAction({ type: "view", view: "stats" });
       return;
     }
     // Wrapped AI: [ / ] or y cycle calendar years.
     if (this.state.view === "wrapped") {
       if (data === "[") {
-        this.cycleWrappedYear(-1);
+        this.applyAction({ type: "wrappedYearDelta", delta: -1 });
         return;
       }
       if (data === "]") {
-        this.cycleWrappedYear(1);
+        this.applyAction({ type: "wrappedYearDelta", delta: 1 });
         return;
       }
       if (matchesKey(data, "y")) {
-        this.cycleWrappedYear(1);
+        this.applyAction({ type: "wrappedYearDelta", delta: 1 });
         return;
       }
     }
     // Providers view: c/n sort by usage or name.
     if (this.state.view === "providers") {
       if (matchesKey(data, "c") || matchesKey(data, "t")) {
-        this.state.agentSortKey = "value";
-        this.deps.tui?.requestRender();
+        this.applyAction({ type: "providerSort", sort: "value" });
         return;
       }
       if (matchesKey(data, "n")) {
-        this.state.agentSortKey = "name";
-        this.deps.tui?.requestRender();
+        this.applyAction({ type: "providerSort", sort: "name" });
         return;
       }
     }
@@ -260,15 +327,15 @@ export class UsageView {
     // window-key handlers, since the time window doesn't apply to Stats).
     if (this.state.view === "stats") {
       if (matchesKey(data, "a")) {
-        this.setStatsRange("all");
+        this.applyAction({ type: "statsRange", range: "all" });
         return;
       }
       if (matchesKey(data, "w")) {
-        this.setStatsRange("7d");
+        this.applyAction({ type: "statsRange", range: "7d" });
         return;
       }
       if (matchesKey(data, "m")) {
-        this.setStatsRange("30d");
+        this.applyAction({ type: "statsRange", range: "30d" });
         return;
       }
     }
@@ -276,47 +343,45 @@ export class UsageView {
     // direction. Intercept before the global sort/window handlers.
     if (this.state.view === "daily") {
       if (matchesKey(data, "t")) {
-        this.setDailySort("tokens");
+        this.applyAction({ type: "dailySort", sort: "tokens" });
         return;
       }
       if (matchesKey(data, "c")) {
-        this.setDailySort("cost");
+        this.applyAction({ type: "dailySort", sort: "cost" });
         return;
       }
       if (matchesKey(data, "d")) {
-        this.setDailySort("date");
+        this.applyAction({ type: "dailySort", sort: "date" });
         return;
       }
     }
     // Sorting (Models & Daily tables).
     if (this.state.view === "models" && (matchesKey(data, "c") || matchesKey(data, "t"))) {
-      this.state.sortKey = "value";
-      this.deps.tui?.requestRender();
+      this.applyAction({ type: "modelSort", sort: "value" });
       return;
     }
     if (this.state.view === "models" && matchesKey(data, "n")) {
-      this.state.sortKey = "name";
-      this.deps.tui?.requestRender();
+      this.applyAction({ type: "modelSort", sort: "name" });
       return;
     }
     if (matchesKey(data, "d")) {
-      this.setWindow("24h");
+      this.applyAction({ type: "window", window: "24h" });
       return;
     }
     if (matchesKey(data, "w")) {
-      this.setWindow("7d");
+      this.applyAction({ type: "window", window: "7d" });
       return;
     }
     if (matchesKey(data, "a")) {
-      this.setWindow("all");
+      this.applyAction({ type: "window", window: "all" });
       return;
     }
     if (matchesKey(data, "r")) {
-      this.deps.onRefresh();
+      this.applyAction({ type: "refresh" });
       return;
     }
     if (matchesKey(data, "s")) {
-      this.deps.onConfigure();
+      this.applyAction({ type: "configure" });
       return;
     }
     if (matchesKey(data, "j") || matchesKey(data, Key.down)) {
@@ -347,7 +412,7 @@ export class UsageView {
 
   render(width: number): string[] {
     const { theme } = this.deps;
-    const all = this.buildLines(width).map((line) => this.clampLine(line, width));
+    const all = this.buildLines(width, false).map((line) => this.clampLine(line, width));
     const height = this.availableHeight();
 
     if (all.length <= height) {
@@ -368,6 +433,16 @@ export class UsageView {
     const pad = Math.max(0, width - visibleWidth(last) - indicatorW);
     slice[slice.length - 1] = last + " ".repeat(pad) + theme.fg("dim", indicator);
     return slice;
+  }
+
+  /** Render all lines without terminal viewport assumptions or key-based instructions. */
+  renderPortable(width: number): string[] {
+    this.portableRendering = true;
+    try {
+      return this.buildLines(width, true).map((line) => this.clampLine(line, width));
+    } finally {
+      this.portableRendering = false;
+    }
   }
 
   /** Final width clamp so one long line can never break the TUI layout. */
@@ -452,14 +527,14 @@ export class UsageView {
     if (this.state.scroll < 0) this.state.scroll = 0;
   }
 
-  private buildLines(width: number): string[] {
+  private buildLines(width: number, portable: boolean): string[] {
     const { theme } = this.deps;
     const lines: string[] = [];
     const w = Math.max(40, width);
 
     lines.push(theme.fg("borderMuted", "─".repeat(w)));
     lines.push(this.titleLineRaw(w));
-    for (const menuLine of this.menuLines(w)) {
+    for (const menuLine of portable ? this.portableMenuLines(w) : this.menuLines(w)) {
       lines.push(menuLine);
     }
 
@@ -467,7 +542,7 @@ export class UsageView {
       lines.push("");
       lines.push(`  ${theme.fg("error", this.state.error)}`);
       lines.push("");
-      lines.push(this.footerLine(w));
+      lines.push(portable ? this.portableFooterLine(w) : this.footerLine(w));
       lines.push(theme.fg("borderMuted", "─".repeat(w)));
       return lines;
     }
@@ -478,7 +553,7 @@ export class UsageView {
       const msg = prog ? `Scanning sessions… ${prog.loaded}/${prog.total}` : "Scanning sessions…";
       lines.push(`  ${theme.fg("accent", msg)}`);
       lines.push("");
-      lines.push(this.footerLine(w));
+      lines.push(portable ? this.portableFooterLine(w) : this.footerLine(w));
       lines.push(theme.fg("borderMuted", "─".repeat(w)));
       return lines;
     }
@@ -510,7 +585,7 @@ export class UsageView {
         break;
     }
 
-    lines.push(this.footerLine(w));
+    lines.push(portable ? this.portableFooterLine(w) : this.footerLine(w));
     lines.push(theme.fg("borderMuted", "─".repeat(w)));
     return lines;
   }
@@ -580,7 +655,9 @@ export class UsageView {
     // Compact top models for at-a-glance context (full table in Models view).
     const total = unit === "tokens" ? bucketTokens(win.total) : win.total.cost;
     this.appendSection(lines, "Top models", win.byModel, total, w, 5, undefined, unit);
-    lines.push(`  ${theme.fg("dim", "→ Tab or 1-8 to explore · ✦8 opens Wrapped AI")}`);
+    lines.push(
+      `  ${theme.fg("dim", this.portableRendering ? "Use the action menu to explore other views." : "→ Tab or 1-8 to explore · ✦8 opens Wrapped AI")}`,
+    );
   }
 
   /** Render the always-on quota bars (plan quota or session-derived budget). */
@@ -786,7 +863,9 @@ export class UsageView {
     lines.push(`  ${theme.fg("accent", theme.bold("Composition"))}`);
     if (w < 54) {
       // Narrow terminals: stack so the delegated half is never clamped away.
-      lines.push(`  ${theme.fg("text", `Direct ${formatTokens(direct)} (${percent(direct, total)})`)}`);
+      lines.push(
+        `  ${theme.fg("text", `Direct ${formatTokens(direct)} (${percent(direct, total)})`)}`,
+      );
       lines.push(
         `  ${theme.fg("muted", `Delegated ${formatTokens(delegated)} (${percent(delegated, total)})`)}`,
       );
@@ -805,7 +884,10 @@ export class UsageView {
       ["Child sessions", `${c.childCount}`],
       ["Parents", `${c.parentCount}`],
       // Recorded timing is a plain number; only inferred timing is flagged.
-      ["Peak concurrency", c.peak == null ? "—" : c.inferred ? `${c.peak} (inferred)` : `${c.peak}`],
+      [
+        "Peak concurrency",
+        c.peak == null ? "—" : c.inferred ? `${c.peak} (inferred)` : `${c.peak}`,
+      ],
       ["Union wall span", c.unionMs == null ? "—" : formatDuration(c.unionMs)],
       ["Summed spans", c.summedMs == null ? "—" : formatDuration(c.summedMs)],
       ["Parallelism", c.parallelism == null ? "—" : `${c.parallelism.toFixed(2)}×`],
@@ -1190,7 +1272,9 @@ export class UsageView {
         theme.fg("accent", "█".repeat(filled)) + theme.fg("borderMuted", "░".repeat(barW - filled));
       const tokStr = showProj ? formatTokens(value).padEnd(tokW) : formatTokens(value);
       const top = agentTopModel(a);
-      const projCell = showProj ? ` ${theme.fg("success", formatInt(a.projects.size).padStart(projW))}` : "";
+      const projCell = showProj
+        ? ` ${theme.fg("success", formatInt(a.projects.size).padStart(projW))}`
+        : "";
       lines.push(
         `  ${theme.fg("text", name)} ${theme.fg("muted", pctStr)} ${barStr} ${theme.fg("dim", tokStr)}${projCell}`,
       );
@@ -1230,8 +1314,11 @@ export class UsageView {
         content.push(`  ${theme.fg("muted", "No activity recorded")}`);
         content.push(`  ${theme.fg("dim", `Nothing to summarize for ${year}.`)}`);
         if (years.length > 0) {
+          const instruction = this.portableRendering
+            ? "select a year from the action menu"
+            : "[ ] to switch";
           content.push(
-            `  ${theme.fg("dim", `Available: ${years.map(String).join(", ")}  ·  [ ] to switch`)}`,
+            `  ${theme.fg("dim", `Available: ${years.map(String).join(", ")}  ·  ${instruction}`)}`,
           );
         }
       });
@@ -1320,7 +1407,9 @@ export class UsageView {
     const title = theme.fg("accent", theme.bold(" Wrapped "));
     const yearBadge = theme.bg("selectedBg", theme.fg("text", theme.bold(` ${year} `)));
     const nav =
-      years.length > 1 ? theme.fg("dim", "  ◂ [ ] ▸  ·  y") : theme.fg("dim", "  single year");
+      years.length > 1
+        ? theme.fg("dim", this.portableRendering ? "  choose year below" : "  ◂ [ ] ▸  ·  y")
+        : theme.fg("dim", "  single year");
     const left = `  ${title}${yearBadge}${nav}`;
     const pad = Math.max(0, width - visibleWidth(left) - 2);
     return `${left}${theme.fg("borderMuted", "─".repeat(Math.max(2, pad)))}`;
@@ -1747,11 +1836,23 @@ export class UsageView {
     lines.push("");
   }
 
+  private portableMenuLines(width: number): string[] {
+    const { theme } = this.deps;
+    const current = VIEW_TABS[this.state.view].label;
+    const views = VIEW_ORDER.map((key) => VIEW_TABS[key].short).join(" · ");
+    return [
+      `  ${theme.fg("accent", current)}  ${theme.fg("dim", `(${VIEW_ORDER.indexOf(this.state.view) + 1}/${VIEW_ORDER.length})`)}`,
+      `  ${theme.fg("dim", truncateToWidth(`Views: ${views}`, Math.max(10, width - 2)))}`,
+    ];
+  }
+
   private menuLines(width: number): string[] {
     const { theme } = this.deps;
     const renderTab = (key: ViewKey, num: number, icon: boolean, long: boolean): string => {
       const tab = VIEW_TABS[key];
-      const text = icon ? ` ${tab.icon}${num} ${long ? tab.label : tab.short} ` : ` ${num} ${tab.short} `;
+      const text = icon
+        ? ` ${tab.icon}${num} ${long ? tab.label : tab.short} `
+        : ` ${num} ${tab.short} `;
       return key === this.state.view
         ? theme.bg("selectedBg", theme.fg(tab.color, theme.bold(text)))
         : theme.fg("dim", text);
@@ -1769,9 +1870,9 @@ export class UsageView {
       { icon: true, long: false },
       { icon: false, long: false },
     ]) {
-      const tabs = VIEW_ORDER.map((key, i) => renderTab(key, i + 1, variant.icon, variant.long)).join(
-        sep,
-      );
+      const tabs = VIEW_ORDER.map((key, i) =>
+        renderTab(key, i + 1, variant.icon, variant.long),
+      ).join(sep);
       const pad = Math.max(
         0,
         width - visibleWidth(rail) - visibleWidth(tabs) - visibleWidth(close) - 2,
@@ -1891,7 +1992,13 @@ export class UsageView {
     if (hasLimit) {
       right = `${fmt(used)} / ${fmt(limit as number)} (${percent(used, limit as number)})`;
     } else {
-      const hint = unit === "tokens" ? "(no token budget — press s)" : "(no limit set — press s)";
+      const hint = this.portableRendering
+        ? unit === "tokens"
+          ? "(no token budget — choose Configure)"
+          : "(no limit set — choose Configure)"
+        : unit === "tokens"
+          ? "(no token budget — press s)"
+          : "(no limit set — press s)";
       right = `${fmt(used)}  ${theme.fg("dim", hint)}`;
     }
     return `  ${theme.fg("text", lbl)} ${barStr} ${theme.fg("muted", right)}`;
@@ -2354,6 +2461,11 @@ export class UsageView {
       renderRow("(core / no plugin)", coreValue, "builtin tools only");
     }
     lines.push("");
+  }
+
+  private portableFooterLine(width: number): string {
+    const text = "Choose an action below to navigate, refresh, configure, page, or close.";
+    return `  ${this.deps.theme.fg("dim", truncateToWidth(text, Math.max(10, width - 2)))}`;
   }
 
   private footerLine(width: number): string {
