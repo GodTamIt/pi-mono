@@ -2,9 +2,12 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
-const packageDir = new URL("../..", import.meta.url).pathname;
+const packageDir = fileURLToPath(new URL("../..", import.meta.url));
+const sourceManifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
+const expectedEntrypoint = "./dist/extensions/agent-browser/index.js";
+const expectedPiMetadata = { extensions: [expectedEntrypoint] };
 const root = mkdtempSync(join(tmpdir(), "pi-agent-browser-smoke-"));
 try {
   const packDir = join(root, "pack");
@@ -39,25 +42,32 @@ try {
     ],
     { cwd: installDir, stdio: "inherit" },
   );
-  const installed = join(installDir, "node_modules", "@ohgodtamit", "pi-agent-browser");
+  const installed = join(installDir, "node_modules", ...sourceManifest.name.split("/"));
   const manifest = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"));
-  if (manifest.version !== "0.1.0") throw new Error(`Unexpected version ${manifest.version}`);
-  if (
-    !existsSync(
-      join(
-        installDir,
-        "node_modules",
-        ".bin",
-        process.platform === "win32" ? "pi-agent-browser-doctor.cmd" : "pi-agent-browser-doctor",
-      ),
-    )
-  )
-    throw new Error("Doctor bin was not installed");
-  const extension = await import(
-    pathToFileURL(join(installed, "dist", "extensions", "agent-browser", "index.js")).href
+  if (manifest.name !== sourceManifest.name) throw new Error(`Unexpected name ${manifest.name}`);
+  if (manifest.version !== sourceManifest.version)
+    throw new Error(`Unexpected version ${manifest.version}`);
+  if (manifest.exports?.["."] !== expectedEntrypoint)
+    throw new Error(`Unexpected root export ${JSON.stringify(manifest.exports?.["."])}`);
+  if (JSON.stringify(manifest.pi) !== JSON.stringify(expectedPiMetadata))
+    throw new Error(`Unexpected pi metadata ${JSON.stringify(manifest.pi)}`);
+  for (const binName of Object.keys(sourceManifest.bin)) {
+    const executable = join(
+      installDir,
+      "node_modules",
+      ".bin",
+      process.platform === "win32" ? `${binName}.cmd` : binName,
+    );
+    if (!existsSync(executable)) throw new Error(`${binName} bin was not installed`);
+  }
+  const importCheck = join(installDir, "import-package.mjs");
+  writeFileSync(
+    importCheck,
+    `import extension from ${JSON.stringify(sourceManifest.name)};\n` +
+      'if (typeof extension !== "function") throw new Error("Packed Pi extension did not load");\n',
   );
-  if (typeof extension.default !== "function") throw new Error("Packed Pi extension did not load");
-  console.log("Packed pi-agent-browser extension and public bins load from an isolated install.");
+  execFileSync(process.execPath, [importCheck], { cwd: installDir, stdio: "inherit" });
+  console.log("Packed pi-agent-browser root export and public bins load from an isolated install.");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

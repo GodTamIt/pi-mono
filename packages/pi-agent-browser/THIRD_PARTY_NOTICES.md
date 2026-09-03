@@ -15,8 +15,8 @@ This package is a partial fork of `pi-agent-browser-native`.
 | Destination | Donor path |
 | --- | --- |
 | `extensions/agent-browser/**` | `extensions/agent-browser/**` |
-| `scripts/{agent-browser-capability-baseline,agent-browser-target,build,config,doctor}.mjs` | same paths |
-| `docs/{ARCHITECTURE,COMMAND_REFERENCE,ELECTRON,REQUIREMENTS,SUPPORT_MATRIX,TOOL_CONTRACT}.md` | same paths |
+| `scripts/{agent-browser-capability-baseline,agent-browser-target,build,check-command-reference-baseline,config,doctor,verify-command-reference}.mjs` | same paths |
+| `docs/{ARCHITECTURE,COMMAND_REFERENCE,ELECTRON,REQUIREMENTS,SOURCE_OF_TRUTH,SUPPORT_MATRIX,support-notes,TOOL_CONTRACT}.md` | same paths |
 | `test/**/*.test.ts`, `test/fixtures/**`, `test/helpers/**` | same paths |
 | `tsconfig.json`, `tsconfig.build.json` | same paths |
 

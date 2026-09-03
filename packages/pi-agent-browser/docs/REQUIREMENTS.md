@@ -5,14 +5,15 @@ Related docs:
 - [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md)
 - [`ELECTRON.md`](ELECTRON.md)
-- [`RELEASE.md` (donor repo)](https://github.com/fitchmultz/pi-agent-browser-native/blob/main/docs/RELEASE.md)
+- [`RELEASE.md`](RELEASE.md)
+- [Historical donor `RELEASE.md`](https://github.com/fitchmultz/pi-agent-browser-native/blob/main/docs/RELEASE.md)
 - [`SUPPORT_MATRIX.md`](SUPPORT_MATRIX.md)
 
 ## Purpose
 
 Define the product requirements and constraints for `pi-agent-browser`.
 
-> Fork note: this file is retained from the pinned [`pi-agent-browser-native`](https://github.com/fitchmultz/pi-agent-browser-native) donor (see [`../THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)). Maintainer workflow references below — `docs/RELEASE.md`, `AGENTS.md`, and the donor's `npm run docs` / `npm run verify` gates — describe the donor repository, not this fork's scripts.
+> Fork note: this file is retained from the pinned [`pi-agent-browser-native`](https://github.com/fitchmultz/pi-agent-browser-native) donor (see [`../THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)). This fork's package publication workflow lives in [`RELEASE.md`](RELEASE.md). References below to `AGENTS.md`, `npm run docs`, `npm run verify`, lifecycle harnesses, and release modes are historical donor requirements, not this fork's available scripts.
 
 ## Product requirements
 
@@ -93,13 +94,13 @@ Define the product requirements and constraints for `pi-agent-browser`.
 - The primary confidence path is a real `pi` session driven in `tmux`.
 - For quick local checkout smoke validation, launch `pi --approve --no-extensions -e .` from the repository root so only the checkout copy loads; do not rely on Pi settings or `/reload` semantics in this isolated mode.
 - For hot-reload validation, configure exactly one active source for this extension in Pi settings and launch plain `pi`; validate `/reload` there because it exercises auto-discovered/configured resources.
-- Maintain a tmux-driven configured-source lifecycle harness (`npm run verify -- lifecycle`; required before release per `docs/RELEASE.md`) that isolates Pi settings, uses exactly one configured source, exercises `/reload`, full restart plus exact `--session-id` relaunch, and asserts managed-session continuity, persisted artifact survival, and real Pi `tool_result` failure-patch semantics. It remains outside the default `npm run verify` sequence, but it is embedded in `npm run verify -- release` so `prepublishOnly` enforces it before publish unless scripts are intentionally skipped. The harness defaults Pi to model `zai/glm-5.2` (`scripts/verify-lifecycle.mjs`); pass `--model <id>` after `lifecycle` when a different model is required. Keep `docs/RELEASE.md` accurate about the harness behavior, cleanup, transcript retention, and limitations.
+- Historical donor requirement: maintain a tmux-driven configured-source lifecycle harness (`npm run verify -- lifecycle`; required before donor releases per the [donor release guide](https://github.com/fitchmultz/pi-agent-browser-native/blob/main/docs/RELEASE.md)) that isolates Pi settings, uses exactly one configured source, exercises `/reload`, full restart plus exact `--session-id` relaunch, and asserts managed-session continuity, persisted artifact survival, and real Pi `tool_result` failure-patch semantics. The donor harness remains outside its default `npm run verify` sequence, but is embedded in its `npm run verify -- release`. It defaults Pi to model `zai/glm-5.2`; the harness and those commands are not retained in this fork.
 - Validate a full `pi` restart with exact `--session-id` relaunch or `/resume` when changes touch managed-session continuity, reload behavior, or persisted artifact paths. Validate branch-backed state changes with the focused `session_tree` harness tests.
 - Prefer full `pi` restart over `/reload` when validating extension changes beyond a quick reload smoke check.
 - Use `/resume` or an explicit session id/path when needed after restart.
 - Keep testing broader than a single smoke site like `example.com`.
 - Bounded release smokes that validate this extension should disable auto-loaded skills with `--no-skills`; run skill-enabled dogfood separately only when validating external skill routing or report-generation behavior.
-- Maintain a concrete release/package verification workflow in `docs/RELEASE.md` and matching repository scripts.
+- Maintain this fork's concrete package verification and publication workflow in [`RELEASE.md`](RELEASE.md) and matching package scripts.
 
 ## Representative use cases
 

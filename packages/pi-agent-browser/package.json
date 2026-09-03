@@ -13,6 +13,12 @@
   },
   "license": "MIT",
   "type": "module",
+  "exports": {
+    ".": "./dist/extensions/agent-browser/index.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "keywords": [
     "pi-package",
     "agent-browser",
@@ -38,6 +44,7 @@
     "docs/ARCHITECTURE.md",
     "docs/COMMAND_REFERENCE.md",
     "docs/ELECTRON.md",
+    "docs/RELEASE.md",
     "docs/REQUIREMENTS.md",
     "docs/SUPPORT_MATRIX.md",
     "docs/TOOL_CONTRACT.md"
@@ -54,6 +61,7 @@
     "build": "node ./scripts/build.mjs",
     "declarations": "npm run build",
     "prepack": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm run unit && npm run pack:inspect && npm run smoke:installed",
     "pack:inspect": "node ./scripts/inspect-package.mjs",
     "smoke:installed": "node ./test/installed/smoke.mjs",
     "doctor": "node ./scripts/doctor.mjs"

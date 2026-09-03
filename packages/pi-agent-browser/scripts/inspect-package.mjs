@@ -19,6 +19,7 @@ for (const required of [
   "scripts/config.mjs",
   "scripts/doctor.mjs",
   "docs/COMMAND_REFERENCE.md",
+  "docs/RELEASE.md",
   "docs/TOOL_CONTRACT.md",
 ])
   if (!files.includes(required)) throw new Error(`Package is missing ${required}`);

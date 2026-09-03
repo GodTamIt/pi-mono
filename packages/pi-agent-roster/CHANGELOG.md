@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+### Minor Changes
+
+- Add RPC and headless compatibility for the /agent, /stack, and /subagents:sessions pickers, and render the TUI searchable picker inside a responsive border box.
+
 ## 0.3.1
 
 ### Patch Changes

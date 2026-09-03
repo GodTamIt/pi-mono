@@ -20,7 +20,7 @@ This map keeps the active documentation set navigable. When changing behavior, u
 | Native tool input schema, `details` fields, result categories, and machine-readable contracts | [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md) | Keep this as the API contract; avoid release-history prose unless it explains an active field. |
 | Electron-specific lifecycle and troubleshooting | [`ELECTRON.md`](ELECTRON.md) | Public desktop app guide; link to contracts instead of duplicating schemas. |
 | Targeted upstream support, release gates, and live verification status | [`SUPPORT_MATRIX.md`](SUPPORT_MATRIX.md) | Active checklist; closed requirement decisions link to the compact [`support-notes.md`](support-notes.md) index. |
-| Maintainer release process and smoke-test procedures | [`RELEASE.md`](RELEASE.md) and [`../AGENTS.md`](../AGENTS.md) | `AGENTS.md` is agent-specific operational guidance; release evidence belongs in `RELEASE.md` or CueLoop. |
+| Maintainer package validation and stable publication process | [`RELEASE.md`](RELEASE.md) | This fork requires package-scoped checks and publication while root changesets remain in alpha mode; donor release evidence in retained docs is historical. |
 | Durable design decisions | [`ARCHITECTURE.md`](ARCHITECTURE.md), [`support-notes.md`](support-notes.md) | Keep only current rationale. |
 
 ## Update rules
