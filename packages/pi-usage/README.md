@@ -20,10 +20,8 @@ and the cache-input reuse ratio. Mirrors the layout and wording of Claude Code's
 > `~/.pi/agent/settings.json`.
 
 ```bash
-pi install npm:@ohgodtamit/pi-usage@alpha
+pi install npm:@ohgodtamit/pi-usage
 ```
-
-The `alpha` tag is required until the first stable release is available on `latest`.
 
 Then inside pi:
 
@@ -34,7 +32,7 @@ Then inside pi:
 Verify it loaded:
 
 ```bash
-pi list          # should show npm:@ohgodtamit/pi-usage@alpha
+pi list          # should show npm:@ohgodtamit/pi-usage
 ```
 
 Type `/` — `/usage` should appear in slash autocomplete.
@@ -42,7 +40,7 @@ Type `/` — `/usage` should appear in slash autocomplete.
 **Don't do this** (common mistake — package installs but pi ignores it):
 
 ```bash
-npm install -g @ohgodtamit/pi-usage@alpha   # ❌ pi will not detect this
+npm install -g @ohgodtamit/pi-usage   # ❌ pi will not detect this
 ```
 
 ---
@@ -339,17 +337,15 @@ quota integration can still surface captured rate-limit headers.
 Use **`pi install`**, not plain `npm install`. Pi registers packages in `settings.json` under `"packages"` and loads extensions from the `pi.extensions` manifest in `package.json`.
 
 ```bash
-pi install npm:@ohgodtamit/pi-usage@alpha
+pi install npm:@ohgodtamit/pi-usage
 ```
-
-The `alpha` tag is required until the first stable release is available on `latest`.
 
 Then run `/reload` in pi (or restart the CLI). Commands like `/usage` should appear in slash autocomplete.
 
 Quick test without persisting to settings:
 
 ```bash
-pi -e npm:@ohgodtamit/pi-usage@alpha
+pi -e npm:@ohgodtamit/pi-usage
 ```
 
 From this repository checkout:
@@ -368,8 +364,8 @@ pi install ./packages/pi-usage
 
 | Symptom | Fix |
 |---------|-----|
-| `/usage` not in autocomplete | Run `pi install npm:@ohgodtamit/pi-usage@alpha`, then `/reload` |
-| Installed with `npm install -g` but pi ignores it | Use `pi install npm:@ohgodtamit/pi-usage@alpha` instead |
+| `/usage` not in autocomplete | Run `pi install npm:@ohgodtamit/pi-usage`, then `/reload` |
+| Installed with `npm install -g` but pi ignores it | Use `pi install npm:@ohgodtamit/pi-usage` instead |
 | Added `npm:...` to `"extensions"` in settings | Wrong key — use `"packages"`, or run `pi install` |
 | Extension listed but disabled | Run `pi config` and enable the extension resource |
 
@@ -377,7 +373,7 @@ Verify install:
 
 ```bash
 pi list
-# should show: npm:@ohgodtamit/pi-usage@alpha
+# should show: npm:@ohgodtamit/pi-usage
 ```
 
 > **Note:** `npm install` only downloads the package to disk. Pi does not auto-scan global or local `node_modules` — you must register the package with `pi install` so it appears in `"packages"`.

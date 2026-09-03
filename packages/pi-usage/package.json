@@ -1,6 +1,6 @@
 {
   "name": "@ohgodtamit/pi-usage",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0",
   "description": "Usage dashboards, attribution, and live provider quotas for Pi",
   "repository": {
     "type": "git",
