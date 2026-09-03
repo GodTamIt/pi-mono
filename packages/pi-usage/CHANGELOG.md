@@ -1,14 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-alpha.0
 
-- Discover nested generic child-session transcripts and account delegated turns without a roster dependency or parent-summary double counting.
-- Add Delegation analytics with direct/delegated composition, optional `subagents:record` metadata, child and parent groupings, and inferred/recorded concurrency intervals.
-- Add token and component-cost composition, including cache writes, reasoning-as-output, and cache-input reuse ratio.
-- Rename Agents to Providers (`/usage-providers`), retaining `/usage-agents` as an alias; add `/usage-delegation` and eight-view navigation.
-- Bump the incremental cache to v6, include project exclusions in validity, and retain raw delegation metadata for cached post-assembly enrichment.
+### Minor Changes
 
-## 0.1.0
-
-- Publish as `@ohgodtamit/pi-usage`, forked from `@zaganjade/pi-usage` 1.9.2 with its full usage dashboards, attribution views, widget, and provider quota integrations.
-- Resolve extension credentials through Pi's public model registry API, including refreshed Codex OAuth tokens and account IDs.
+- 615f326: Introduce the @ohgodtamit/pi-usage package with cost and token attribution, live provider quotas, incremental caching, model-registry credential resolution, and complete usage and provenance documentation.
+- e01c7c9: Add an eight-view keyboard TUI with RPC-compatible paginated rendering and navigation, delegation analytics, progress and freshness reporting, headless guards, and broad provider compatibility.

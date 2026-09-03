@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const packageDir = fileURLToPath(new URL("../..", import.meta.url));
 const root = mkdtempSync(join(tmpdir(), "pi-usage-smoke-"));
@@ -49,10 +49,24 @@ try {
   );
   const installed = join(installDir, "node_modules", "@ohgodtamit", "pi-usage");
   const manifest = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"));
-  assert(manifest.version === "0.1.0", `Unexpected packed version: ${manifest.version}`);
+  const sourceManifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
+  assert(
+    manifest.name === sourceManifest.name && manifest.version === sourceManifest.version,
+    `Unexpected packed package: ${manifest.name}@${manifest.version}`,
+  );
+  assert(
+    manifest.exports?.["."]?.types === "./dist/index.d.ts" &&
+      manifest.exports["."].import === "./src/index.ts",
+    `Unexpected packed root export: ${JSON.stringify(manifest.exports?.["."])}`,
+  );
+  assert(
+    JSON.stringify(manifest.pi?.extensions) === JSON.stringify(["./src/index.ts"]),
+    `Unexpected packed extension entries: ${JSON.stringify(manifest.pi?.extensions)}`,
+  );
   const require = createRequire(join(installDir, "package.json"));
   const { createJiti } = require("jiti");
-  const loaded = await createJiti(import.meta.url).import(join(installed, "src", "index.ts"));
+  const jiti = createJiti(pathToFileURL(join(installDir, "package.json")).href);
+  const loaded = await jiti.import("@ohgodtamit/pi-usage");
   assert(typeof loaded.default === "function", "Packed extension did not expose its entry point");
   for (const peer of Object.keys(manifest.peerDependencies)) {
     const resolved = fileURLToPath(
