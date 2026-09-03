@@ -1,0 +1,2473 @@
+/**
+ * Interactive usage panel TUI component.
+ *
+ * Rendered via ctx.ui.custom(). Mirrors Claude Code's `/usage` screen:
+ * always-visible 5-hour and weekly quota bars, a selectable time window, and
+ * independent-characteristic breakdowns by model / skill / plugin / tool /
+ * project. Supports vertical scrolling for small terminals.
+ */
+import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
+import type { TUI } from "@earendil-works/pi-tui";
+import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import {
+  agentStats,
+  agentTopModel,
+  type AttributionMaps,
+  availableYears,
+  type Bucket,
+  bucketTokens,
+  computeStats,
+  type ContribGraph,
+  contributionGraph,
+  dailyStats,
+  dayTopModel,
+  dayUptimeMs,
+  defaultWrappedYear,
+  hourlyStats,
+  hourTopModel,
+  metricValue,
+  naturalMetric,
+  ranked,
+  rangeLabel,
+  rangeSince,
+  type Report,
+  type StatsRange,
+  tokensPerSecond,
+  type WrappedStats,
+  wrappedStats,
+  type WindowedReport,
+  type WindowKey,
+  windowize,
+} from "./aggregate.ts";
+import {
+  formatCost,
+  formatDayLabel,
+  formatDuration,
+  formatHour,
+  formatInt,
+  formatTokens,
+  monthLabel,
+  percent,
+  shortenPath,
+  sparkline,
+} from "./format.ts";
+import {
+  mascotPose,
+  mascotQuip,
+  RAINBOW,
+  renderMascot,
+  renderWrappedMascot,
+  toolGlyph,
+  wrappedMascotCaption,
+  VIEW_ORDER,
+  VIEW_TABS,
+  type ViewKey,
+} from "./mascot.ts";
+import type { ProviderQuota } from "./provider.ts";
+
+export type { ViewKey } from "./mascot.ts";
+
+/** Sort field for the Models table. */
+type SortKey = "value" | "name";
+
+/** Sort field + direction for the Daily table. */
+type DailySortField = "tokens" | "cost" | "date";
+type SortDir = "asc" | "desc";
+
+export interface UsageViewDeps {
+  theme: Theme;
+  tui: TUI | undefined;
+  maps: AttributionMaps;
+  home: string;
+  getConfig: () => {
+    fiveHourLimit?: number;
+    weeklyLimit?: number;
+    fiveHourTokenLimit?: number;
+    weeklyTokenLimit?: number;
+  };
+  onClose: () => void;
+  onRefresh: () => void;
+  onConfigure: () => void;
+}
+
+interface ViewState {
+  report: Report | undefined;
+  windowKey: WindowKey;
+  /** Active top-level view (Overview / Models / Daily / Stats). */
+  view: ViewKey;
+  /** Sort field for the Models table. */
+  sortKey: SortKey;
+  /** Sort field + direction for the Daily table. */
+  dailySortField: DailySortField;
+  dailySortDir: SortDir;
+  /** Time range for the Stats view summary (All / 30d / 7d). */
+  statsRange: StatsRange;
+  /** Calendar year for the Wrapped AI view. */
+  wrappedYear: number;
+  /** Sort field for the Providers table. */
+  agentSortKey: SortKey;
+  scanProgress: { loaded: number; total: number } | null;
+  scroll: number;
+  error: string | null;
+  providerQuota: ProviderQuota | null;
+}
+
+export class UsageView {
+  private readonly deps: UsageViewDeps;
+  private state: ViewState = {
+    report: undefined,
+    windowKey: "24h",
+    view: "overview",
+    sortKey: "value",
+    dailySortField: "tokens",
+    dailySortDir: "desc",
+    statsRange: "all",
+    wrappedYear: new Date().getFullYear(),
+    agentSortKey: "value",
+    scanProgress: null,
+    scroll: 0,
+    error: null,
+    providerQuota: null,
+  };
+
+  constructor(deps: UsageViewDeps) {
+    this.deps = deps;
+  }
+
+  /** Set the initial view (used by /usage-models, /usage-daily, … shortcuts). */
+  setInitialView(view: ViewKey): void {
+    this.state.view = view;
+    this.deps.tui?.requestRender();
+  }
+
+  /** Re-bind the TUI/theme/close callback once pi's custom() factory runs. */
+  bind(tui: TUI, theme: Theme, onClose: () => void): void {
+    this.deps.tui = tui;
+    this.deps.theme = theme;
+    this.deps.onClose = onClose;
+    this.deps.tui?.requestRender();
+  }
+
+  // --- mutators used by the orchestrator (index.ts) ---
+
+  setReport(report: Report): void {
+    this.state.report = report;
+    this.state.scanProgress = null;
+    this.state.error = null;
+    this.state.wrappedYear = defaultWrappedYear(report);
+    this.clampScroll();
+    this.deps.tui?.requestRender();
+  }
+
+  setScanning(loaded: number, total: number): void {
+    this.state.scanProgress = { loaded, total };
+    this.deps.tui?.requestRender();
+  }
+
+  setError(message: string): void {
+    this.state.error = message;
+    this.state.scanProgress = null;
+    this.deps.tui?.requestRender();
+  }
+
+  setProviderQuota(quota: ProviderQuota): void {
+    this.state.providerQuota = quota;
+    this.clampScroll();
+    this.deps.tui?.requestRender();
+  }
+
+  // --- Component interface ---
+
+  handleInput(data: string): void {
+    if (matchesKey(data, "q") || matchesKey(data, Key.escape)) {
+      this.deps.onClose();
+      return;
+    }
+    // View navigation: Tab / Shift+Tab + arrows + number keys.
+    if (matchesKey(data, Key.tab) || matchesKey(data, Key.right)) {
+      this.cycleView(1);
+      return;
+    }
+    if (matchesKey(data, "shift+tab") || matchesKey(data, Key.left)) {
+      this.cycleView(-1);
+      return;
+    }
+    if (data === "1") {
+      this.setView("overview");
+      return;
+    }
+    if (data === "2") {
+      this.setView("models");
+      return;
+    }
+    if (data === "3") {
+      this.setView("delegation");
+      return;
+    }
+    if (data === "4") {
+      this.setView("daily");
+      return;
+    }
+    if (data === "6") {
+      this.setView("hourly");
+      return;
+    }
+    if (data === "7") {
+      this.setView("providers");
+      return;
+    }
+    if (data === "8") {
+      this.setView("wrapped");
+      return;
+    }
+    if (data === "5") {
+      if (this.state.view === "overview" || this.state.view === "models") {
+        this.setWindow("5h");
+        return;
+      }
+      this.setView("stats");
+      return;
+    }
+    // Wrapped AI: [ / ] or y cycle calendar years.
+    if (this.state.view === "wrapped") {
+      if (data === "[") {
+        this.cycleWrappedYear(-1);
+        return;
+      }
+      if (data === "]") {
+        this.cycleWrappedYear(1);
+        return;
+      }
+      if (matchesKey(data, "y")) {
+        this.cycleWrappedYear(1);
+        return;
+      }
+    }
+    // Providers view: c/n sort by usage or name.
+    if (this.state.view === "providers") {
+      if (matchesKey(data, "c") || matchesKey(data, "t")) {
+        this.state.agentSortKey = "value";
+        this.deps.tui?.requestRender();
+        return;
+      }
+      if (matchesKey(data, "n")) {
+        this.state.agentSortKey = "name";
+        this.deps.tui?.requestRender();
+        return;
+      }
+    }
+    // Stats view: a/w/m pick the summary time range (intercept before the
+    // window-key handlers, since the time window doesn't apply to Stats).
+    if (this.state.view === "stats") {
+      if (matchesKey(data, "a")) {
+        this.setStatsRange("all");
+        return;
+      }
+      if (matchesKey(data, "w")) {
+        this.setStatsRange("7d");
+        return;
+      }
+      if (matchesKey(data, "m")) {
+        this.setStatsRange("30d");
+        return;
+      }
+    }
+    // Daily view: t/c/d choose the sort field; pressing the same key flips
+    // direction. Intercept before the global sort/window handlers.
+    if (this.state.view === "daily") {
+      if (matchesKey(data, "t")) {
+        this.setDailySort("tokens");
+        return;
+      }
+      if (matchesKey(data, "c")) {
+        this.setDailySort("cost");
+        return;
+      }
+      if (matchesKey(data, "d")) {
+        this.setDailySort("date");
+        return;
+      }
+    }
+    // Sorting (Models & Daily tables).
+    if (this.state.view === "models" && (matchesKey(data, "c") || matchesKey(data, "t"))) {
+      this.state.sortKey = "value";
+      this.deps.tui?.requestRender();
+      return;
+    }
+    if (this.state.view === "models" && matchesKey(data, "n")) {
+      this.state.sortKey = "name";
+      this.deps.tui?.requestRender();
+      return;
+    }
+    if (matchesKey(data, "d")) {
+      this.setWindow("24h");
+      return;
+    }
+    if (matchesKey(data, "w")) {
+      this.setWindow("7d");
+      return;
+    }
+    if (matchesKey(data, "a")) {
+      this.setWindow("all");
+      return;
+    }
+    if (matchesKey(data, "r")) {
+      this.deps.onRefresh();
+      return;
+    }
+    if (matchesKey(data, "s")) {
+      this.deps.onConfigure();
+      return;
+    }
+    if (matchesKey(data, "j") || matchesKey(data, Key.down)) {
+      this.scrollBy(1);
+      return;
+    }
+    if (matchesKey(data, "k") || matchesKey(data, Key.up)) {
+      this.scrollBy(-1);
+      return;
+    }
+    if (matchesKey(data, Key.space) || matchesKey(data, "ctrl+d")) {
+      this.scrollBy(this.availableHeight() / 2);
+      return;
+    }
+    if (matchesKey(data, "ctrl+u") || matchesKey(data, "b")) {
+      this.scrollBy(-this.availableHeight() / 2);
+      return;
+    }
+    if (data === "g") {
+      this.scrollTo(0);
+      return;
+    }
+    if (data === "G") {
+      this.scrollTo(Number.MAX_SAFE_INTEGER);
+      return;
+    }
+  }
+
+  render(width: number): string[] {
+    const { theme } = this.deps;
+    const all = this.buildLines(width).map((line) => this.clampLine(line, width));
+    const height = this.availableHeight();
+
+    if (all.length <= height) {
+      this.state.scroll = 0;
+      return all;
+    }
+
+    const max = all.length - height;
+    if (this.state.scroll > max) this.state.scroll = max;
+    if (this.state.scroll < 0) this.state.scroll = 0;
+    const start = this.state.scroll;
+    const slice = all.slice(start, start + height);
+
+    // Scroll indicator (top-right) so the user knows there is more content.
+    const indicator = ` ${start + 1}-${Math.min(start + height, all.length)}/${all.length} `;
+    const indicatorW = visibleWidth(indicator);
+    const last = truncateToWidth(slice[slice.length - 1] ?? "", Math.max(0, width - indicatorW));
+    const pad = Math.max(0, width - visibleWidth(last) - indicatorW);
+    slice[slice.length - 1] = last + " ".repeat(pad) + theme.fg("dim", indicator);
+    return slice;
+  }
+
+  /** Final width clamp so one long line can never break the TUI layout. */
+  private clampLine(line: string, width: number): string {
+    return visibleWidth(line) > width ? truncateToWidth(line, width) : line;
+  }
+
+  invalidate(): void {
+    this.deps.tui?.requestRender();
+  }
+
+  // --- internals ---
+
+  private availableHeight(): number {
+    // Reserve a couple of rows for pi's footer/status. Floor at a sane minimum.
+    const rows = this.deps.tui?.terminal?.rows ?? 24;
+    return Math.max(8, rows - 2);
+  }
+
+  private setWindow(key: WindowKey): void {
+    this.state.windowKey = key;
+    this.state.scroll = 0;
+    this.deps.tui?.requestRender();
+  }
+
+  private setView(view: ViewKey): void {
+    this.state.view = view;
+    this.state.scroll = 0;
+    this.deps.tui?.requestRender();
+  }
+
+  private cycleView(delta: number): void {
+    const idx = VIEW_ORDER.indexOf(this.state.view);
+    const next = (idx + delta + VIEW_ORDER.length) % VIEW_ORDER.length;
+    this.setView(VIEW_ORDER[next]);
+  }
+
+  private setStatsRange(range: StatsRange): void {
+    this.state.statsRange = range;
+    this.state.scroll = 0;
+    this.deps.tui?.requestRender();
+  }
+
+  /** Set the Daily sort field; pressing the same field again flips direction. */
+  private setDailySort(field: DailySortField): void {
+    if (this.state.dailySortField === field) {
+      this.state.dailySortDir = this.state.dailySortDir === "desc" ? "asc" : "desc";
+    } else {
+      this.state.dailySortField = field;
+      this.state.dailySortDir = "desc";
+    }
+    this.state.scroll = 0;
+    this.deps.tui?.requestRender();
+  }
+
+  private cycleWrappedYear(delta: number): void {
+    const report = this.state.report;
+    if (!report) return;
+    const years = availableYears(report);
+    if (years.length === 0) return;
+    const cur = this.state.wrappedYear;
+    const idx = years.indexOf(cur);
+    const base = idx >= 0 ? idx : 0;
+    const next = (base + delta + years.length) % years.length;
+    this.state.wrappedYear = years[next];
+    this.state.scroll = 0;
+    this.deps.tui?.requestRender();
+  }
+
+  private scrollBy(delta: number): void {
+    this.scrollTo(this.state.scroll + delta);
+  }
+
+  private scrollTo(pos: number): void {
+    this.state.scroll = Math.max(0, Math.round(pos));
+    this.clampScroll();
+    this.deps.tui?.requestRender();
+  }
+
+  private clampScroll(): void {
+    // Re-clamped precisely in render(); keep a rough bound here.
+    if (this.state.scroll < 0) this.state.scroll = 0;
+  }
+
+  private buildLines(width: number): string[] {
+    const { theme } = this.deps;
+    const lines: string[] = [];
+    const w = Math.max(40, width);
+
+    lines.push(theme.fg("borderMuted", "─".repeat(w)));
+    lines.push(this.titleLineRaw(w));
+    for (const menuLine of this.menuLines(w)) {
+      lines.push(menuLine);
+    }
+
+    if (this.state.error) {
+      lines.push("");
+      lines.push(`  ${theme.fg("error", this.state.error)}`);
+      lines.push("");
+      lines.push(this.footerLine(w));
+      lines.push(theme.fg("borderMuted", "─".repeat(w)));
+      return lines;
+    }
+
+    if (!this.state.report) {
+      lines.push("");
+      const prog = this.state.scanProgress;
+      const msg = prog ? `Scanning sessions… ${prog.loaded}/${prog.total}` : "Scanning sessions…";
+      lines.push(`  ${theme.fg("accent", msg)}`);
+      lines.push("");
+      lines.push(this.footerLine(w));
+      lines.push(theme.fg("borderMuted", "─".repeat(w)));
+      return lines;
+    }
+
+    switch (this.state.view) {
+      case "overview":
+        this.renderOverview(lines, w);
+        break;
+      case "models":
+        this.renderModels(lines, w);
+        break;
+      case "delegation":
+        this.renderDelegation(lines, w);
+        break;
+      case "daily":
+        this.renderDaily(lines, w);
+        break;
+      case "stats":
+        this.renderStats(lines, w);
+        break;
+      case "hourly":
+        this.renderHourly(lines, w);
+        break;
+      case "providers":
+        this.renderProviders(lines, w);
+        break;
+      case "wrapped":
+        this.renderWrapped(lines, w);
+        break;
+    }
+
+    lines.push(this.footerLine(w));
+    lines.push(theme.fg("borderMuted", "─".repeat(w)));
+    return lines;
+  }
+
+  /**
+   * Subscription-aware breakdown unit: token-priced providers (Codex, ZAI
+   * plans) always show tokens; otherwise USD when the window has real cost.
+   */
+  private unitForWindow(win: WindowedReport): "usd" | "tokens" {
+    const activeProviderName = this.state.providerQuota?.active?.provider ?? "";
+    const isSubscription =
+      activeProviderName === "openai-codex" ||
+      activeProviderName.startsWith("openai-codex-") ||
+      !!this.state.providerQuota?.planQuota;
+    return isSubscription || win.total.cost <= 0 ? "tokens" : "usd";
+  }
+
+  // ---------------------------------------------------------------- Overview
+
+  private renderOverview(lines: string[], w: number): void {
+    const { theme } = this.deps;
+    const report = this.state.report;
+    if (!report) return;
+    const win = windowize(report, this.state.windowKey, this.deps.maps);
+    lines.push(this.subheaderLine(win, w));
+    lines.push("");
+
+    const unit = this.unitForWindow(win);
+    this.renderQuotaBlock(lines, win, w, unit);
+    lines.push("");
+
+    // Headline stats for the selected window.
+    lines.push(this.statsLine(win, w));
+    if (bucketTokens(win.delegated) > 0) {
+      const share = percent(bucketTokens(win.delegated), bucketTokens(win.total));
+      const peak = win.concurrency.peak == null ? "—" : `${win.concurrency.peak}`;
+      // Only mark the peak as estimated when child timing was inferred from
+      // transcript mtimes; precise spawn/end records make it a real measurement.
+      const peakLabel = win.concurrency.inferred ? "est. peak" : "peak";
+      const childWord = win.children.length === 1 ? "child session" : "child sessions";
+      const detail = truncateToWidth(
+        `Delegated ${share} · ${win.children.length} ${childWord} · ${peakLabel} ${peak}`,
+        Math.max(20, w - 4),
+      );
+      lines.push(`  ${theme.fg("muted", detail)}`);
+    }
+    lines.push("");
+    this.appendTokenComposition(lines, win, w);
+    lines.push("");
+
+    // Active provider + live quota (from the provider itself).
+    this.appendProviderSection(lines, w);
+
+    // "Top consumer" sentence (single biggest independent characteristic).
+    const top = this.topConsumer(win, unit);
+    if (top) {
+      lines.push(`  ${theme.fg("muted", "Top consumer")}`);
+      lines.push(
+        `  ${theme.fg("text", `${top.pct} of usage came from ${top.kind} `)}${theme.fg("accent", top.name)}`,
+      );
+      lines.push("");
+    }
+
+    // Mini trend: last 30 active-window days as a sparkline.
+    this.appendTrendSparkline(lines, w);
+
+    // Compact top models for at-a-glance context (full table in Models view).
+    const total = unit === "tokens" ? bucketTokens(win.total) : win.total.cost;
+    this.appendSection(lines, "Top models", win.byModel, total, w, 5, undefined, unit);
+    lines.push(`  ${theme.fg("dim", "→ Tab or 1-8 to explore · ✦8 opens Wrapped AI")}`);
+  }
+
+  /** Render the always-on quota bars (plan quota or session-derived budget). */
+  private renderQuotaBlock(
+    lines: string[],
+    win: WindowedReport,
+    w: number,
+    unit: "usd" | "tokens",
+  ): void {
+    const { theme } = this.deps;
+    const cfg = this.deps.getConfig();
+    const activeProviderName = this.state.providerQuota?.active?.provider ?? "";
+    const planQuota = this.state.providerQuota?.planQuota;
+    if (planQuota) {
+      // Provider-native plan quota (ZAI GLM coding plans): the upstream reports
+      // the authoritative used % + live reset countdown directly. No budget
+      // config needed — these ARE the 5h/weekly used/remaining from upstream.
+      const planLabel = planQuota.plan
+        ? `  ${theme.fg("accent", planQuota.plan)} plan · upstream quota`
+        : "";
+      if (planQuota.session5h) {
+        // Session-derived cost/tokens in the same window, combined with the
+        // upstream percentage. The right-side text reads:
+        //   "100% used / $02.12 · 0% left · resets 3m 9s"
+        lines.push(this.percentLine("5-hour quota", planQuota.session5h, w, unit, win.fiveHour));
+      } else if (planQuota.weekly) {
+        // Upstream reports weekly but not 5h — show an explicit line so the
+        // row doesn't silently disappear (some plans/plans-in-certain-regions
+        // only expose the weekly window).
+        lines.push(
+          `  ${theme.fg("text", "5-hour quota".padEnd(16))} ${theme.fg("dim", "not reported by upstream for this plan")}`,
+        );
+      }
+      if (planQuota.weekly) {
+        lines.push(this.percentLine("Weekly quota", planQuota.weekly, w, unit, win.weekly));
+      }
+      lines.push(`  ${theme.fg("dim", "live from provider")}${planLabel}`);
+      if (planQuota.webSearches) {
+        const ws = planQuota.webSearches;
+        lines.push(
+          `  ${theme.fg("text", "Web searches")}  ${theme.fg("muted", `${ws.used}/${ws.limit}`)}${ws.resetMs ? ` ${theme.fg("dim", `resets ${countdown(ws.resetMs)}`)}` : ""}`,
+        );
+      }
+      if (planQuota.credits) {
+        const c = planQuota.credits;
+        const value = c.unlimited ? "unlimited" : `${c.balance} credits`;
+        lines.push(`  ${theme.fg("text", "Credits")}  ${theme.fg("muted", value)}`);
+      }
+    } else {
+      // For subscription providers (OpenAI Codex, ZAI coding plans) the session-derived
+      // fallback is misleading — the panel should never suggest `/usage-config` for
+      // a subscription, because the real quota comes from the upstream. Show a
+      // clear action hint instead so the user knows what to do.
+      const isSubscriptionProvider =
+        activeProviderName === "openai-codex" ||
+        activeProviderName.startsWith("openai-codex-") ||
+        activeProviderName === "zai";
+      if (isSubscriptionProvider) {
+        lines.push(`  ${theme.fg("warning", this.buildSubscriptionHint(activeProviderName))}`);
+      } else {
+        // Fallback: session-derived usage. Unit adapts to the provider (USD for
+        // priced providers, tokens for token-priced ones) against a user budget.
+        const unitTag = theme.fg("dim", unit === "tokens" ? "(tokens)" : "(USD)");
+        lines.push(
+          this.quotaLine(
+            "5-hour quota",
+            win.fiveHour,
+            unit === "usd" ? cfg.fiveHourLimit : cfg.fiveHourTokenLimit,
+            w,
+            unit,
+          ),
+        );
+        lines.push(
+          this.quotaLine(
+            "Weekly quota",
+            win.weekly,
+            unit === "usd" ? cfg.weeklyLimit : cfg.weeklyTokenLimit,
+            w,
+            unit,
+          ),
+        );
+        lines.push(
+          `  ${unitTag}  ${theme.fg("dim", `session history · set a budget via /usage-config`)}`,
+        );
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ Models
+
+  private renderModels(lines: string[], w: number): void {
+    const report = this.state.report;
+    if (!report) return;
+    const win = windowize(report, this.state.windowKey, this.deps.maps);
+    lines.push(this.subheaderLine(win, w));
+    lines.push("");
+
+    const unit = this.unitForWindow(win);
+    // Breakdown sections use the same unit as the quota bars (tokens when
+    // the provider has no pricing, USD otherwise).
+    const total = unit === "tokens" ? bucketTokens(win.total) : win.total.cost;
+    this.appendModelTable(lines, win, total, w, unit);
+    this.appendSection(lines, "Skills", win.bySkill, total, w, 8, undefined, unit);
+    this.appendSection(lines, "Bundles", win.byBundle, total, w, 8, (k) => k, unit);
+    // Plugin usage: ranked plugins with the skills/tools that drove each, plus
+    // the “core” remainder (turns that used only builtin tools and no skill).
+    this.appendPluginUsageSection(lines, win, total, w, unit);
+    this.appendToolsSection(lines, win.byTool, total, w, 8, unit);
+    this.appendSection(
+      lines,
+      "Projects",
+      win.byProject,
+      total,
+      w,
+      6,
+      (k) => shortenPath(k, this.deps.home),
+      unit,
+    );
+  }
+
+  /**
+   * Models table styled like the Skills section (name · % · bar · value), with
+   * an extra column for the average generation speed (estimated tok/s).
+   */
+  private appendModelTable(
+    lines: string[],
+    win: WindowedReport,
+    total: number,
+    width: number,
+    unit: "usd" | "tokens",
+  ): void {
+    const { theme } = this.deps;
+    const bucketValue = (b: Bucket) => (unit === "tokens" ? bucketTokens(b) : b.cost);
+    const fmt = (n: number) => (unit === "tokens" ? formatTokens(n) : formatCost(n));
+
+    const rows =
+      this.state.sortKey === "name"
+        ? [...win.byModel.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+        : ranked(win.byModel, bucketValue);
+
+    // Match the Skills/appendSection geometry so both sections line up, plus a
+    // fixed-width value column so the tok/s column aligns under its header.
+    const labelW = Math.max(16, Math.min(36, Math.floor((width - 30) * 0.6)));
+    const barW = Math.max(6, Math.min(20, width - labelW - 26));
+    const valueW = 9;
+    const unitLabel = unit === "tokens" ? "tokens" : "cost";
+
+    lines.push(this.tableHeader("Models", labelW, barW, unitLabel, "tok/s", valueW));
+    if (rows.length === 0) {
+      lines.push(`  ${theme.fg("dim", "— none in this window —")}`);
+      lines.push("");
+      return;
+    }
+
+    const shown = rows.slice(0, 12);
+    for (const [key, b] of shown) {
+      const value = bucketValue(b);
+      const name = truncateToWidth(key, labelW).padEnd(labelW);
+      const pctStr = percent(value, total).padStart(4);
+      const ratio = total > 0 ? value / total : 0;
+      const filled = Math.max(ratio > 0 ? 1 : 0, Math.round(ratio * barW));
+      const barStr =
+        theme.fg("accent", "█".repeat(filled)) + theme.fg("borderMuted", "░".repeat(barW - filled));
+      const valueStr = fmt(value).padEnd(valueW);
+      const tps = tokensPerSecond(b);
+      const rate = tps > 0 ? formatRate(tps) : "—";
+      lines.push(
+        `  ${theme.fg("text", name)} ${theme.fg("muted", pctStr)} ${barStr} ${theme.fg("dim", valueStr)} ${theme.fg("success", rate)}`,
+      );
+    }
+    const rest = rows.length - shown.length;
+    if (rest > 0) {
+      lines.push(`  ${theme.fg("dim", `… +${rest} more`)}`);
+    }
+    lines.push(`  ${theme.fg("dim", "tok/s · est. avg output speed")}`);
+    lines.push("");
+  }
+
+  // ------------------------------------------------------------ Delegation
+
+  private renderDelegation(lines: string[], w: number): void {
+    const { theme } = this.deps;
+    const report = this.state.report;
+    if (!report) return;
+    const win = windowize(report, this.state.windowKey, this.deps.maps);
+    lines.push(this.subheaderLine(win, w));
+    lines.push("");
+    if (win.children.length === 0 && bucketTokens(win.delegated) === 0) {
+      lines.push(`  ${theme.fg("muted", "No delegated child sessions in this window.")}`);
+      lines.push(
+        `  ${theme.fg("dim", "Generic tasks/subagents transcripts are discovered automatically.")}`,
+      );
+      lines.push("");
+      return;
+    }
+    const direct = bucketTokens(win.direct);
+    const delegated = bucketTokens(win.delegated);
+    const total = bucketTokens(win.total);
+    const unit = this.unitForWindow(win);
+    const delegatedValue = unit === "usd" ? win.delegated.cost : delegated;
+    const cutoff = win.window === "all" ? -1 : Date.now() - this.windowDuration(win.window);
+    const selectedTurns = report.entries.filter((turn) => cutoff === -1 || turn.ts >= cutoff);
+    lines.push(`  ${theme.fg("accent", theme.bold("Composition"))}`);
+    if (w < 54) {
+      // Narrow terminals: stack so the delegated half is never clamped away.
+      lines.push(`  ${theme.fg("text", `Direct ${formatTokens(direct)} (${percent(direct, total)})`)}`);
+      lines.push(
+        `  ${theme.fg("muted", `Delegated ${formatTokens(delegated)} (${percent(delegated, total)})`)}`,
+      );
+    } else {
+      lines.push(
+        `  ${theme.fg("text", `Direct ${formatTokens(direct)} (${percent(direct, total)})`)}  ${theme.fg("muted", `Delegated ${formatTokens(delegated)} (${percent(delegated, total)})`)}`,
+      );
+    }
+    if (w >= 64) {
+      const detail = `direct in/out/cache ${formatTokens(win.direct.input)}/${formatTokens(win.direct.output)}/${formatTokens(win.direct.cacheRead + win.direct.cacheWrite)} · delegated ${formatTokens(win.delegated.input)}/${formatTokens(win.delegated.output)}/${formatTokens(win.delegated.cacheRead + win.delegated.cacheWrite)}`;
+      lines.push(`  ${theme.fg("dim", truncateToWidth(detail, Math.max(20, w - 4)))}`);
+    }
+    lines.push("");
+    const c = win.concurrency;
+    const pairs: Array<[string, string]> = [
+      ["Child sessions", `${c.childCount}`],
+      ["Parents", `${c.parentCount}`],
+      // Recorded timing is a plain number; only inferred timing is flagged.
+      ["Peak concurrency", c.peak == null ? "—" : c.inferred ? `${c.peak} (inferred)` : `${c.peak}`],
+      ["Union wall span", c.unionMs == null ? "—" : formatDuration(c.unionMs)],
+      ["Summed spans", c.summedMs == null ? "—" : formatDuration(c.summedMs)],
+      ["Parallelism", c.parallelism == null ? "—" : `${c.parallelism.toFixed(2)}×`],
+      [
+        "Overlap saved",
+        c.overlapSavedMs == null || c.overlapSavedMs <= 0
+          ? "—"
+          : `est. ${formatDuration(c.overlapSavedMs)}`,
+      ],
+    ];
+    lines.push(`  ${theme.fg("accent", theme.bold("Concurrency"))}`);
+    this.appendStatGrid(lines, pairs, w);
+    lines.push("");
+
+    const childTurnsBySession = new Map<string, typeof selectedTurns>();
+    for (const turn of selectedTurns) {
+      if (!turn.delegated) continue;
+      const turns = childTurnsBySession.get(turn.sessionId) ?? [];
+      turns.push(turn);
+      childTurnsBySession.set(turn.sessionId, turns);
+    }
+
+    const grouped = new Map<string, Bucket>();
+    for (const child of win.children) {
+      const bucket = grouped.get(child.agentType) ?? this.zeroBucket();
+      for (const turn of childTurnsBySession.get(child.id) ?? []) {
+        this.addUsageToBucket(bucket, turn.usage);
+      }
+      grouped.set(child.agentType, bucket);
+    }
+    this.appendSection(lines, "Agent / profile", grouped, delegatedValue, w, 8, undefined, unit);
+    const parentGroups = new Map<string, Bucket>();
+    for (const turn of selectedTurns) {
+      if (!turn.delegated) continue;
+      const label =
+        win.children.find((child) => child.id === turn.sessionId)?.parentLabel ||
+        turn.parentSessionId ||
+        "(unknown)";
+      const bucket = parentGroups.get(label) ?? this.zeroBucket();
+      this.addUsageToBucket(bucket, turn.usage);
+      parentGroups.set(label, bucket);
+    }
+    this.appendSection(lines, "Parents", parentGroups, delegatedValue, w, 8, undefined, unit);
+    lines.push(`  ${theme.fg("accent", theme.bold("Child sessions"))}`);
+    if (win.children.length === 0) {
+      lines.push(`  ${theme.fg("dim", "— none in this window —")}`);
+      lines.push("");
+      return;
+    }
+    const childRow = (child: (typeof win.children)[number]) => {
+      const childTurns = childTurnsBySession.get(child.id) ?? [];
+      const tokens = childTurns.reduce(
+        (sum, turn) =>
+          sum + turn.usage.input + turn.usage.output + turn.usage.cacheRead + turn.usage.cacheWrite,
+        0,
+      );
+      const cost = childTurns.reduce((sum, turn) => sum + turn.usage.cost.total, 0);
+      const value = unit === "usd" ? formatCost(cost) : formatTokens(tokens);
+      const duration =
+        child.endedAt > child.startedAt ? formatDuration(child.endedAt - child.startedAt) : "—";
+      const mode = child.isBackground == null ? "" : child.isBackground ? " bg" : " fg";
+      return { value, duration, status: `${child.status}${mode}` };
+    };
+    if (w < 54) {
+      // Narrow terminals: two-line rows keep the task name readable.
+      for (const child of win.children.slice(0, 20)) {
+        const row = childRow(child);
+        lines.push(`  ${theme.fg("text", truncateToWidth(child.task, Math.max(10, w - 4)))}`);
+        lines.push(
+          `  ${theme.fg("dim", `${row.value} · ${row.duration} · `)}${theme.fg("success", row.status)}`,
+        );
+      }
+    } else {
+      const taskW = Math.max(6, w - 43);
+      lines.push(
+        `  ${" ".repeat(taskW)} ${theme.fg("dim", "tokens".padStart(8))} ${theme.fg("dim", "span".padStart(7))} ${theme.fg("dim", "status")}`,
+      );
+      for (const child of win.children.slice(0, 20)) {
+        const row = childRow(child);
+        lines.push(
+          `  ${theme.fg("text", truncateToWidth(child.task, taskW).padEnd(taskW))} ${theme.fg("muted", truncateToWidth(row.value, 8).padStart(8))} ${theme.fg("dim", truncateToWidth(row.duration, 7).padStart(7))} ${theme.fg("success", truncateToWidth(row.status, 12))}`,
+        );
+      }
+    }
+    if (win.children.length > 20)
+      lines.push(`  ${theme.fg("dim", `… +${win.children.length - 20} more`)}`);
+    lines.push("");
+  }
+
+  private windowDuration(key: WindowKey): number {
+    return key === "5h"
+      ? 5 * 60 * 60 * 1000
+      : key === "24h"
+        ? 24 * 60 * 60 * 1000
+        : key === "7d"
+          ? 7 * 24 * 60 * 60 * 1000
+          : Number.POSITIVE_INFINITY;
+  }
+
+  private zeroBucket(): Bucket {
+    return {
+      cost: 0,
+      costInput: 0,
+      costOutput: 0,
+      costCacheRead: 0,
+      costCacheWrite: 0,
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cacheWrite1h: 0,
+      reasoning: 0,
+      turns: 0,
+      genMs: 0,
+      timedTurns: 0,
+    };
+  }
+
+  private addUsageToBucket(bucket: Bucket, usage: import("@earendil-works/pi-ai").Usage): void {
+    bucket.cost += usage.cost.total;
+    bucket.costInput += usage.cost.input ?? 0;
+    bucket.costOutput += usage.cost.output ?? 0;
+    bucket.costCacheRead += usage.cost.cacheRead ?? 0;
+    bucket.costCacheWrite += usage.cost.cacheWrite ?? 0;
+    bucket.input += usage.input;
+    bucket.output += usage.output;
+    bucket.cacheRead += usage.cacheRead;
+    bucket.cacheWrite += usage.cacheWrite;
+    bucket.cacheWrite1h += usage.cacheWrite1h ?? 0;
+    bucket.reasoning += usage.reasoning ?? 0;
+    bucket.turns += 1;
+  }
+
+  // ------------------------------------------------------------ Daily Summary
+
+  private renderDaily(lines: string[], w: number): void {
+    const { theme } = this.deps;
+    const report = this.state.report;
+    if (!report) return;
+
+    const days = dailyStats(report);
+
+    // Totals across all active days (uptime / tokens / cost).
+    let totalCost = 0;
+    let totalTokens = 0;
+    let totalUptime = 0;
+    for (const d of days) {
+      totalCost += d.bucket.cost;
+      totalTokens += bucketTokens(d.bucket);
+      totalUptime += dayUptimeMs(d);
+    }
+
+    const field = this.state.dailySortField;
+    const dir = this.state.dailySortDir;
+    const arrow = dir === "asc" ? "↑" : "↓";
+    lines.push(
+      `  ${theme.fg("muted", "Daily")}   ${theme.fg("dim", `${days.length} active days · all time · sort: ${field} ${arrow}`)}`,
+    );
+    if (days.length > 0) {
+      const totalCostStr =
+        totalCost > 0
+          ? `   ${theme.fg("dim", "·")}   ${theme.fg("dim", "cost")} ${theme.fg("success", formatCost(totalCost))}`
+          : "";
+      lines.push(
+        `  ${theme.fg("dim", "uptime")} ${theme.fg("text", formatDuration(totalUptime))}` +
+          `   ${theme.fg("dim", "·")}   ${theme.fg("dim", "tokens")} ${theme.fg("text", formatTokens(totalTokens))}` +
+          totalCostStr,
+      );
+    }
+    lines.push("");
+
+    if (days.length === 0) {
+      lines.push(`  ${theme.fg("dim", "— no activity recorded —")}`);
+      lines.push("");
+      return;
+    }
+
+    // The bar always tracks tokens (activity): most models are token-priced
+    // (cost 0), so a cost-based bar would collapse to empty.
+    const dayTokens = (d: (typeof days)[number]) => bucketTokens(d.bucket);
+    const maxVal = days.reduce((m, d) => Math.max(m, dayTokens(d)), 0);
+
+    // Sort by the chosen field + direction.
+    const sortValue = (d: (typeof days)[number]) =>
+      field === "cost" ? d.bucket.cost : field === "date" ? d.ts : dayTokens(d);
+    const sign = dir === "asc" ? 1 : -1;
+    const sorted = [...days].sort((a, b) => sign * (sortValue(a) - sortValue(b)));
+
+    // Column geometry. The bar is the "graph"; numeric columns give the
+    // exact cost / tokens / uptime, and the last column names the day's top
+    // model (the model that drove most of that day's spend).
+    const labelW = 14;
+    const costW = 8;
+    const tokW = 9;
+    const upW = 7;
+    const fixed = 2 + labelW + 1 + 1 + costW + 1 + tokW + 1 + upW + 1;
+    const barW = Math.max(6, Math.min(12, w - fixed - 10));
+    const modelW = w - fixed - barW;
+    const showModel = modelW >= 8;
+
+    // Aligned header.
+    let header = `  ${theme.fg("accent", theme.bold("Day".padEnd(labelW)))} ${" ".repeat(barW)}`;
+    header += ` ${theme.fg("dim", "cost".padStart(costW))}`;
+    header += ` ${theme.fg("dim", "tokens".padStart(tokW))}`;
+    header += ` ${theme.fg("dim", "uptime".padStart(upW))}`;
+    if (showModel) header += ` ${theme.fg("dim", "top model")}`;
+    lines.push(header);
+
+    for (const d of sorted.slice(0, 60)) {
+      const value = dayTokens(d);
+      const ratio = maxVal > 0 ? value / maxVal : 0;
+      const filled = Math.max(value > 0 ? 1 : 0, Math.round(ratio * barW));
+      const barColor: ThemeColor = ratio > 0.66 ? "accent" : ratio > 0.33 ? "success" : "warning";
+      const barStr =
+        theme.fg(barColor, "█".repeat(filled)) + theme.fg("borderMuted", "░".repeat(barW - filled));
+      const label = truncateToWidth(formatDayLabel(d.dateKey), labelW).padEnd(labelW);
+      // Cost is "—" when the day's models are token-priced (no pricing → 0),
+      // so the column doesn't read as a broken row of $0.00.
+      const cost = (d.bucket.cost > 0 ? formatCost(d.bucket.cost) : "—").padStart(costW);
+      const tokens = formatTokens(bucketTokens(d.bucket)).padStart(tokW);
+      const uptime = formatDuration(dayUptimeMs(d)).padStart(upW);
+      const costCell = d.bucket.cost > 0 ? theme.fg("success", cost) : theme.fg("dim", cost);
+      let line =
+        `  ${theme.fg("text", label)} ${barStr}` +
+        ` ${costCell} ${theme.fg("muted", tokens)} ${theme.fg("dim", uptime)}`;
+      if (showModel) {
+        const top = dayTopModel(d) ?? "—";
+        const m = truncateToWidth(top, modelW - 1);
+        line += ` ${theme.fg("accent", m)}`;
+      }
+      lines.push(line);
+    }
+    if (sorted.length > 60) {
+      lines.push(`  ${theme.fg("dim", `… +${sorted.length - 60} more days`)}`);
+    }
+    lines.push("");
+  }
+
+  // ---------------------------------------------------------------- Hourly
+
+  private renderHourly(lines: string[], w: number): void {
+    const { theme } = this.deps;
+    const report = this.state.report;
+    if (!report) return;
+
+    const hours = hourlyStats(report);
+    let totalTokens = 0;
+    let totalTurns = 0;
+    let activeHours = 0;
+    for (const h of hours) {
+      const tok = bucketTokens(h.bucket);
+      totalTokens += tok;
+      totalTurns += h.bucket.turns;
+      if (tok > 0) activeHours += 1;
+    }
+
+    lines.push(
+      `  ${theme.fg("muted", "Hourly")}   ${theme.fg("dim", "by time of day · all days combined")}`,
+    );
+    if (totalTurns > 0) {
+      lines.push(
+        `  ${theme.fg("dim", "turns")} ${theme.fg("text", formatInt(totalTurns))}` +
+          `   ${theme.fg("dim", "·")}   ${theme.fg("dim", "tokens")} ${theme.fg("text", formatTokens(totalTokens))}` +
+          `   ${theme.fg("dim", "·")}   ${theme.fg("dim", "active hours")} ${theme.fg("text", `${activeHours}/24`)}`,
+      );
+    }
+    lines.push("");
+
+    if (totalTurns === 0) {
+      lines.push(`  ${theme.fg("dim", "— no activity recorded —")}`);
+      lines.push("");
+      return;
+    }
+
+    const maxVal = hours.reduce((m, h) => Math.max(m, bucketTokens(h.bucket)), 0);
+    const labelW = 6;
+    const tokW = 9;
+    const turnW = 6;
+    const fixed = 2 + labelW + 1 + 1 + tokW + 1 + turnW + 1;
+    const barW = Math.max(8, Math.min(24, w - fixed - 14));
+    const modelW = Math.max(0, w - fixed - barW);
+    const showModel = modelW >= 10;
+
+    let header = `  ${theme.fg("accent", theme.bold("Hour".padEnd(labelW)))} ${" ".repeat(barW)}`;
+    header += ` ${theme.fg("dim", "tokens".padStart(tokW))}`;
+    header += ` ${theme.fg("dim", "turns".padStart(turnW))}`;
+    if (showModel) header += ` ${theme.fg("dim", "top model")}`;
+    lines.push(header);
+
+    for (const h of hours) {
+      const value = bucketTokens(h.bucket);
+      const ratio = maxVal > 0 ? value / maxVal : 0;
+      const filled = Math.max(value > 0 ? 1 : 0, Math.round(ratio * barW));
+      const barColor: ThemeColor =
+        ratio > 0.66 ? "accent" : ratio > 0.33 ? "success" : value > 0 ? "warning" : "borderMuted";
+      const barStr =
+        value > 0
+          ? theme.fg(barColor, "█".repeat(filled)) +
+            theme.fg("borderMuted", "░".repeat(barW - filled))
+          : theme.fg("borderMuted", "·".repeat(barW));
+      const label = formatHour(h.hour).padEnd(labelW);
+      const tokens = (value > 0 ? formatTokens(value) : "—").padStart(tokW);
+      const turns = (h.bucket.turns > 0 ? formatInt(h.bucket.turns) : "—").padStart(turnW);
+      let line =
+        `  ${theme.fg(value > 0 ? "text" : "dim", label)} ${barStr}` +
+        ` ${theme.fg(value > 0 ? "text" : "dim", tokens)}` +
+        ` ${theme.fg("dim", turns)}`;
+      if (showModel) {
+        const top = hourTopModel(h);
+        const modelCell = top ? truncateToWidth(top, modelW) : theme.fg("dim", "—");
+        line += ` ${theme.fg("muted", modelCell)}`;
+      }
+      lines.push(line);
+    }
+    lines.push("");
+  }
+
+  // -------------------------------------------------------------- Providers
+
+  private renderProviders(lines: string[], w: number): void {
+    const { theme } = this.deps;
+    const report = this.state.report;
+    if (!report) return;
+
+    const agents = agentStats(report);
+    let totalTokens = 0;
+    let totalCost = 0;
+    for (const a of agents) {
+      totalTokens += bucketTokens(a.bucket);
+      totalCost += a.bucket.cost;
+    }
+
+    const sortLabel = this.state.agentSortKey === "name" ? "name" : "usage";
+    lines.push(
+      `  ${theme.fg("muted", "Providers")}   ${theme.fg("dim", `${agents.length} providers · sort: ${sortLabel}`)}`,
+    );
+    if (agents.length > 0) {
+      const costStr =
+        totalCost > 0
+          ? `   ${theme.fg("dim", "·")}   ${theme.fg("dim", "cost")} ${theme.fg("success", formatCost(totalCost))}`
+          : "";
+      lines.push(
+        `  ${theme.fg("dim", "tokens")} ${theme.fg("text", formatTokens(totalTokens))}${costStr}`,
+      );
+    }
+    lines.push("");
+
+    if (agents.length === 0) {
+      lines.push(`  ${theme.fg("dim", "— no providers recorded —")}`);
+      lines.push("");
+      return;
+    }
+
+    const rows =
+      this.state.agentSortKey === "name"
+        ? [...agents].sort((a, b) => a.provider.localeCompare(b.provider))
+        : agents;
+
+    // The proj column is the first casualty of a narrow terminal; drop it
+    // below 48 columns so the tokens column stays intact.
+    const showProj = w >= 48;
+    const labelW = showProj
+      ? Math.max(14, Math.min(28, Math.floor((w - 36) * 0.45)))
+      : Math.max(12, Math.min(28, Math.floor((w - 30) * 0.45)));
+    const barW = Math.max(6, Math.min(18, w - labelW - (showProj ? 28 : 22)));
+    const tokW = 9;
+    const projW = 5;
+
+    lines.push(
+      showProj
+        ? this.tableHeader("Provider", labelW, barW, "tokens", "proj", tokW)
+        : this.tableHeader("Provider", labelW, barW, "tokens"),
+    );
+
+    for (const a of rows.slice(0, 16)) {
+      const value = bucketTokens(a.bucket);
+      const name = truncateToWidth(a.provider, labelW).padEnd(labelW);
+      const pctStr = percent(value, totalTokens).padStart(4);
+      const ratio = totalTokens > 0 ? value / totalTokens : 0;
+      const filled = Math.max(ratio > 0 ? 1 : 0, Math.round(ratio * barW));
+      const barStr =
+        theme.fg("accent", "█".repeat(filled)) + theme.fg("borderMuted", "░".repeat(barW - filled));
+      const tokStr = showProj ? formatTokens(value).padEnd(tokW) : formatTokens(value);
+      const top = agentTopModel(a);
+      const projCell = showProj ? ` ${theme.fg("success", formatInt(a.projects.size).padStart(projW))}` : "";
+      lines.push(
+        `  ${theme.fg("text", name)} ${theme.fg("muted", pctStr)} ${barStr} ${theme.fg("dim", tokStr)}${projCell}`,
+      );
+      if (top && w >= labelW + barW + 40) {
+        lines.push(
+          `  ${" ".repeat(labelW + barW + 8)}${theme.fg("dim", `↳ ${truncateToWidth(top, w - labelW - barW - 12)}`)}`,
+        );
+      }
+    }
+    if (rows.length > 16) {
+      lines.push(`  ${theme.fg("dim", `… +${rows.length - 16} more providers`)}`);
+    }
+    if (showProj) {
+      lines.push(`  ${theme.fg("dim", "proj · distinct project paths per provider")}`);
+    }
+    lines.push("");
+  }
+
+  // ----------------------------------------------------------- Wrapped AI
+
+  private renderWrapped(lines: string[], w: number): void {
+    const { theme } = this.deps;
+    const report = this.state.report;
+    if (!report) return;
+
+    const year = this.state.wrappedYear;
+    const stats = wrappedStats(report, year);
+    const years = availableYears(report);
+    const pose = mascotPose("wrapped", stats);
+    const mascot = renderWrappedMascot(pose, theme);
+
+    lines.push(this.wrappedBannerLine(years, w));
+    lines.push("");
+
+    if (!stats) {
+      this.appendMascotBlock(lines, mascot, w, (content) => {
+        content.push(`  ${theme.fg("muted", "No activity recorded")}`);
+        content.push(`  ${theme.fg("dim", `Nothing to summarize for ${year}.`)}`);
+        if (years.length > 0) {
+          content.push(
+            `  ${theme.fg("dim", `Available: ${years.map(String).join(", ")}  ·  [ ] to switch`)}`,
+          );
+        }
+      });
+      lines.push("");
+      return;
+    }
+
+    this.appendMascotBlock(lines, mascot, w, (content) => {
+      this.appendWrappedHero(content, stats, w);
+    });
+    lines.push("");
+    lines.push(this.wrappedSectionHeader("Highlights", w));
+    this.appendWrappedHighlights(lines, stats, w);
+    lines.push("");
+    lines.push(this.wrappedSectionHeader("Monthly activity", w));
+    this.appendWrappedMonthly(lines, stats, w);
+    lines.push("");
+    lines.push(this.wrappedSectionHeader("Rankings", w));
+    this.appendWrappedTops(lines, stats, w);
+    lines.push("");
+    const caption = wrappedMascotCaption(stats, year);
+    lines.push(this.wrappedInsightBox(caption, pose, w));
+    lines.push("");
+  }
+
+  /** Hairline section label — matches Stats/Daily report rhythm. */
+  private wrappedSectionHeader(title: string, width: number): string {
+    const { theme } = this.deps;
+    const label = `  ${theme.fg("muted", title)} `;
+    const ruleW = Math.max(4, width - visibleWidth(label) - 2);
+    return `${label}${theme.fg("borderMuted", "─".repeat(ruleW))}`;
+  }
+
+  /** Pi-chan footer card — character accent, professional tone. */
+  private wrappedInsightBox(
+    caption: string,
+    pose: ReturnType<typeof mascotPose>,
+    width: number,
+  ): string {
+    const { theme } = this.deps;
+    const face = renderWrappedMascot(pose, theme)[1] ?? "";
+    const tag = theme.fg("accent", "Pi-chan");
+    const body = theme.fg("text", truncateToWidth(caption, Math.max(20, width - 24)));
+    const inner = `${tag}  ${body}`;
+    const pad = Math.max(0, width - visibleWidth(face) - visibleWidth(inner) - 6);
+    return `  ${face}  ${theme.fg("borderMuted", "│")} ${inner}${" ".repeat(pad)}`;
+  }
+
+  /** Side-by-side mascot + content when the terminal is wide enough. */
+  private appendMascotBlock(
+    lines: string[],
+    mascot: string[],
+    width: number,
+    renderContent: (content: string[]) => void,
+  ): void {
+    const { theme } = this.deps;
+    const content: string[] = [];
+    renderContent(content);
+    const mascotW = 14;
+    const gap = 2;
+    const sideBySide = width >= 72 && mascot.length > 0;
+
+    if (!sideBySide) {
+      for (const m of mascot) lines.push(m);
+      lines.push("");
+      lines.push(...content);
+      return;
+    }
+
+    const rule = theme.fg("borderMuted", "│");
+    const rows = Math.max(mascot.length, content.length);
+    for (let i = 0; i < rows; i++) {
+      const left = (mascot[i] ?? "").padEnd(mascotW);
+      const right = content[i] ?? "";
+      if (right) {
+        lines.push(`${left}${rule}${" ".repeat(gap)}${right}`);
+      } else if (left.trim()) {
+        lines.push(left);
+      }
+    }
+  }
+
+  private wrappedBannerLine(years: number[], width: number): string {
+    const { theme } = this.deps;
+    const year = this.state.wrappedYear;
+    const title = theme.fg("accent", theme.bold(" Wrapped "));
+    const yearBadge = theme.bg("selectedBg", theme.fg("text", theme.bold(` ${year} `)));
+    const nav =
+      years.length > 1 ? theme.fg("dim", "  ◂ [ ] ▸  ·  y") : theme.fg("dim", "  single year");
+    const left = `  ${title}${yearBadge}${nav}`;
+    const pad = Math.max(0, width - visibleWidth(left) - 2);
+    return `${left}${theme.fg("borderMuted", "─".repeat(Math.max(2, pad)))}`;
+  }
+
+  private appendWrappedHero(lines: string[], stats: WrappedStats, w: number): void {
+    const { theme } = this.deps;
+    const headline =
+      stats.metric === "tokens" ? formatTokens(stats.totalTokens) : formatCost(stats.totalCost);
+    const unit = stats.metric === "tokens" ? "tokens" : "estimated spend";
+    lines.push(`  ${theme.fg("text", theme.bold(headline))} ${theme.fg("muted", unit)}`);
+    const kpis = [
+      `${formatInt(stats.totalTurns)} turns`,
+      `${stats.activeDays} active days`,
+      `${stats.modelCount} models`,
+      `${stats.providerCount} providers`,
+    ];
+    lines.push(`  ${kpis.map((k) => theme.fg("dim", k)).join(theme.fg("borderMuted", "  ·  "))}`);
+    lines.push("");
+
+    const pairs: Array<[string, string]> = [
+      ["Favorite model", stats.favoriteModel ?? "—"],
+      ["Top provider", stats.favoriteProvider ?? "—"],
+      ["Busiest day", stats.busiestDay ? formatDayLabel(stats.busiestDay.dateKey) : "—"],
+      ["Peak hour", stats.peakHour != null ? formatHour(stats.peakHour) : "—"],
+      ["Longest streak", `${stats.longestStreak} day${stats.longestStreak === 1 ? "" : "s"}`],
+      [
+        "Avg / active day",
+        stats.metric === "tokens"
+          ? formatTokens(Math.round(stats.avgPerActiveDay))
+          : formatCost(stats.avgPerActiveDay),
+      ],
+    ];
+    this.appendStatGrid(lines, pairs, w);
+  }
+
+  private appendWrappedMonthly(lines: string[], stats: WrappedStats, w: number): void {
+    if (w < 54) {
+      this.appendWrappedMonthlyRows(lines, stats, w);
+      return;
+    }
+    this.appendWrappedMonthlyHeatmap(lines, stats, w);
+  }
+
+  /**
+   * Claude Code / Stats-style vertical month columns: graded blocks, month
+   * labels, Less→More legend, and a peak-month callout.
+   */
+  private appendWrappedMonthlyHeatmap(lines: string[], stats: WrappedStats, width: number): void {
+    const { theme } = this.deps;
+    const values = stats.monthlyTokens;
+    const max = Math.max(...values, 1);
+    const colW = width >= 68 ? 3 : 2;
+    const gap = colW === 3 ? " " : "";
+    const barH = width >= 68 ? 5 : 4;
+    const block = "█".repeat(colW);
+    const empty = "·".repeat(colW);
+
+    const unitLabel = "tokens by month";
+    lines.push(`  ${theme.fg("dim", unitLabel)}`);
+
+    const levels = values.map((v) => this.heatmapLevel(v / max));
+    const filledRows = values.map((v) => (v > 0 ? Math.max(1, Math.round((v / max) * barH)) : 0));
+
+    for (let row = 0; row < barH; row++) {
+      let line = "  ";
+      for (let m = 0; m < 12; m++) {
+        const rowFromBottom = barH - 1 - row;
+        if (filledRows[m] > 0 && rowFromBottom < filledRows[m]) {
+          line += theme.fg(this.heatmapColor(levels[m]), block);
+        } else {
+          line += theme.fg("borderMuted", empty);
+        }
+        if (m < 11) line += gap;
+      }
+      lines.push(line);
+    }
+
+    let labelLine = "  ";
+    for (let m = 0; m < 12; m++) {
+      const lab = colW >= 3 ? monthLabel(m + 1).slice(0, 3) : monthLabel(m + 1).slice(0, 1);
+      labelLine += theme.fg("dim", lab.padEnd(colW));
+      if (m < 11) labelLine += gap;
+    }
+    lines.push(labelLine);
+
+    let legend = `  ${theme.fg("dim", "Less ")}`;
+    legend += theme.fg("borderMuted", empty);
+    for (let l = 1; l < 5; l++) {
+      legend += theme.fg(this.heatmapColor(l), block);
+    }
+    legend += theme.fg("dim", " More");
+    lines.push(legend);
+
+    const activeMonths = values.filter((v) => v > 0).length;
+    let peakIdx = 0;
+    let peakVal = 0;
+    for (let i = 0; i < 12; i++) {
+      if (values[i] > peakVal) {
+        peakVal = values[i];
+        peakIdx = i;
+      }
+    }
+    if (peakVal > 0) {
+      lines.push(
+        `  ${theme.fg("muted", "Peak month")}  ${theme.fg("text", monthLabel(peakIdx + 1))}` +
+          `  ${theme.fg("dim", formatTokens(peakVal))}` +
+          `  ${theme.fg("borderMuted", "·")}  ${theme.fg("dim", `${activeMonths} active month${activeMonths === 1 ? "" : "s"}`)}`,
+      );
+    } else {
+      lines.push(
+        `  ${theme.fg("dim", `${activeMonths} active month${activeMonths === 1 ? "" : "s"}`)}`,
+      );
+    }
+  }
+
+  /** Narrow-terminal fallback: horizontal share bars (same geometry as Rankings). */
+  private appendWrappedMonthlyRows(lines: string[], stats: WrappedStats, width: number): void {
+    const { theme } = this.deps;
+    const values = stats.monthlyTokens;
+    const max = Math.max(...values, 1);
+    const total = values.reduce((s, v) => s + v, 0);
+    const labelW = 5;
+    const barW = Math.max(6, Math.min(14, width - labelW - 16));
+    const valueW = 8;
+
+    lines.push(`  ${theme.fg("dim", "tokens by month")}`);
+    for (let m = 0; m < 12; m++) {
+      const v = values[m];
+      const name = monthLabel(m + 1)
+        .slice(0, 3)
+        .padEnd(labelW);
+      if (v <= 0) {
+        lines.push(
+          `  ${theme.fg("dim", name)} ${theme.fg("borderMuted", "·".repeat(barW))} ${theme.fg("dim", "—".padStart(valueW))}`,
+        );
+        continue;
+      }
+      const ratio = v / max;
+      const filled = Math.max(1, Math.round(ratio * barW));
+      const level = this.heatmapLevel(ratio);
+      const bar =
+        theme.fg(this.heatmapColor(level), "█".repeat(filled)) +
+        theme.fg("borderMuted", "░".repeat(barW - filled));
+      const pct = total > 0 ? `${Math.round((v / total) * 100)}%`.padStart(4) : "   —";
+      lines.push(
+        `  ${theme.fg("text", name)} ${theme.fg("muted", pct)} ${bar} ${theme.fg("dim", formatTokens(v).padStart(valueW))}`,
+      );
+    }
+  }
+
+  private appendWrappedHighlights(lines: string[], stats: WrappedStats, w: number): void {
+    const topProj = stats.topProject
+      ? truncateToWidth(shortenPath(stats.topProject, this.deps.home), Math.max(20, w - 28))
+      : "—";
+    const pairs: Array<[string, string]> = [
+      ["Models used", `${stats.modelCount}`],
+      ["Providers", `${stats.providerCount}`],
+      ["Projects", `${stats.projectCount}`],
+      ["Top project", topProj],
+    ];
+    this.appendStatGrid(lines, pairs, w);
+  }
+
+  private appendWrappedTops(lines: string[], stats: WrappedStats, w: number): void {
+    const { theme } = this.deps;
+    const labelW = Math.max(16, Math.min(28, Math.floor(w * 0.38)));
+    const barW = Math.max(6, Math.min(16, w - labelW - 22));
+    const pctW = 5;
+
+    lines.push(`  ${theme.fg("muted", "Models")}`);
+    if (stats.topModels.length === 0) {
+      lines.push(`  ${theme.fg("dim", "—")}`);
+    }
+    for (const m of stats.topModels) {
+      const name = truncateToWidth(m.name, labelW).padEnd(labelW);
+      const pct = `${Math.round(m.pct)}%`.padStart(pctW);
+      const filled = Math.max(m.pct > 0 ? 1 : 0, Math.round((m.pct / 100) * barW));
+      const bar =
+        theme.fg("accent", "█".repeat(filled)) + theme.fg("borderMuted", "░".repeat(barW - filled));
+      lines.push(
+        `  ${theme.fg("text", name)} ${theme.fg("muted", pct)} ${bar} ${theme.fg("dim", formatTokens(m.tokens))}`,
+      );
+    }
+
+    lines.push("");
+    lines.push(`  ${theme.fg("muted", "Providers")}`);
+    if (stats.topProviders.length === 0) {
+      lines.push(`  ${theme.fg("dim", "—")}`);
+    }
+    for (const p of stats.topProviders) {
+      const name = truncateToWidth(p.name, labelW).padEnd(labelW);
+      const pct = `${Math.round(p.pct)}%`.padStart(pctW);
+      const filled = Math.max(p.pct > 0 ? 1 : 0, Math.round((p.pct / 100) * barW));
+      const bar =
+        theme.fg("success", "█".repeat(filled)) +
+        theme.fg("borderMuted", "░".repeat(barW - filled));
+      lines.push(
+        `  ${theme.fg("text", name)} ${theme.fg("muted", pct)} ${bar} ${theme.fg("dim", formatTokens(p.tokens))}`,
+      );
+    }
+  }
+
+  // ------------------------------------------------------------------- Stats
+
+  private renderStats(lines: string[], w: number): void {
+    const { theme } = this.deps;
+    const report = this.state.report;
+    if (!report) return;
+
+    const since = rangeSince(this.state.statsRange);
+    const stats = computeStats(report, undefined, since);
+    // The calendar always shows the trailing ~year (GitHub-style), regardless
+    // of the summary range below it.
+    const graph = contributionGraph(report, 53, stats.metric);
+    const fmt = (n: number) => (stats.metric === "tokens" ? formatTokens(n) : formatCost(n));
+    const headline =
+      stats.metric === "tokens"
+        ? `${formatTokens(stats.totalTokens)} tokens`
+        : formatCost(stats.totalCost);
+
+    // Title + interactive range selector.
+    lines.push(this.statsRangeLine());
+    lines.push("");
+    this.appendContribGraph(lines, graph, w);
+    lines.push("");
+
+    const fmtKey = (k: string | null) => (k ? formatDayLabel(k) : "—");
+    const dayWord = (n: number) => `${n} day${n === 1 ? "" : "s"}`;
+    const pairs: Array<[string, string]> = [
+      ["Total", headline],
+      ["Total turns", formatInt(stats.totalTurns)],
+      ["Active days", `${stats.activeDays}`],
+      ["Favorite model", stats.favoriteModel ?? "—"],
+      ["Current streak", dayWord(stats.currentStreak)],
+      ["Longest streak", dayWord(stats.longestStreak)],
+      ["Busiest day", stats.busiestDay ? fmtKey(stats.busiestDay.dateKey) : "—"],
+      ["Peak hour", stats.peakHour != null ? formatHour(stats.peakHour) : "—"],
+      ["First activity", fmtKey(stats.firstDay)],
+      ["Avg / active day", fmt(stats.avgPerActiveDay)],
+    ];
+    this.appendStatGrid(lines, pairs, w);
+
+    const fun = this.statsFunFact(stats);
+    if (fun) {
+      lines.push("");
+      lines.push(`  ${theme.fg("accent", fun)}`);
+    }
+    lines.push("");
+  }
+
+  /** Interactive range selector for the Stats view (All / 7d / 30d). */
+  private statsRangeLine(): string {
+    const { theme } = this.deps;
+    const ranges: StatsRange[] = ["all", "7d", "30d"];
+    const tabs = ranges
+      .map((r) => {
+        const text = ` ${rangeLabel(r)} `;
+        return r === this.state.statsRange
+          ? theme.bg("selectedBg", theme.fg("accent", theme.bold(text)))
+          : theme.fg("dim", text);
+      })
+      .join(theme.fg("borderMuted", "│"));
+    return `  ${theme.fg("muted", "Stats")}   ${tabs}`;
+  }
+
+  /** Render stat pairs in two aligned columns. */
+  private appendStatGrid(lines: string[], pairs: Array<[string, string]>, width: number): void {
+    const { theme } = this.deps;
+    const step = width < 54 ? 1 : 2;
+    // Single-column mode (narrow terminals) gets the full row width so values
+    // like "2 (inferred)" aren't needlessly truncated to the half-width cell.
+    const colW = step === 1 ? width - 2 : Math.max(24, Math.floor((width - 2) / 2));
+    const labelW = 16;
+    const cell = (label: string, value: string) => {
+      const v = truncateToWidth(value, Math.max(6, colW - labelW - 1));
+      return `${theme.fg("muted", label.padEnd(labelW))} ${theme.fg("text", v)}`;
+    };
+    for (let i = 0; i < pairs.length; i += step) {
+      const left = cell(pairs[i][0], pairs[i][1]);
+      let line = `  ${left}`;
+      const next = step === 2 ? pairs[i + 1] : undefined;
+      if (next) {
+        const pad = Math.max(2, colW - visibleWidth(left));
+        line += `${" ".repeat(pad)}${cell(next[0], next[1])}`;
+      }
+      lines.push(line);
+    }
+  }
+
+  /** A playful one-liner comparing total usage to a familiar reference. */
+  private statsFunFact(stats: {
+    totalTokens: number;
+    totalCost: number;
+    metric: "usd" | "tokens";
+  }): string | null {
+    // The Great Gatsby ≈ 47k words ≈ ~62k tokens.
+    const GATSBY_TOKENS = 62000;
+    if (stats.totalTokens >= GATSBY_TOKENS) {
+      const ratio = stats.totalTokens / GATSBY_TOKENS;
+      return `You've used ~${formatInt(ratio)}x more tokens than The Great Gatsby`;
+    }
+    if (stats.metric === "usd" && stats.totalCost > 0) {
+      return `Total spend across these sessions: ${formatCost(stats.totalCost)}`;
+    }
+    return null;
+  }
+
+  /**
+   * GitHub-style contribution heatmap: a month-label header row, then 7 day
+   * rows (Sun..Sat) of graded square cells, then a Less→More legend.
+   */
+  private heatmapColor(level: number): ThemeColor {
+    switch (level) {
+      case 4:
+        return "accent";
+      case 3:
+        return "success";
+      case 2:
+        return "warning";
+      case 1:
+        return "muted";
+      default:
+        return "borderMuted";
+    }
+  }
+
+  /** Map a 0–1 usage ratio to heatmap intensity (matches Stats view). */
+  private heatmapLevel(ratio: number): number {
+    if (ratio <= 0) return 0;
+    if (ratio >= 0.75) return 4;
+    if (ratio >= 0.5) return 3;
+    if (ratio >= 0.25) return 2;
+    return 1;
+  }
+
+  private appendContribGraph(lines: string[], graph: ContribGraph, width: number): void {
+    const { theme } = this.deps;
+    const colorFor = (level: number) => this.heatmapColor(level);
+    // Active days are solid 2-wide blocks so consecutive activity fuses into
+    // chunky, seamless squares (the tokscale / Claude Code look). Inactive
+    // days stay a faint dot on the dark background — never a filled block —
+    // so only real activity is colored.
+    const cellW = 2;
+    const block = "█".repeat(cellW);
+    const empty = "·".padEnd(cellW);
+
+    // Left gutter holds the weekday labels; keep month header aligned to it.
+    const gutter = 5;
+    const leftPad = gutter + 1;
+    const maxWeeks = Math.max(6, Math.floor((width - leftPad - 1) / cellW));
+    const weeks =
+      graph.weeks.length > maxWeeks
+        ? graph.weeks.slice(graph.weeks.length - maxWeeks)
+        : graph.weeks;
+
+    // Month-label header: place each month abbreviation at the week where it
+    // first appears (GitHub-style), so the timeline reads left→right.
+    const firstTs = (col: Array<{ ts: number } | null>): number | null => {
+      for (const c of col) if (c) return c.ts;
+      return null;
+    };
+    const monthRow = new Array<string>(weeks.length * cellW).fill(" ");
+    let lastMonth = -1;
+    for (let i = 0; i < weeks.length; i++) {
+      const ts = firstTs(weeks[i]);
+      if (ts == null) continue;
+      const mon = new Date(ts).getMonth();
+      if (mon !== lastMonth) {
+        lastMonth = mon;
+        const label = monthLabel(mon + 1);
+        const at = i * cellW;
+        for (let k = 0; k < label.length && at + k < monthRow.length; k++) {
+          monthRow[at + k] = label[k];
+        }
+      }
+    }
+    lines.push(`${" ".repeat(leftPad)}${theme.fg("dim", monthRow.join(""))}`);
+
+    const dowLabels = ["", "Mon", "", "Wed", "", "Fri", ""];
+    for (let row = 0; row < 7; row++) {
+      let line = `  ${theme.fg("dim", (dowLabels[row] ?? "").padEnd(gutter - 2))} `;
+      for (const col of weeks) {
+        const cell = col[row];
+        if (!cell) {
+          line += " ".repeat(cellW);
+          continue;
+        }
+        // Inactive day: faint dot on the dark background (no fill).
+        if (cell.level === 0) {
+          line += theme.fg("borderMuted", empty);
+          continue;
+        }
+        line += theme.fg(colorFor(cell.level), block);
+      }
+      lines.push(line);
+    }
+
+    let legend = `  ${theme.fg("dim", "Less ")}`;
+    legend += theme.fg("borderMuted", empty);
+    for (let l = 1; l < 5; l++) legend += theme.fg(colorFor(l), block);
+    legend += theme.fg("dim", " More");
+    lines.push(legend);
+  }
+
+  /** Sparkline of the last 30 active-window days (Overview trend strip). */
+  private appendTrendSparkline(lines: string[], _w: number): void {
+    const { theme } = this.deps;
+    const report = this.state.report;
+    if (!report) return;
+    const days = dailyStats(report);
+    if (days.length === 0) return;
+    const metric = naturalMetric(days);
+    const recent = days.slice(-30);
+    const values = recent.map((d) => metricValue(d.bucket, metric));
+    const spark = sparkline(values);
+    const span =
+      recent.length > 1
+        ? `${formatDayLabel(recent[0].dateKey).slice(4)} → ${formatDayLabel(recent[recent.length - 1].dateKey).slice(4)}`
+        : formatDayLabel(recent[0].dateKey).slice(4);
+    lines.push(
+      `  ${theme.fg("muted", "Trend")}  ${theme.fg("accent", spark)}  ${theme.fg("dim", span)}`,
+    );
+    lines.push("");
+  }
+
+  private menuLines(width: number): string[] {
+    const { theme } = this.deps;
+    const renderTab = (key: ViewKey, num: number, icon: boolean, long: boolean): string => {
+      const tab = VIEW_TABS[key];
+      const text = icon ? ` ${tab.icon}${num} ${long ? tab.label : tab.short} ` : ` ${num} ${tab.short} `;
+      return key === this.state.view
+        ? theme.bg("selectedBg", theme.fg(tab.color, theme.bold(text)))
+        : theme.fg("dim", text);
+    };
+    const rail = theme.fg("borderMuted", "╭─ views ");
+    const close = theme.fg("borderMuted", " ─╮");
+    const sep = theme.fg("borderMuted", " │ ");
+
+    // Pick the richest tab style that fits: full labels, then short labels,
+    // then iconless short labels. An 8-tab rail simply cannot fit below ~90
+    // columns, so the fallback centers the active tab with its neighbours.
+    let row1 = "";
+    for (const variant of [
+      { icon: true, long: true },
+      { icon: true, long: false },
+      { icon: false, long: false },
+    ]) {
+      const tabs = VIEW_ORDER.map((key, i) => renderTab(key, i + 1, variant.icon, variant.long)).join(
+        sep,
+      );
+      const pad = Math.max(
+        0,
+        width - visibleWidth(rail) - visibleWidth(tabs) - visibleWidth(close) - 2,
+      );
+      const candidate = `${rail}${tabs}${" ".repeat(pad)}${close}`;
+      row1 = candidate;
+      if (visibleWidth(candidate) <= width) break;
+      row1 = "";
+    }
+    if (!row1) {
+      const idx = VIEW_ORDER.indexOf(this.state.view);
+      const prev = VIEW_TABS[VIEW_ORDER[(idx - 1 + VIEW_ORDER.length) % VIEW_ORDER.length]];
+      const next = VIEW_TABS[VIEW_ORDER[(idx + 1) % VIEW_ORDER.length]];
+      const cur = VIEW_TABS[this.state.view];
+      const active = theme.bg(
+        "selectedBg",
+        theme.fg(cur.color, theme.bold(` ${cur.icon}${idx + 1} ${cur.label} `)),
+      );
+      row1 = ` ${theme.fg("dim", `‹ ${prev.short}`)} ${active} ${theme.fg("dim", `${next.short} ›`)} ${theme.fg("dim", `${idx + 1}/${VIEW_ORDER.length}`)}`;
+    }
+
+    const pose = mascotPose(this.state.view);
+    const miniMascot = renderMascot(pose, theme)[1] ?? "";
+    const quip = mascotQuip(
+      this.state.view,
+      this.state.view === "wrapped" && this.state.report
+        ? wrappedStats(this.state.report, this.state.wrappedYear)
+        : null,
+    );
+    // Drop the quip on narrow terminals so the key hints survive clamping;
+    // truncate it to whatever room remains left of the hint on mid widths.
+    const hintRight = theme.fg("dim", width < 64 ? "Tab · ←→" : "Tab · ←→ · 1-8 jump");
+    const quipRoom =
+      width - visibleWidth(miniMascot) - visibleWidth("Pi-chan") - visibleWidth(hintRight) - 9;
+    const quipText = width >= 64 && quipRoom > 8 ? truncateToWidth(quip, quipRoom) : "";
+    const hintLeft = quipText
+      ? `${theme.fg("success", "Pi-chan")} ${theme.fg("muted", quipText)}`
+      : `${theme.fg("success", "Pi-chan")}`;
+    const hintPad = Math.max(
+      2,
+      width - visibleWidth(miniMascot) - visibleWidth(hintLeft) - visibleWidth(hintRight) - 4,
+    );
+    const row2 = `  ${miniMascot}  ${hintLeft}${" ".repeat(hintPad)}${hintRight}`;
+
+    return [row1, row2];
+  }
+
+  private titleLineRaw(width: number): string {
+    const { theme } = this.deps;
+    const title = theme.fg("accent", theme.bold(" Usage "));
+    const tabs = this.windowTabs();
+    const dots = Math.max(2, width - visibleWidth(title) - visibleWidth(tabs) - 2);
+    return `${title}${theme.fg("borderMuted", "─".repeat(dots))}${tabs}`;
+  }
+
+  private windowTabs(): string {
+    const { theme } = this.deps;
+    const cur = this.state.windowKey;
+    const tabs: string[] = [];
+    for (const key of ["5h", "24h", "7d", "all"] as WindowKey[]) {
+      const label = key.toUpperCase().replace("24H", "DAY").replace("7D", "WEEK");
+      const text = ` ${label} `;
+      tabs.push(
+        key === cur
+          ? theme.bg("selectedBg", theme.fg("accent", theme.bold(text)))
+          : theme.fg("dim", text),
+      );
+    }
+    return tabs.join(theme.fg("borderMuted", "│"));
+  }
+
+  private subheaderLine(win: WindowedReport, width: number): string {
+    const { theme } = this.deps;
+    const left = theme.fg("muted", `  Showing: ${labelForWindow(win.window)}`);
+    const ago = win.latest > 0 ? `last activity ${relativeTime(win.latest)}` : "no activity";
+    const right = theme.fg(
+      "dim",
+      width < 72 ? `${win.sessionCount} sessions  ` : `${ago}  ·  ${win.sessionCount} sessions  `,
+    );
+    const pad = Math.max(1, width - visibleWidth(left) - visibleWidth(right));
+    return left + " ".repeat(pad) + right;
+  }
+
+  private quotaLine(
+    label: string,
+    bucket: Bucket,
+    limit: number | undefined,
+    width: number,
+    unit: "usd" | "tokens" = "usd",
+  ): string {
+    const { theme } = this.deps;
+    // Pick the measured value for the chosen unit. When a provider has no
+    // pricing (cost === 0 across the window) dollars are meaningless, so the
+    // caller switches the unit to tokens — the real usage signal.
+    const used = unit === "tokens" ? bucketTokens(bucket) : bucket.cost;
+    const hasLimit = typeof limit === "number" && limit > 0;
+    const ratio = hasLimit ? used / limit : 0;
+    const color: ThemeColor = ratio >= 1 ? "error" : ratio >= 0.85 ? "warning" : "success";
+
+    const fmt = (n: number) => (unit === "tokens" ? formatTokens(n) : formatCost(n));
+    const labelW = 16;
+    const lbl = truncateToWidth(label, labelW).padEnd(labelW);
+    const barW = Math.max(8, Math.min(28, width - labelW - 34));
+    const filled = hasLimit
+      ? Math.round(Math.min(1, ratio) * barW)
+      : Math.min(
+          barW,
+          Math.max(
+            used > 0 ? 1 : 0,
+            Math.round(Math.sqrt(Math.max(0, used)) * (unit === "tokens" ? 0.02 : 2)),
+          ),
+        );
+    const barStr =
+      theme.fg(color, "█".repeat(filled)) + theme.fg("borderMuted", "░".repeat(barW - filled));
+
+    let right: string;
+    if (hasLimit) {
+      right = `${fmt(used)} / ${fmt(limit as number)} (${percent(used, limit as number)})`;
+    } else {
+      const hint = unit === "tokens" ? "(no token budget — press s)" : "(no limit set — press s)";
+      right = `${fmt(used)}  ${theme.fg("dim", hint)}`;
+    }
+    return `  ${theme.fg("text", lbl)} ${barStr} ${theme.fg("muted", right)}`;
+  }
+
+  /**
+   * Render an upstream-reported percentage quota bar (e.g. ZAI 5h/weekly).
+   * The provider only exposes `usedPct` (0-100) + a reset countdown, so the bar
+   * shows used%, remaining%, and when the window resets.
+   */
+  private percentLine(
+    label: string,
+    window: { usedPct: number; resetMs: number },
+    width: number,
+    unit: "usd" | "tokens",
+    sessionBucket?: Bucket,
+  ): string {
+    const { theme } = this.deps;
+    const pct = Math.max(0, Math.min(100, window.usedPct));
+    const remaining = 100 - pct;
+    const color: ThemeColor = pct >= 90 ? "error" : pct >= 75 ? "warning" : "success";
+
+    const labelW = 16;
+    const lbl = truncateToWidth(label, labelW).padEnd(labelW);
+
+    // Session-derived cost/tokens in the same window, combined with the
+    // upstream percentage. Format: "<pct>% used / $<cost> · <rem>% left · resets X".
+    let sessionText = "";
+    if (sessionBucket) {
+      const value = unit === "tokens" ? bucketTokens(sessionBucket) : sessionBucket.cost;
+      const fmt = (n: number) => (unit === "tokens" ? formatTokens(n) : formatCost(n));
+      // Always show the session value, even if 0 (so the user sees the bar
+      // is genuinely empty for the chosen unit, not just hidden).
+      sessionText = ` / ${fmt(value)}`;
+    }
+
+    const right = `${pct}% used${sessionText} · ${remaining}% left${
+      window.resetMs ? ` · resets ${countdown(window.resetMs)}` : ""
+    }`;
+    const rightW = visibleWidth(right);
+    const barW = Math.max(8, Math.min(28, width - labelW - rightW - 6));
+    // Guarantee at least one filled cell when usedPct > 0, so a low-usage
+    // window (e.g. 1% of 5h) is still visible rather than rendering as a
+    // fully-empty bar that looks like "nothing".
+    const filled = pct > 0 ? Math.max(1, Math.round((pct / 100) * barW)) : 0;
+    const barStr =
+      theme.fg(color, "█".repeat(filled)) + theme.fg("borderMuted", "░".repeat(barW - filled));
+    return `  ${theme.fg("text", lbl)} ${barStr} ${theme.fg("muted", right)}`;
+  }
+
+  /**
+   * Build a context-aware hint explaining why the subscription quota isn't
+   * shown yet. Subscriptions (OpenAI Codex, ZAI coding plans) get their quota
+   * from the upstream — the panel must never suggest `/usage-config` for
+   * these, because that would be wrong (it would just aggregate session
+   * history, not the real plan quota).
+   */
+  private buildSubscriptionHint(provider: string): string {
+    const notes = this.state.providerQuota?.notes ?? [];
+    if (provider === "zai") {
+      // ZAI quota comes from the monitor endpoint. If we have notes from
+      // fetchProviderQuota, surface them (e.g. token expired).
+      return notes[0] ?? "No upstream quota yet — press r to refresh, or make a request to retry.";
+    }
+    // openai-codex: quota comes from response headers (`x-codex-*`) captured by
+    // pi on every Codex request. If we haven't made one this session, no
+    // headers are captured yet.
+    if (notes.some((n) => n.includes("expired") || n.includes("sign in"))) {
+      return "OpenAI Codex token expired — sign in to Codex CLI (`codex auth`), then press r to refresh.";
+    }
+    return "No Codex headers captured yet — make any request to refresh, then press r.";
+  }
+
+  private appendTokenComposition(lines: string[], win: WindowedReport, width: number): void {
+    const { theme } = this.deps;
+    const t = win.total;
+    lines.push(`  ${theme.fg("accent", theme.bold("Token composition"))}`);
+    const rows: Array<[string, number, number]> = [
+      ["Input", t.input, t.costInput],
+      ["Output", t.output, t.costOutput],
+      ["Cache read", t.cacheRead, t.costCacheRead],
+      ["Cache write", t.cacheWrite, t.costCacheWrite],
+    ];
+    if (t.reasoning > 0) rows.push(["Reasoning (of output)", t.reasoning, 0]);
+    if (t.cacheWrite1h > 0) rows.push(["Cache write (1h)", t.cacheWrite1h, 0]);
+    const compact = width < 64;
+    for (const [label, tokens, cost] of rows) {
+      if (tokens <= 0) continue;
+      const priced = cost > 0 ? ` · ${formatCost(cost)}` : "";
+      lines.push(
+        `  ${theme.fg("muted", truncateToWidth(label, compact ? 18 : 24).padEnd(compact ? 18 : 24))} ${theme.fg("text", formatTokens(tokens))}${theme.fg("dim", priced)}`,
+      );
+    }
+    const denominator = t.input + t.cacheRead;
+    const reuse = denominator > 0 ? percent(t.cacheRead, denominator) : "—";
+    lines.push(`  ${theme.fg("dim", `cache-input reuse ratio ${reuse}`)}`);
+  }
+
+  private statsLine(win: WindowedReport, _width: number): string {
+    const { theme } = this.deps;
+    const t = win.total;
+    const totalTokens = bucketTokens(t);
+    const parts = [
+      `${theme.fg("accent", "↑")}${theme.fg("text", formatTokens(t.input))}`,
+      `${theme.fg("accent", "↓")}${theme.fg("text", formatTokens(t.output))}`,
+      `${theme.fg("accent", "⚡")}${theme.fg("text", formatTokens(t.cacheRead))}`,
+      `${theme.fg("accent", "↥")}${theme.fg("text", formatTokens(t.cacheWrite))}`,
+    ];
+    // Only show $ when there's real pricing; otherwise emphasize total tokens.
+    if (t.cost > 0) {
+      parts.push(theme.fg("success", formatCost(t.cost)));
+    } else {
+      parts.push(`${theme.fg("success", formatTokens(totalTokens))} ${theme.fg("dim", "tokens")}`);
+    }
+    const meta = theme.fg("dim", `·  ${win.turnCount} turns`);
+    return `  ${parts.join("  ")}   ${meta}`;
+  }
+
+  private topConsumer(
+    win: WindowedReport,
+    unit: "usd" | "tokens",
+  ): { kind: string; name: string; pct: string } | null {
+    // Use the same subscription-aware unit as the rest of the panel. Ranking by
+    // cost when a subscription provider is active would wrongly credit the one
+    // priced legacy turn (e.g. $0.20 of codex) as "100% of usage" while ignoring
+    // the token-heavy subscription turns (e.g. glm-5.2 with 81M tokens).
+    const useTokens = unit === "tokens";
+    const total = useTokens ? bucketTokens(win.total) : win.total.cost;
+    if (total <= 0) return null;
+    const bucketValue = (b: Bucket) => (useTokens ? bucketTokens(b) : b.cost);
+    const candidates: Array<{ kind: string; name: string; value: number }> = [];
+    const pick = (kind: string, map: Map<string, Bucket>) => {
+      for (const [name, b] of ranked(map, bucketValue).slice(0, 1)) {
+        candidates.push({ kind, name, value: bucketValue(b) });
+      }
+    };
+    pick("model", win.byModel);
+    pick("skill", win.bySkill);
+    pick("plugin", win.byPlugin);
+    candidates.sort((a, b) => b.value - a.value);
+    const best = candidates[0];
+    if (!best || best.value <= 0) return null;
+    return {
+      kind: best.kind,
+      name: best.name,
+      pct: percent(best.value, total),
+    };
+  }
+
+  /** Render the active-provider banner + live quota + rate-limit windows. */
+  private appendProviderSection(lines: string[], width: number): void {
+    const { theme } = this.deps;
+    const quota = this.state.providerQuota;
+
+    lines.push(`  ${theme.fg("accent", theme.bold("Active provider"))}`);
+
+    if (!quota?.active) {
+      lines.push(`  ${theme.fg("dim", "— no active model yet —")}`);
+      lines.push("");
+      return;
+    }
+
+    const a = quota.active;
+    const host = hostFromUrl(a.baseUrl);
+    const keyBadge = a.hasKey ? theme.fg("success", "key ✓") : theme.fg("warning", "no env key");
+    lines.push(
+      `  ${theme.fg("text", `${a.provider} / ${a.modelId}`)}  ${theme.fg("dim", host)}  ${keyBadge}`,
+    );
+
+    // Live money quota from the provider's billing API.
+    if (quota.credits) {
+      const c = quota.credits;
+      lines.push(
+        this.miniBar(
+          "Account credits",
+          c.remaining,
+          c.total,
+          `${formatCost(c.remaining)} / ${formatCost(c.total)}`,
+          width,
+        ),
+      );
+    }
+    if (quota.spend5h != null || quota.spend7d != null) {
+      const parts: string[] = [];
+      if (quota.spend5h != null) parts.push(`5h ${formatCost(quota.spend5h)}`);
+      if (quota.spend7d != null) parts.push(`7d ${formatCost(quota.spend7d)}`);
+      if (quota.monthlyLimit != null) parts.push(`limit ${formatCost(quota.monthlyLimit)}/mo`);
+      lines.push(
+        `  ${theme.fg("muted", "Provider spend")}  ${theme.fg("text", parts.join("   "))}`,
+      );
+    }
+
+    // Rate-limit windows captured from the latest provider response.
+    if (quota.rateLimits.length > 0) {
+      lines.push(`  ${theme.fg("muted", "Rate limits (live, from last response)")}`);
+      for (const rl of quota.rateLimits.slice(0, 6)) {
+        const limit = rl.limit > 0 ? rl.limit : 0;
+        const ratio = limit > 0 ? rl.remaining / limit : 0;
+        const used = Math.max(0, limit - rl.remaining);
+        const reset = rl.resetMs > 0 ? `resets in ${countdown(rl.resetMs)}` : "";
+        const right = `${formatLimit(rl.remaining)}/${formatLimit(limit)}${reset ? `  ${reset}` : ""}`;
+        lines.push(
+          this.miniBar(rl.resource, Math.max(0, ratio), undefined, right, width, used, limit),
+        );
+      }
+    } else if (quota.source === "none") {
+      lines.push(
+        `  ${theme.fg("dim", "No rate-limit headers captured yet — make a request first.")}`,
+      );
+    }
+
+    for (const note of quota.notes) {
+      lines.push(`  ${theme.fg("dim", `• ${note}`)}`);
+    }
+    if (quota.error) {
+      lines.push(`  ${theme.fg("error", quota.error)}`);
+    }
+    lines.push("");
+  }
+
+  /** Compact single-line bar: `[label] ██████░░░░ right` */
+  private miniBar(
+    label: string,
+    ratioOrValue: number,
+    limitForRatio: number | undefined,
+    right: string,
+    width: number,
+    used?: number,
+    limitNum?: number,
+  ): string {
+    const { theme } = this.deps;
+    const labelW = 16;
+    const lbl = truncateToWidth(label, labelW).padEnd(labelW);
+
+    let ratio: number;
+    if (limitForRatio === undefined) {
+      // ratioOrValue is itself a 0..1 ratio
+      ratio = Math.max(0, Math.min(1, ratioOrValue));
+    } else if (limitForRatio > 0) {
+      // remaining/limit → bar shows remaining; color by usage pressure
+      const remaining = ratioOrValue;
+      ratio = remaining / limitForRatio;
+    } else {
+      ratio = 0;
+    }
+    // Color: green when plenty remaining, yellow mid, red low.
+    const color: ThemeColor = ratio >= 0.5 ? "success" : ratio >= 0.2 ? "warning" : "error";
+
+    const rightW = visibleWidth(right);
+    const barW = Math.max(6, Math.min(22, width - labelW - rightW - 6));
+    const filled = Math.max(ratio > 0 ? 1 : 0, Math.round(ratio * barW));
+    const barStr =
+      theme.fg(color, "█".repeat(filled)) + theme.fg("borderMuted", "░".repeat(barW - filled));
+    void used;
+    void limitNum;
+    return `  ${theme.fg("text", lbl)} ${barStr} ${theme.fg("muted", right)}`;
+  }
+
+  /**
+   * One aligned table-header row: the section title fills the label column and
+   * the column labels (`%`, value unit, optional extra) sit directly above
+   * their data columns. Keeps every breakdown section visually consistent.
+   */
+  private tableHeader(
+    title: string,
+    labelW: number,
+    barW: number,
+    valueLabel: string,
+    extraLabel?: string,
+    valueW?: number,
+  ): string {
+    const { theme } = this.deps;
+    const titleCell = theme.fg("accent", theme.bold(truncateToWidth(title, labelW).padEnd(labelW)));
+    const pctCell = theme.fg("dim", "%".padStart(4));
+    const barSpace = " ".repeat(barW);
+    const valueCell = theme.fg("dim", valueW ? valueLabel.padEnd(valueW) : valueLabel);
+    let line = `  ${titleCell} ${pctCell} ${barSpace} ${valueCell}`;
+    if (extraLabel) line += ` ${theme.fg("dim", extraLabel)}`;
+    return line;
+  }
+
+  private appendToolsSection(
+    lines: string[],
+    map: Map<string, Bucket>,
+    total: number,
+    width: number,
+    limit: number,
+    unit: "usd" | "tokens",
+  ): void {
+    const { theme } = this.deps;
+    const bucketValue = (b: Bucket) => (unit === "tokens" ? bucketTokens(b) : b.cost);
+    const fmt = (n: number) => (unit === "tokens" ? formatTokens(n) : formatCost(n));
+    const rows = ranked(map, bucketValue);
+    const unitLabel = unit === "tokens" ? "tokens" : "cost";
+
+    const labelW = Math.max(16, Math.min(36, Math.floor((width - 30) * 0.6)));
+    const barW = Math.max(6, Math.min(20, width - labelW - 26));
+    lines.push(
+      `  ${theme.fg("warning", "⚙")} ${theme.fg("dim", "Pi-chan tracked these tool calls")}`,
+    );
+    lines.push(this.tableHeader("Tools", labelW, barW, unitLabel));
+
+    if (rows.length === 0) {
+      lines.push(`  ${theme.fg("dim", "— none in this window —")}`);
+      lines.push("");
+      return;
+    }
+
+    const shown = rows.slice(0, limit);
+    for (let i = 0; i < shown.length; i++) {
+      const [key, bucket] = shown[i];
+      const value = bucketValue(bucket);
+      const glyph = toolGlyph(key);
+      const rawName = truncateToWidth(key, labelW - 2);
+      const name = `${glyph} ${rawName}`.padEnd(labelW);
+      const pct = percent(value, total);
+      const ratio = total > 0 ? value / total : 0;
+      const filled = Math.max(ratio > 0 ? 1 : 0, Math.round(ratio * barW));
+      const color = RAINBOW[i % RAINBOW.length];
+      const barStr =
+        theme.fg(color, "█".repeat(filled)) + theme.fg("borderMuted", "░".repeat(barW - filled));
+      const pctStr = pct.padStart(4);
+      lines.push(
+        `  ${theme.fg("text", name)} ${theme.fg("muted", pctStr)} ${barStr} ${theme.fg(color, fmt(value))}`,
+      );
+    }
+
+    const rest = rows.length - shown.length;
+    if (rest > 0) {
+      lines.push(`  ${theme.fg("dim", `… +${rest} more tools`)}`);
+    }
+    lines.push(`  ${theme.fg("dim", "glyph · tool type hint")}`);
+    lines.push("");
+  }
+
+  private appendSection(
+    lines: string[],
+    title: string,
+    map: Map<string, Bucket>,
+    total: number,
+    width: number,
+    limit: number,
+    labelFn: (key: string) => string = (k) => k,
+    unit: "usd" | "tokens" = "usd",
+  ): void {
+    const { theme } = this.deps;
+    const bucketValue = (b: Bucket) => (unit === "tokens" ? bucketTokens(b) : b.cost);
+    const fmt = (n: number) => (unit === "tokens" ? formatTokens(n) : formatCost(n));
+    const rows = ranked(map, bucketValue);
+    const unitLabel = unit === "tokens" ? "tokens" : "cost";
+
+    // Column geometry (shared with the row layout below) so the header labels
+    // sit directly above their columns instead of drifting to the far right.
+    const labelW = Math.max(16, Math.min(36, Math.floor((width - 30) * 0.6)));
+    const barW = Math.max(6, Math.min(20, width - labelW - 26));
+    lines.push(this.tableHeader(title, labelW, barW, unitLabel));
+
+    if (rows.length === 0) {
+      lines.push(`  ${theme.fg("dim", "— none in this window —")}`);
+      lines.push("");
+      return;
+    }
+
+    const shown = rows.slice(0, limit);
+
+    for (const [key, bucket] of shown) {
+      const value = bucketValue(bucket);
+      const name = truncateToWidth(labelFn(key), labelW).padEnd(labelW);
+      const pct = percent(value, total);
+      const ratio = total > 0 ? value / total : 0;
+      const filled = Math.max(ratio > 0 ? 1 : 0, Math.round(ratio * barW));
+      const barStr =
+        theme.fg("accent", "█".repeat(filled)) + theme.fg("borderMuted", "░".repeat(barW - filled));
+      const pctStr = pct.padStart(4);
+      lines.push(
+        `  ${theme.fg("text", name)} ${theme.fg("muted", pctStr)} ${barStr} ${theme.fg("dim", fmt(value))}`,
+      );
+    }
+
+    const rest = rows.length - shown.length;
+    if (rest > 0) {
+      lines.push(`  ${theme.fg("dim", `… +${rest} more`)}`);
+    }
+    lines.push("");
+  }
+
+  /**
+   * Plugin usage section: ranks plugins by their attributed usage and shows the
+   * specific skills/tools that drove each one, plus the "core" remainder
+   * (turns with only builtin tools and no skill — i.e. plain pi usage).
+   *
+   * Plugins are independent characteristics: a single turn can credit several
+   * plugins, so the percentages need not sum to 100. The core line is the
+   * complement (turns attributed to NO plugin).
+   */
+  private appendPluginUsageSection(
+    lines: string[],
+    win: WindowedReport,
+    total: number,
+    width: number,
+    unit: "usd" | "tokens",
+  ): void {
+    const { theme } = this.deps;
+    const fmt = (n: number) => (unit === "tokens" ? formatTokens(n) : formatCost(n));
+    const bucketValue = (b: Bucket) => (unit === "tokens" ? bucketTokens(b) : b.cost);
+
+    const rows = ranked(win.pluginDetail, (c) => bucketValue(c.bucket));
+    const coreValue = bucketValue(win.byCore);
+
+    // Share the geometry with the other breakdown sections so columns and bars
+    // line up, and give the value a fixed width so the "via" detail aligns.
+    const labelW = Math.max(16, Math.min(36, Math.floor((width - 30) * 0.6)));
+    const barW = Math.max(6, Math.min(20, width - labelW - 26));
+    const valueW = 9;
+    const unitLabel = unit === "tokens" ? "tokens" : "cost";
+
+    lines.push(this.tableHeader("Plugin usage", labelW, barW, unitLabel, "via", valueW));
+    if (rows.length === 0 && coreValue <= 0) {
+      lines.push(`  ${theme.fg("dim", "— none in this window —")}`);
+      lines.push("");
+      return;
+    }
+
+    const renderRow = (name: string, value: number, detail?: string) => {
+      const pct = total > 0 ? percent(value, total) : "0%";
+      const ratio = total > 0 ? value / total : 0;
+      const filled = Math.max(ratio > 0 ? 1 : 0, Math.round(ratio * barW));
+      const barStr =
+        theme.fg("accent", "█".repeat(filled)) + theme.fg("borderMuted", "░".repeat(barW - filled));
+      const nm = truncateToWidth(name, labelW).padEnd(labelW);
+      const valueStr = fmt(value).padEnd(valueW);
+      // The "via" detail trails the fixed name/%/bar/value columns plus one
+      // separating space (2-indent + labelW + 1 + 4 + 1 + barW + 1 + valueW + 1
+      // = labelW + barW + valueW + 10). Tool/skill names can be long (e.g.
+      // "firecrawl_firecrawl_scrape"), so truncate to the remaining width to
+      // keep the row within the terminal and avoid a TUI width-overflow crash.
+      const viaW = width - (labelW + barW + valueW) - 10;
+      const detailStr =
+        detail && viaW > 0 ? ` ${theme.fg("dim", truncateToWidth(detail, viaW))}` : "";
+      lines.push(
+        `  ${theme.fg("text", nm)} ${theme.fg("muted", pct.padStart(4))} ${barStr} ${theme.fg("dim", valueStr)}${detailStr}`,
+      );
+    };
+
+    for (const [name, contrib] of rows.slice(0, 8)) {
+      // Summarize which skills/tools of this plugin contributed.
+      const parts: string[] = [];
+      const topSkills = ranked(contrib.skills, (b) => bucketValue(b)).slice(0, 2);
+      for (const [s] of topSkills) parts.push(s);
+      const topTools = ranked(contrib.tools, (b) => bucketValue(b)).slice(0, 2);
+      for (const [t] of topTools) parts.push(t);
+      const detail = parts.length > 0 ? parts.join(", ") : undefined;
+      renderRow(name, bucketValue(contrib.bucket), detail);
+    }
+    if (rows.length > 8) {
+      lines.push(`  ${theme.fg("dim", `… +${rows.length - 8} more`)}`);
+    }
+    // Core remainder: turns with no plugin attribution (builtin tools only).
+    if (coreValue > 0) {
+      renderRow("(core / no plugin)", coreValue, "builtin tools only");
+    }
+    lines.push("");
+  }
+
+  private footerLine(width: number): string {
+    const { theme } = this.deps;
+    const view = this.state.view;
+    const keys: Array<[string, string]> = [["⇥/←→", "views"]];
+    if (view === "overview" || view === "models") {
+      keys.push(["5/d/w/a", "window"]);
+    } else if (view === "delegation") {
+      // Delegation honours the window too (5 stays reserved for the Stats tab).
+      keys.push(["d/w/a", "window"]);
+    }
+    if (view === "models") {
+      keys.push(["c/n", "sort"]);
+    }
+    if (view === "daily") {
+      keys.push(["t/c/d", "sort ±"]);
+    }
+    if (view === "stats") {
+      keys.push(["a/w/m", "range"]);
+    }
+    if (view === "providers") {
+      keys.push(["c/n", "sort"]);
+    }
+    if (view === "wrapped") {
+      keys.push(["[ ]/y", "year"]);
+    }
+    keys.push(
+      ["1-8", "jump"],
+      ["r", "refresh"],
+      ["s", "limits"],
+      ["j/k", "scroll"],
+      ["q", "close"],
+    );
+    const sep = theme.fg("borderMuted", " · ");
+    const render = (parts: Array<[string, string]>, labels: boolean) =>
+      `  ${parts
+        .map(([k, label]) =>
+          labels ? `${theme.fg("accent", k)} ${theme.fg("dim", label)}` : theme.fg("accent", k),
+        )
+        .join(sep)}`;
+    let parts = keys;
+    let line = render(parts, true);
+    // Drop the least-critical hints until the footer fits the terminal.
+    for (const key of ["j/k", "1-8", "s"]) {
+      if (visibleWidth(line) <= width) break;
+      parts = parts.filter(([k]) => k !== key);
+      line = render(parts, true);
+    }
+    if (visibleWidth(line) > width) {
+      line = render(parts, false);
+    }
+    return line;
+  }
+}
+
+function labelForWindow(key: WindowKey): string {
+  switch (key) {
+    case "5h":
+      return "last 5 hours";
+    case "24h":
+      return "last 24 hours";
+    case "7d":
+      return "last 7 days";
+    case "all":
+      return "all time";
+  }
+}
+
+function relativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  const min = 60 * 1000;
+  const hour = 60 * min;
+  const day = 24 * hour;
+  if (diff < min) return "just now";
+  if (diff < hour) return `${Math.floor(diff / min)}m ago`;
+  if (diff < day) return `${Math.floor(diff / hour)}h ago`;
+  return `${Math.floor(diff / day)}d ago`;
+}
+
+/** Extract a short host from a base URL for the provider banner. */
+function hostFromUrl(url: string): string {
+  if (!url) return "";
+  try {
+    const u = new URL(url);
+    return u.host;
+  } catch {
+    return url.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  }
+}
+
+/** Human countdown to a future epoch-ms timestamp. */
+function countdown(resetMs: number): string {
+  const diff = resetMs - Date.now();
+  if (diff <= 0) return "now";
+  const s = Math.round(diff / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m${s % 60 ? ` ${s % 60}s` : ""}`;
+  const h = Math.floor(m / 60);
+  return `${h}h${m % 60 ? ` ${m % 60}m` : ""}`;
+}
+
+/** Format a tokens/second rate compactly (e.g. "47", "8.2", "1.2k"). */
+function formatRate(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0";
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  if (n >= 100) return `${Math.round(n)}`;
+  return n.toFixed(1);
+}
+
+/** Format a rate-limit count (tokens use k/M suffixes). */
+function formatLimit(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return `${Math.round(n)}`;
+}
