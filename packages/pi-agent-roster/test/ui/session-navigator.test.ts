@@ -274,6 +274,9 @@ describe("SessionNavigatorHandler", () => {
   function makeUI(pickerResult?: string) {
     return {
       notify: vi.fn(),
+      select: vi.fn(async (_title: string, options: string[]) =>
+        pickerResult === undefined ? undefined : options.find((option) => option.startsWith("1.")),
+      ),
       custom: vi.fn().mockResolvedValueOnce(pickerResult).mockResolvedValue(undefined),
     };
   }
@@ -313,6 +316,8 @@ describe("SessionNavigatorHandler", () => {
     const notReady = makeNavigable({ isSessionReady: () => false, outputFile: undefined });
     await new SessionNavigatorHandler().handle({
       ui,
+      mode: "tui",
+      hasUI: true,
       agents: [notReady],
       registry,
       cwd: "/test/cwd",
@@ -326,6 +331,8 @@ describe("SessionNavigatorHandler", () => {
     const ui = makeUI(undefined);
     await new SessionNavigatorHandler().handle({
       ui,
+      mode: "tui",
+      hasUI: true,
       agents: [makeNavigable()],
       registry,
       cwd: "/test/cwd",
@@ -343,6 +350,8 @@ describe("SessionNavigatorHandler", () => {
 
     await new SessionNavigatorHandler().handle({
       ui,
+      mode: "tui",
+      hasUI: true,
       agents: [record],
       registry,
       cwd: "/test/cwd",
@@ -382,6 +391,8 @@ describe("SessionNavigatorHandler", () => {
 
     await new SessionNavigatorHandler().handle({
       ui,
+      mode: "tui",
+      hasUI: true,
       agents: [first, second],
       registry,
       cwd: "/test/cwd",
@@ -421,6 +432,8 @@ describe("SessionNavigatorHandler", () => {
 
     await new SessionNavigatorHandler().handle({
       ui,
+      mode: "tui",
+      hasUI: true,
       agents: [released],
       registry,
       cwd: "/test/cwd",
@@ -433,6 +446,42 @@ describe("SessionNavigatorHandler", () => {
     expect(rendered).toContain("released reply");
     expect(rendered).toContain("ID e1");
     expect(rendered).toContain("released snapshot");
+  });
+
+  it("summarizes an RPC selection without opening a custom component", async () => {
+    const ui = makeUI("live:agent-1");
+    await new SessionNavigatorHandler().handle({
+      ui,
+      mode: "rpc",
+      hasUI: true,
+      agents: [makeNavigable({ outputFile: "/tasks/agent-1.jsonl" })],
+      registry,
+      cwd: "/test/cwd",
+      readFile: noReadFile,
+    });
+
+    expect(ui.select).toHaveBeenCalledOnce();
+    expect(ui.custom).not.toHaveBeenCalled();
+    expect(ui.notify).toHaveBeenCalledWith(
+      "Agent · completed · 3.0s · 2 tool uses · live session · ID agent-1 · output /tasks/agent-1.jsonl",
+      "info",
+    );
+  });
+
+  it("skips picker backends when UI is unavailable", async () => {
+    const ui = makeUI();
+    await new SessionNavigatorHandler().handle({
+      ui,
+      mode: "print",
+      hasUI: false,
+      agents: [makeNavigable()],
+      registry,
+      cwd: "/test/cwd",
+      readFile: noReadFile,
+    });
+
+    expect(ui.select).not.toHaveBeenCalled();
+    expect(ui.custom).not.toHaveBeenCalled();
   });
 
   it("notifies and skips the overlay when the session file cannot be read", async () => {
@@ -453,6 +502,8 @@ describe("SessionNavigatorHandler", () => {
 
     await new SessionNavigatorHandler().handle({
       ui,
+      mode: "tui",
+      hasUI: true,
       agents: [released],
       registry,
       cwd: "/test/cwd",

@@ -5,6 +5,7 @@
  * Uses the callback form of setWidget for themed rendering.
  */
 
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentTypeRegistry } from "../config/agent-types.ts";
 import type { Subagent } from "../lifecycle/subagent.ts";
 import type { SubagentManager, SubagentManagerObserver } from "../lifecycle/subagent-manager.ts";
@@ -67,6 +68,7 @@ export type UICtx = {
   setWidget(
     key: string,
     content:
+      | string[]
       | undefined
       | ((tui: TuiSurface, theme: Theme) => { render(): string[]; invalidate(): void }),
     options?: { placement?: "aboveEditor" | "belowEditor" } | undefined,
@@ -77,6 +79,8 @@ export type UICtx = {
 
 export class AgentWidget implements SubagentManagerObserver {
   private uiCtx: UICtx | undefined;
+  private mode: ExtensionContext["mode"] | undefined;
+  private hasUI = false;
   private widgetFrame = 0;
   private widgetInterval: ReturnType<typeof setInterval> | undefined;
   /** Tracks each observed completion so resumed agents get a fresh linger window. */
@@ -95,14 +99,20 @@ export class AgentWidget implements SubagentManagerObserver {
   ) {}
 
   /** Set the UI context (grabbed from first tool execution). */
-  setUICtx(ctx: UICtx) {
-    if (ctx !== this.uiCtx) {
-      // UICtx changed — the widget registered on the old context is gone.
-      // Force re-registration on next update().
-      this.uiCtx = ctx;
-      this.widgetRegistered = false;
-      this.tui = undefined;
+  setUICtx(ctx: UICtx, mode: ExtensionContext["mode"] = "tui", hasUI = true) {
+    if (ctx === this.uiCtx && mode === this.mode && hasUI === this.hasUI) return;
+
+    if (this.widgetRegistered) this.uiCtx?.setWidget("agents", undefined);
+    if (this.widgetInterval) {
+      clearInterval(this.widgetInterval);
+      this.widgetInterval = undefined;
     }
+    this.uiCtx = hasUI ? ctx : undefined;
+    this.mode = mode;
+    this.hasUI = hasUI;
+    this.widgetRegistered = false;
+    this.tui = undefined;
+    this.update();
   }
 
   /**
@@ -153,7 +163,7 @@ export class AgentWidget implements SubagentManagerObserver {
 
   /** Ensure the widget update timer is running. */
   private ensureTimer() {
-    this.widgetInterval ??= setInterval(() => this.update(), 80);
+    if (this.mode === "tui") this.widgetInterval ??= setInterval(() => this.update(), 80);
   }
 
   /** Check if a finished agent should still be shown in the widget. */
@@ -204,11 +214,15 @@ export class AgentWidget implements SubagentManagerObserver {
 
   /** Delegate rendering to the pure widget-renderer module. */
   private renderWidget(tui: TuiSurface, theme: Theme): string[] {
+    return this.renderWidgetAtWidth(tui.terminal.columns, theme);
+  }
+
+  private renderWidgetAtWidth(terminalWidth: number, theme: Theme): string[] {
     return renderWidgetLines({
       agents: this.listBackgroundAgents().map((r) => this.toWidgetAgent(r)),
       registry: this.registry,
       spinnerFrame: this.widgetFrame,
-      terminalWidth: tui.terminal.columns,
+      terminalWidth,
       theme,
       shouldShowFinished: (id, status) => this.shouldShowFinished(id, status),
     });
@@ -258,7 +272,7 @@ export class AgentWidget implements SubagentManagerObserver {
 
   /** Force an immediate widget update. */
   update() {
-    if (!this.uiCtx) return;
+    if (!this.uiCtx || !this.hasUI) return;
 
     const backgroundAgents = this.listBackgroundAgents();
     this.seedFinishedAgents(backgroundAgents);
@@ -273,6 +287,18 @@ export class AgentWidget implements SubagentManagerObserver {
 
     this.updateStatusBar(state);
     this.widgetFrame++;
+
+    if (this.mode !== "tui") {
+      const identityTheme: Theme = {
+        fg: (_color, text) => text,
+        bold: (text) => text,
+      };
+      this.uiCtx.setWidget("agents", this.renderWidgetAtWidth(100, identityTheme), {
+        placement: "aboveEditor",
+      });
+      this.widgetRegistered = true;
+      return;
+    }
 
     // Register the widget callback once. Fullscreen mode can safely animate it;
     // recurring regular-mode renders move terminal scrollback back to the bottom.
@@ -309,6 +335,9 @@ export class AgentWidget implements SubagentManagerObserver {
     this.footerStatus.setAgentCounts(0, 0);
     this.widgetRegistered = false;
     this.tui = undefined;
+    this.uiCtx = undefined;
+    this.mode = undefined;
+    this.hasUI = false;
     this.finishedTurnAge.clear();
   }
 }

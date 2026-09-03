@@ -1,6 +1,10 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
-import { RosterPicker, type RosterPickerItem } from "../../src/ui/roster-picker.ts";
+import {
+  RosterPicker,
+  type RosterPickerItem,
+  showRosterPicker,
+} from "../../src/ui/roster-picker.ts";
 
 const theme = {
   fg: (_color: string, text: string) => text,
@@ -16,6 +20,49 @@ function picker(items: RosterPickerItem[]) {
     requestRender,
   };
 }
+
+describe("showRosterPicker", () => {
+  it("uses select in RPC and maps duplicate labels back to stable values", async () => {
+    const custom = vi.fn();
+    const select = vi.fn(async (_title: string, options: string[]) => options[1]);
+    const selected = await showRosterPicker(
+      { mode: "rpc", hasUI: true, ui: { custom, select } as never },
+      "Choose",
+      [
+        { value: "first-id", label: "Same\u001b[31m name", description: "x".repeat(300) },
+        { value: "second-id", label: "Same name", description: "x".repeat(300) },
+      ],
+    );
+
+    expect(selected).toBe("second-id");
+    expect(custom).not.toHaveBeenCalled();
+    const options = select.mock.calls[0]?.[1] ?? [];
+    expect(options).toHaveLength(2);
+    expect(options[0]).not.toBe(options[1]);
+    expect(options.every((option) => visibleWidth(option) <= 160)).toBe(true);
+    expect(options.every((option) => !option.includes("\u001b"))).toBe(true);
+  });
+
+  it("preserves cancellation and skips both backends without UI", async () => {
+    const custom = vi.fn();
+    const select = vi.fn(async () => undefined);
+    await expect(
+      showRosterPicker({ mode: "rpc", hasUI: true, ui: { custom, select } as never }, "Choose", [
+        { value: "one", label: "One" },
+      ]),
+    ).resolves.toBeUndefined();
+    expect(custom).not.toHaveBeenCalled();
+
+    select.mockClear();
+    await expect(
+      showRosterPicker({ mode: "print", hasUI: false, ui: { custom, select } as never }, "Choose", [
+        { value: "one", label: "One" },
+      ]),
+    ).resolves.toBeUndefined();
+    expect(select).not.toHaveBeenCalled();
+    expect(custom).not.toHaveBeenCalled();
+  });
+});
 
 describe("RosterPicker", () => {
   it("pins stack-picker layouts at wide and narrow widths in monochrome", () => {
@@ -38,29 +85,32 @@ describe("RosterPicker", () => {
 
     expect({ wide: wide.join("\n"), narrow: narrow.join("\n") }).toMatchInlineSnapshot(`
       {
-        "narrow": " Choose
-       Filter: type to search
-
-       › Balanced · Current
-          model: sonnet · thinking:
-          medium
-          General implementation and
-          review.
-         Deep
-          model: opus · thinking: high
-          Long-horizon architecture and
-          difficult synthesis.
-
-       1/2 · ↑↓/jk · Enter · Esc",
-        "wide": " Choose
-       Filter: type to search
-
-       › Balanced · Current              model: sonnet · thinking: medium
-          General implementation and review.
-         Deep                            model: opus · thinking: high
-          Long-horizon architecture and difficult synthesis.
-
-       1/2 · ↑↓/j k navigate · Enter select · Esc cancel",
+        "narrow": "╭─ Choose ───────────────────────╮
+      │ Filter: type to search         │
+      ├────────────────────────────────┤
+      │ › Balanced · Current           │
+      │    model: sonnet · thinking:   │
+      │    medium                      │
+      │    General implementation and  │
+      │    review.                     │
+      │   Deep                         │
+      │    model: opus · thinking:     │
+      │    high                        │
+      │    Long-horizon architecture   │
+      │    and difficult synthesis.    │
+      ├────────────────────────────────┤
+      │ 1/2 · ↑↓/jk · Enter · Esc      │
+      ╰────────────────────────────────╯",
+        "wide": "╭─ Choose ─────────────────────────────────────────────────────────────────────────────╮
+      │ Filter: type to search                                                               │
+      ├──────────────────────────────────────────────────────────────────────────────────────┤
+      │ › Balanced · Current             model: sonnet · thinking: medium                    │
+      │    General implementation and review.                                                │
+      │   Deep                           model: opus · thinking: high                        │
+      │    Long-horizon architecture and difficult synthesis.                                │
+      ├──────────────────────────────────────────────────────────────────────────────────────┤
+      │ 1/2 · ↑↓/j k navigate · Enter select · Esc cancel                                    │
+      ╰──────────────────────────────────────────────────────────────────────────────────────╯",
       }
     `);
     expect([...wide, ...narrow].every((line) => !line.includes("\u001b"))).toBe(true);
@@ -106,12 +156,13 @@ describe("RosterPicker", () => {
     h.component.handleInput("\x1b[128640u");
     h.component.handleInput("\x1b[120u");
     expect(h.component.render(40).join("\n")).toMatchInlineSnapshot(`
-      " Choose
-       Filter: 🚀x
-
-       No matches
-
-       ↑↓/jk · Enter · Esc"
+      "╭─ Choose ─────────────────────────────╮
+      │ Filter: 🚀x                          │
+      ├──────────────────────────────────────┤
+      │ No matches                           │
+      ├──────────────────────────────────────┤
+      │ ↑↓/jk · Enter · Esc                  │
+      ╰──────────────────────────────────────╯"
     `);
 
     h.component.handleInput("\x1b[127u");
@@ -161,22 +212,86 @@ describe("RosterPicker", () => {
     expect(lines.every((line) => visibleWidth(line) <= 20)).toBe(true);
     expect(lines.every((line) => !line.includes("\u001b"))).toBe(true);
     expect(lines.join("\n")).toMatchInlineSnapshot(`
-      " Choose
-       Filter: type to ...
-
-       › 設計 🚀
-          stack:
-          deliberate ·
-          model:
-          long-model
-          Unicode words
-          stay reviewable
-          when the picker
-          wraps.
-
-       1/1
-       ↑↓ · Enter · Esc"
+      "╭─ Choose ─────────╮
+      │ Filter: type t...│
+      ├──────────────────┤
+      │ › 設計 🚀        │
+      │    stack:        │
+      │    deliberate ·  │
+      │    model:        │
+      │    long-model    │
+      │    Unicode words │
+      │    stay          │
+      │    reviewable    │
+      │    when the      │
+      │    picker wraps. │
+      ├──────────────────┤
+      │ 1/1              │
+      │ ↑↓ · Enter · Esc │
+      ╰──────────────────╯"
     `);
+  });
+
+  it("drops the border chrome below the minimum box width", () => {
+    for (const width of [8, 12, 19]) {
+      const lines = picker([
+        {
+          value: "wide",
+          label: "設計 🚀",
+          secondary: "stack: deliberate",
+          description: "Unicode words stay reviewable when the picker wraps.",
+        },
+      ]).component.render(width);
+
+      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+      expect(lines.every((line) => !line.includes("\u001b"))).toBe(true);
+      expect(lines.join("\n")).not.toMatch(/[╭╮╰╯│├┤]/);
+      expect(lines.join("\n")).toContain("Choose");
+    }
+  });
+
+  it("clips long titles inside the top border and keeps box rows aligned", () => {
+    const component = new RosterPicker(
+      "Select a very long picker title that cannot fit",
+      [{ value: "one", label: "One" }],
+      theme,
+      () => undefined,
+    );
+    const lines = component.render(24);
+
+    expect(lines[0]).toMatch(/^╭─ .+╮$/);
+    expect(lines[0]).toContain("…");
+    expect(lines.at(-1)).toMatch(/^╰─+╯$/);
+    expect(lines.every((line) => visibleWidth(line) === 24)).toBe(true);
+    for (const line of lines.slice(1, -1)) {
+      expect(line.startsWith("│") || line.startsWith("├")).toBe(true);
+      expect(line.endsWith("│") || line.endsWith("┤")).toBe(true);
+    }
+  });
+
+  it.each([24, 40, 88])("keeps ANSI-decorated box output within %i columns", (width) => {
+    const ansiTheme = {
+      fg: (_color: string, text: string) => `\u001b[31m${text}\u001b[39m`,
+      bold: (text: string) => `\u001b[1m${text}\u001b[22m`,
+    };
+    const component = new RosterPicker(
+      "Choose",
+      [
+        {
+          value: "deep",
+          label: "Deep",
+          secondary: "model: opus · thinking: high",
+          description: "Long-horizon architecture and difficult synthesis.",
+        },
+      ],
+      ansiTheme,
+      () => undefined,
+    );
+
+    const lines = component.render(width);
+
+    expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+    expect(lines[0]).toContain("\u001b");
   });
 
   it.each([40, 60, 80, 120])(

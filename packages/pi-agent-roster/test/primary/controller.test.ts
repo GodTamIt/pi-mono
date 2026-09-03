@@ -65,6 +65,9 @@ function harness(
   const notify = vi.fn();
   const setStatus = vi.fn();
   const custom = vi.fn<CustomUI>(async () => undefined);
+  const select = vi.fn(
+    async (_title: string, _options: string[]) => undefined as string | undefined,
+  );
   const pi = {
     getFlag: vi.fn((name: string) => flags[name]),
     getThinkingLevel: vi.fn(() => thinking),
@@ -95,7 +98,9 @@ function harness(
       getAvailable: () => [baseModel, primaryModel],
     },
     getSystemPrompt: () => "Baseline prompt",
-    ui: { notify, setStatus, custom },
+    mode: "tui",
+    hasUI: true,
+    ui: { notify, setStatus, custom, select },
   } as unknown as ExtensionContext;
   const overrides = new AgentStackOverrides();
   const footerStatus = new FooterStatus();
@@ -115,6 +120,7 @@ function harness(
     notify,
     setStatus,
     custom,
+    select,
     getActive: () => active,
   };
 }
@@ -484,6 +490,34 @@ describe("PrimaryController", () => {
     expect(lines).toContain("Pi default · Default");
     expect(lines).toContain("Lead · Current");
     expect(lines).toContain("stack: default · model: anthropic/primary · thinking: high");
+  });
+
+  it("uses the RPC selector for an omitted agent and skips pickers without UI", async () => {
+    const rpc = harness();
+    await rpc.controller.handleSessionStart(rpc.ctx);
+    rpc.select.mockImplementationOnce(async (_title, options) => options[1]);
+    const waitForIdle = vi.fn(async () => undefined);
+    await rpc.controller.handleAgentCommand("", {
+      ...rpc.ctx,
+      mode: "rpc",
+      hasUI: true,
+      waitForIdle,
+    } as unknown as ExtensionCommandContext);
+
+    expect(rpc.select).toHaveBeenCalledOnce();
+    expect(rpc.custom).not.toHaveBeenCalled();
+    expect(waitForIdle).toHaveBeenCalledOnce();
+
+    const headless = harness();
+    await headless.controller.handleSessionStart(headless.ctx);
+    await headless.controller.handleAgentCommand("", {
+      ...headless.ctx,
+      mode: "print",
+      hasUI: false,
+      waitForIdle: vi.fn(async () => undefined),
+    } as unknown as ExtensionCommandContext);
+    expect(headless.select).not.toHaveBeenCalled();
+    expect(headless.custom).not.toHaveBeenCalled();
   });
 
   it("completes stack command agents and their available stacks", () => {

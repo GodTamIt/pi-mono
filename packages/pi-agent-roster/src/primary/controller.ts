@@ -134,8 +134,7 @@ export class PrimaryController {
   async handleAgentCommand(args: string, ctx: ExtensionCommandContext): Promise<void> {
     this.options.registry.reload();
     const direct = args.trim();
-    const name =
-      direct || (await showRosterPicker(ctx.ui, "Select primary agent", this.agentItems()));
+    const name = direct || (await showRosterPicker(ctx, "Select primary agent", this.agentItems()));
     if (!name) return;
     await this.selectPrimary(name, ctx);
   }
@@ -222,7 +221,7 @@ export class PrimaryController {
         return;
       }
       rawStack = await showRosterPicker(
-        ctx.ui,
+        ctx,
         `Select stack for ${this.agentDisplayName(rawAgent)}`,
         this.stackItems(rawAgent),
       );

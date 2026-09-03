@@ -40,6 +40,7 @@ export interface NavigationIdentity {
   readonly duration: string;
   readonly toolUses: number;
   readonly sourceLabel: "live session" | "released snapshot";
+  readonly outputFile?: string | undefined;
 }
 
 export type NavigationEntry = NavigationIdentity &
@@ -174,5 +175,6 @@ function buildIdentity(
     status: record.status,
     duration: formatDuration(record.startedAt, record.completedAt),
     toolUses: record.toolUses,
+    outputFile: record.outputFile,
   };
 }

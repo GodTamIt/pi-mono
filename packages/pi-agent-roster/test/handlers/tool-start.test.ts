@@ -17,9 +17,9 @@ describe("ToolStartHandler", () => {
     it("calls setUICtx with the context's ui", () => {
       const ui = { setStatus: vi.fn(), setWidget: vi.fn() };
 
-      handler.handleToolExecutionStart({}, { ui });
+      handler.handleToolExecutionStart({}, { ui, mode: "rpc", hasUI: true });
 
-      expect(widget.setUICtx).toHaveBeenCalledWith(ui);
+      expect(widget.setUICtx).toHaveBeenCalledWith(ui, "rpc", true);
     });
   });
 });

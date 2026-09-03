@@ -5,14 +5,18 @@
  * with a mocked narrow runtime interface.
  */
 
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+
 /** Narrow widget interface — only the methods the handler calls. */
 export interface ToolStartWidget {
-  setUICtx(ctx: unknown): void;
+  setUICtx(ctx: unknown, mode: ExtensionContext["mode"], hasUI: boolean): void;
 }
 
-/** Minimal context shape for tool_execution_start — only the field the handler reads. */
+/** Minimal context shape for tool_execution_start — only the fields the handler reads. */
 interface ToolStartCtx {
   ui: unknown;
+  mode: ExtensionContext["mode"];
+  hasUI: boolean;
 }
 
 /**
@@ -24,6 +28,6 @@ export class ToolStartHandler {
   constructor(private readonly widget: ToolStartWidget) {}
 
   handleToolExecutionStart(_event: unknown, ctx: ToolStartCtx): void {
-    this.widget.setUICtx(ctx.ui);
+    this.widget.setUICtx(ctx.ui, ctx.mode, ctx.hasUI);
   }
 }

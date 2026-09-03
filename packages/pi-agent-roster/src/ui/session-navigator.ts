@@ -43,10 +43,15 @@ export type OverlayComponentFactory<R> = (
   done: (result: R) => void,
 ) => Component;
 
-export type SessionNavigatorUI = Pick<ExtensionCommandContext["ui"], "notify" | "custom">;
+export type SessionNavigatorUI = Pick<
+  ExtensionCommandContext["ui"],
+  "custom" | "notify" | "select"
+>;
 
 export interface SessionNavigatorParams {
   ui: SessionNavigatorUI;
+  mode: ExtensionCommandContext["mode"];
+  hasUI: boolean;
   agents: readonly NavigableSubagent[];
   registry: AgentConfigLookup;
   cwd: string;
@@ -64,7 +69,15 @@ export interface TranscriptOverlayOptions {
 }
 
 export class SessionNavigatorHandler {
-  async handle({ ui, agents, registry, cwd, readFile }: SessionNavigatorParams): Promise<void> {
+  async handle({
+    ui,
+    mode,
+    hasUI,
+    agents,
+    registry,
+    cwd,
+    readFile,
+  }: SessionNavigatorParams): Promise<void> {
     const entries = listNavigableAgents(agents, registry);
     if (entries.length === 0) {
       ui.notify("No subagent sessions to view.", "info");
@@ -77,9 +90,18 @@ export class SessionNavigatorHandler {
       description: entry.description,
       secondary: `ID ${entry.id} · ${entry.duration} · ${entry.toolUses} tool uses · ${entry.sourceLabel}`,
     }));
-    const selectedKey = await showRosterPicker(ui, "Subagent sessions", items);
+    const selectedKey = await showRosterPicker({ ui, mode, hasUI }, "Subagent sessions", items);
     const entry = entries.find((candidate) => candidate.key === selectedKey);
     if (!entry) return;
+
+    if (mode !== "tui") {
+      const output = entry.outputFile ? ` · output ${sanitizeTerminalText(entry.outputFile)}` : "";
+      ui.notify(
+        `${sanitizeTerminalText(entry.name)} · ${entry.status} · ${entry.duration} · ${entry.toolUses} tool uses · ${entry.sourceLabel} · ID ${sanitizeTerminalText(entry.id)}${output}`,
+        "info",
+      );
+      return;
+    }
 
     let source: TranscriptSource;
     try {

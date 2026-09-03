@@ -17,14 +17,19 @@ describe("listNavigableAgents", () => {
     expect(listNavigableAgents([], registry)).toEqual([]);
   });
 
-  it("makes a session-ready record a live entry", () => {
-    const ready = makeNavigable({ id: "ready", isSessionReady: () => true });
+  it("makes a session-ready record a live entry with its output path", () => {
+    const ready = makeNavigable({
+      id: "ready",
+      isSessionReady: () => true,
+      outputFile: "/tasks/ready.jsonl",
+    });
     const entries = listNavigableAgents([ready], registry);
     expect(entries).toHaveLength(1);
     const entry = entries[0];
     if (!entry) throw new Error("live entry missing");
     expect(entry.kind).toBe("live");
     expect(entry.kind === "live" && entry.record).toBe(ready);
+    expect(entry.outputFile).toBe("/tasks/ready.jsonl");
   });
 
   it("makes a released record (no live session, has outputFile) a snapshot entry", () => {

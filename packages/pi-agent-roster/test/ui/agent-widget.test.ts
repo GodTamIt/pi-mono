@@ -436,6 +436,52 @@ describe("AgentWidget — self-drives from lifecycle notifications", () => {
   });
 });
 
+describe("AgentWidget — RPC and headless capabilities", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("publishes plain string lines in RPC without starting an animation timer", () => {
+    const record = createTestSubagent({
+      status: "running",
+      completedAt: undefined,
+      invocation: { runInBackground: true },
+    });
+    const widget = new AgentWidget(
+      { listAgents: () => [record] } as unknown as SubagentManager,
+      new AgentTypeRegistry(() => new Map()),
+      new FooterStatus(),
+    );
+    const setWidget = vi.fn<UICtx["setWidget"]>();
+
+    widget.setUICtx({ setStatus: vi.fn(), setWidget }, "rpc", true);
+    widget.onSubagentStarted(record);
+
+    expect(Array.isArray(setWidget.mock.calls.at(-1)?.[1])).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    widget.dispose();
+  });
+
+  it("skips widgets and timers without UI", () => {
+    const record = createTestSubagent({
+      status: "running",
+      completedAt: undefined,
+      invocation: { runInBackground: true },
+    });
+    const widget = new AgentWidget(
+      { listAgents: () => [record] } as unknown as SubagentManager,
+      new AgentTypeRegistry(() => new Map()),
+      new FooterStatus(),
+    );
+    const setWidget = vi.fn<UICtx["setWidget"]>();
+
+    widget.setUICtx({ setStatus: vi.fn(), setWidget }, "print", false);
+    widget.onSubagentStarted(record);
+
+    expect(setWidget).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
 describe("AgentWidget — theme changes", () => {
   it("re-registers its factory after invalidation and renders with the new theme", () => {
     const record = createTestSubagent({

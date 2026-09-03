@@ -340,6 +340,8 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       await sessionNavigator.handle({
         ui: ctx.ui,
+        mode: ctx.mode,
+        hasUI: ctx.hasUI,
         agents: manager.listAgents(),
         registry,
         cwd: ctx.cwd,
