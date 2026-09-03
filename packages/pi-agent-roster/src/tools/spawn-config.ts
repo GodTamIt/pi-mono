@@ -1,4 +1,4 @@
-import type { Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentTypeRegistry } from "../config/agent-types.ts";
 import { resolveAgentInvocationConfig } from "../config/invocation-config.ts";
 import type { ModelRegistry } from "../session/model-resolver.ts";
@@ -12,13 +12,13 @@ import {
 } from "../ui/display.ts";
 
 export interface ModelInfo {
-  parentModel: Model<any> | undefined;
+  parentModel: Model<Api> | undefined;
   modelRegistry: ModelRegistry | undefined;
 }
 
 export interface PropagatedStackSelection {
   stack: string;
-  fallbackModel: Model<any>;
+  fallbackModel: Model<Api>;
   fallbackThinking?: ThinkingLevel | undefined;
 }
 
@@ -40,7 +40,7 @@ export interface SpawnExecution {
   task: string;
   description: string;
   notice?: string | undefined;
-  model: Model<any> | undefined;
+  model: Model<Api> | undefined;
   effectiveMaxTurns: number | undefined;
   effectiveGraceTurns: number | undefined;
   thinking: ThinkingLevel | undefined;
@@ -89,7 +89,7 @@ export interface ResumeConfig {
 
 export interface ResolvedInvocationSelection {
   agent: AgentConfig;
-  model: Model<any> | undefined;
+  model: Model<Api> | undefined;
   invocation: AgentInvocation;
   notice?: string | undefined;
 }
@@ -272,7 +272,10 @@ export function resolveSpawnConfig(
 
   const selection = resolveInvocationForAgent(rawType, params, registry, modelInfo, options);
   if ("error" in selection) return selection;
-  const canonical = registry.resolveType(rawType)!;
+  const canonical = registry.resolveType(rawType);
+  if (!canonical) return { error: `Unknown subagent type: ${rawType}` };
+  const stack = selection.invocation.stack;
+  if (!stack) return { error: `No stack resolved for subagent type: ${canonical}` };
   const resolvedConfig = resolveAgentInvocationConfig(selection.agent, params);
   const runInBackground = resolvedConfig.runInBackground;
   const effectiveMaxTurns = resolvedConfig.maxTurns ?? settings.defaultMaxTurns;
@@ -311,7 +314,7 @@ export function resolveSpawnConfig(
       effectiveMaxTurns,
       effectiveGraceTurns,
       thinking: selection.invocation.thinking,
-      stack: selection.invocation.stack!,
+      stack,
       runInBackground,
       agentInvocation,
     },

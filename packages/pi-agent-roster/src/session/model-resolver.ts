@@ -1,17 +1,17 @@
 /**
  * Model resolution: exact match ("provider/modelId") with fuzzy fallback.
  */
-import type { Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 
 export interface ModelRegistry {
-  find(provider: string, modelId: string): Model<any> | undefined;
-  getAll(): Model<any>[];
-  getAvailable?(): Model<any>[];
+  find(provider: string, modelId: string): Model<Api> | undefined;
+  getAll(): Model<Api>[];
+  getAvailable?(): Model<Api>[];
 }
 
 /** Successful model resolution — `model` is the resolved or inherited model instance. */
 export interface ModelResolutionResult {
-  model: Model<any> | undefined;
+  model: Model<Api> | undefined;
   error?: undefined | undefined;
 }
 
@@ -35,7 +35,7 @@ export type ModelResolution = ModelResolutionResult | ModelResolutionError;
  *    - `modelFromParams` false → silent fallback to `parentModel`.
  */
 export function resolveInvocationModel(
-  parentModel: Model<any> | undefined,
+  parentModel: Model<Api> | undefined,
   modelInput: string | undefined,
   modelFromParams: boolean,
   registry: ModelRegistry | undefined,
@@ -53,7 +53,7 @@ export function resolveInvocationModel(
  * Tries exact match first ("provider/modelId"), then fuzzy match against all available models.
  * Returns the Model on success, or an error message string on failure.
  */
-export function resolveModel(input: string, registry: ModelRegistry): Model<any> | string {
+export function resolveModel(input: string, registry: ModelRegistry): Model<Api> | string {
   // Available models (those with auth configured)
   const all = registry.getAvailable?.() ?? registry.getAll();
   const availableSet = new Set(all.map((m) => `${m.provider}/${m.id}`.toLowerCase()));
@@ -89,8 +89,8 @@ export function resolveModel(input: string, registry: ModelRegistry): Model<any>
  * contains > provider+id contains — and return the best match at or above
  * the acceptance threshold (20), or undefined if nothing scores high enough.
  */
-function findBestFuzzyMatch(all: Model<any>[], query: string): Model<any> | undefined {
-  let bestMatch: Model<any> | undefined;
+function findBestFuzzyMatch(all: Model<Api>[], query: string): Model<Api> | undefined {
+  let bestMatch: Model<Api> | undefined;
   let bestScore = 0;
 
   for (const m of all) {

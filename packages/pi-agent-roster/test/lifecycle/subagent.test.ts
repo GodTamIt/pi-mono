@@ -724,7 +724,7 @@ describe("Subagent.run() — happy path", () => {
     const agent = createRunnableAgent();
     await agent.run();
     expect(agent.subagentSession).toBeDefined();
-    expect(agent.subagentSession!.session).toBeDefined();
+    expect(agent.subagentSession?.session).toBeDefined();
   });
 
   it("flushes pending steers when session is created", async () => {
@@ -748,7 +748,7 @@ describe("Subagent.run() — workspace provider", () => {
       workspaceProvider: provider,
     });
     await agent.run();
-    const params = (factory as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const params = (factory as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
     expect(params.cwd).toBe("/ws/dir");
   });
 
@@ -783,7 +783,7 @@ describe("Subagent.run() — workspace provider", () => {
       workspaceProvider: provider,
     });
     await agent.run();
-    const params = (factory as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const params = (factory as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
     expect(params.cwd).toBeUndefined();
     expect(agent.status).toBe("completed");
   });
@@ -859,7 +859,7 @@ describe("Subagent.run() — RunConfig threading", () => {
       getRunConfig: () => ({ defaultMaxTurns: 10, graceTurns: 3 }),
     });
     await agent.run();
-    const turnOpts = stub.runTurnLoop.mock.calls[0]![1];
+    const turnOpts = stub.runTurnLoop.mock.calls[0]?.[1];
     expect(turnOpts.defaultMaxTurns).toBe(10);
     expect(turnOpts.graceTurns).toBe(3);
   });
@@ -954,8 +954,8 @@ describe("Subagent.resume() — happy path", () => {
     const signal = new AbortController().signal;
     await agent.resume("continue", signal);
     expect(stub.resumeTurnLoop).toHaveBeenCalledOnce();
-    expect(stub.resumeTurnLoop.mock.calls[0]![0]).toBe("continue");
-    expect(stub.resumeTurnLoop.mock.calls[0]![1]).toMatchObject({ signal });
+    expect(stub.resumeTurnLoop.mock.calls[0]?.[0]).toBe("continue");
+    expect(stub.resumeTurnLoop.mock.calls[0]?.[1]).toMatchObject({ signal });
   });
 
   it("resets transition state before resuming", async () => {
@@ -1023,7 +1023,7 @@ describe("Subagent.resume() — happy path", () => {
       });
       expect(factory).toHaveBeenCalledTimes(2);
       expect(onSessionCreated).toHaveBeenCalledTimes(2);
-      expect(vi.mocked(factory).mock.calls[1]![0]).toMatchObject({
+      expect(vi.mocked(factory).mock.calls[1]?.[0]).toMatchObject({
         cwd: "/worktrees/resumed",
         resumeTranscriptPath: "/sessions/child.jsonl",
       });
@@ -1043,7 +1043,11 @@ describe("Subagent.resume() — happy path", () => {
       createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl"),
       createSubagentSessionStub(createMockSession(), "/sessions/child.jsonl"),
     ];
-    const factory: SessionFactory = vi.fn(async () => toSubagentSession(stubs.shift()!));
+    const factory: SessionFactory = vi.fn(async () => {
+      const stub = stubs.shift();
+      if (!stub) throw new Error("Unexpected child session reconstruction");
+      return toSubagentSession(stub);
+    });
     const preparedWorkspaces = [
       makeWorkspace("/ws/one"),
       makeWorkspace("/ws/two"),
@@ -1082,7 +1086,7 @@ describe("Subagent.resume() — happy path", () => {
     await agent.releaseSession();
     await agent.resume("continue");
 
-    expect(vi.mocked(factory).mock.calls[1]![0]).toMatchObject({
+    expect(vi.mocked(factory).mock.calls[1]?.[0]).toMatchObject({
       cwd: STUB_SNAPSHOT.cwd,
       resumeTranscriptPath: "/sessions/child.jsonl",
     });
@@ -1116,7 +1120,7 @@ describe("Subagent.resume() — happy path", () => {
       modelName: "anthropic/deep",
       thinking: "high",
     });
-    expect(vi.mocked(factory).mock.calls[1]![0]).toMatchObject({
+    expect(vi.mocked(factory).mock.calls[1]?.[0]).toMatchObject({
       model,
       thinkingLevel: "high",
       invocation: { stack: "deep", modelName: "anthropic/deep", thinking: "high" },
@@ -1314,7 +1318,7 @@ describe("Subagent.resume() — error handling", () => {
 
     await agent.resume("retry");
     expect(agent.status).toBe("completed");
-    expect(vi.mocked(factory).mock.calls[1]![0]).toMatchObject({
+    expect(vi.mocked(factory).mock.calls[1]?.[0]).toMatchObject({
       cwd: "/ws/retry",
       resumeTranscriptPath: "/sessions/child.jsonl",
     });

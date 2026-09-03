@@ -1,13 +1,13 @@
 /**
- * make-model.ts — Test fixture builder for the SDK `Model<any>` type.
+ * make-model.ts — Test fixture builder for the SDK `Model<Api>` type.
  *
  * Model resolution tests only vary `id` / `name` / `provider`; this builder fills
  * the remaining SDK-required fields with inert defaults so fixtures satisfy the
- * real `Model<any>` shape without every test call site repeating them.
+ * real `Model<Api>` shape without every test call site repeating them.
  */
-import type { Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 
-export function makeModel(overrides: Partial<Model<any>> = {}): Model<any> {
+export function makeModel(overrides: Partial<Model<Api>> = {}): Model<Api> {
   return {
     id: "test-model",
     name: "Test Model",

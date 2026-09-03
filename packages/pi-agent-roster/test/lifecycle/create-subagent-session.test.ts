@@ -18,6 +18,11 @@ let io: ReturnType<typeof createSubagentSessionIO>;
 const exec = vi.fn();
 const MODEL_REGISTRY = { find: () => undefined, getAll: () => [] };
 
+function requireDefined<T>(value: T | undefined, label: string): T {
+  if (value === undefined) throw new Error(`${label} was not created`);
+  return value;
+}
+
 beforeEach(() => {
   io = createSubagentSessionIO();
 });
@@ -138,8 +143,16 @@ describe("createSubagentSession — assembly", () => {
         appendSystemPromptOverride: expect.any(Function),
       }),
     );
-    const loaderOpts = io.createResourceLoader.mock.calls[0]![0];
-    expect(loaderOpts.appendSystemPromptOverride()).toEqual([]);
+    const loaderCall = requireDefined(
+      io.createResourceLoader.mock.calls[0],
+      "resource loader call",
+    );
+    const loaderOpts = loaderCall[0];
+    const appendSystemPromptOverride = requireDefined(
+      loaderOpts.appendSystemPromptOverride,
+      "append system prompt override",
+    );
+    expect(appendSystemPromptOverride()).toEqual([]);
   });
 
   it.each(["append", "replace"] as const)(
@@ -162,8 +175,16 @@ describe("createSubagentSession — assembly", () => {
       { baseline: STUB_SNAPSHOT, modelRegistry: MODEL_REGISTRY, type: "Explore" },
       defaultDeps(),
     );
-    const loaderOpts = io.createResourceLoader.mock.calls[0]![0];
-    expect(loaderOpts.systemPromptOverride!()).toBe(" ");
+    const loaderCall = requireDefined(
+      io.createResourceLoader.mock.calls[0],
+      "resource loader call",
+    );
+    const loaderOpts = loaderCall[0];
+    const systemPromptOverride = requireDefined(
+      loaderOpts.systemPromptOverride,
+      "system prompt override",
+    );
+    expect(systemPromptOverride()).toBe(" ");
   });
 
   it("passes only permitted built-ins to prompt guidance and session creation", async () => {
@@ -200,7 +221,7 @@ describe("createSubagentSession — assembly", () => {
       createSubagentSessionDeps({ io, exec, registry: mockAgentLookup }),
     );
 
-    const sm = io.createSessionManager.mock.results[0]!.value;
+    const sm = requireDefined(io.createSessionManager.mock.results[0]?.value, "session manager");
     expect(sm.newSession).toHaveBeenCalledWith({ parentSession: "parent-id-123" });
   });
 });
@@ -266,8 +287,14 @@ describe("createSubagentSession — lifecycle ordering", () => {
     );
 
     expect(lifecycle.spawning).toHaveBeenCalledOnce();
-    const spawnOrder = lifecycle.spawning.mock.invocationCallOrder[0]!;
-    const createdOrder = lifecycle.sessionCreated.mock.invocationCallOrder[0]!;
+    const spawnOrder = requireDefined(
+      lifecycle.spawning.mock.invocationCallOrder[0],
+      "spawning invocation",
+    );
+    const createdOrder = requireDefined(
+      lifecycle.sessionCreated.mock.invocationCallOrder[0],
+      "session-created invocation",
+    );
     expect(spawnOrder).toBeLessThan(createdOrder);
   });
 
@@ -278,8 +305,14 @@ describe("createSubagentSession — lifecycle ordering", () => {
     );
 
     expect(lifecycle.sessionCreated).toHaveBeenCalledOnce();
-    const createdOrder = lifecycle.sessionCreated.mock.invocationCallOrder[0]!;
-    const bindOrder = session.bindExtensions.mock.invocationCallOrder[0]!;
+    const createdOrder = requireDefined(
+      lifecycle.sessionCreated.mock.invocationCallOrder[0],
+      "session-created invocation",
+    );
+    const bindOrder = requireDefined(
+      session.bindExtensions.mock.invocationCallOrder[0],
+      "bindExtensions invocation",
+    );
     expect(createdOrder).toBeLessThan(bindOrder);
   });
 

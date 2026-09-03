@@ -1,4 +1,4 @@
-import type { Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { SessionContext } from "../types.ts";
 
 /** Immutable model identity safe to retain before a child is admitted. */
@@ -13,7 +13,7 @@ export interface ChildRuntimeBaseline {
   readonly model?: ChildModelIdentity | undefined;
 }
 
-export function modelIdentity(model: Model<any> | undefined): ChildModelIdentity | undefined {
+export function modelIdentity(model: Model<Api> | undefined): ChildModelIdentity | undefined {
   return model ? { provider: model.provider, id: model.id } : undefined;
 }
 

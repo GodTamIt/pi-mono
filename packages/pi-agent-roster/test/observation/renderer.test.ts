@@ -32,7 +32,8 @@ function makeDetails(overrides: Partial<NotificationDetails> = {}): Notification
 /** Render to a flat string for assertion; uses the public render() API. */
 function renderText(result: ReturnType<ReturnType<typeof createNotificationRenderer>>): string {
   expect(result).toBeDefined();
-  return result!.render(120).join("\n");
+  if (!result) throw new Error("Expected rendered notification");
+  return result.render(120).join("\n");
 }
 
 describe("resolveStatusPresentation", () => {

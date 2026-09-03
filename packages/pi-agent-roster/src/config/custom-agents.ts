@@ -264,7 +264,7 @@ function parsePermission(value: unknown, path: string): ToolPermissions | undefi
 
   const result: Record<string, "allow" | "deny"> = {};
   for (const [name, action] of Object.entries(value)) {
-    if (name !== "*" && (!name || name !== name.trim() || /[\\/*?\[\]{}]/.test(name))) {
+    if (name !== "*" && (!name || name !== name.trim() || /[\\/*?[\]{}]/.test(name))) {
       throw new Error(`${path}.${name} must be an exact tool name or "*"`);
     }
     if (action !== "allow" && action !== "deny") {

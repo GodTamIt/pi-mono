@@ -118,7 +118,7 @@ describe("createFactorySession", () => {
   it("stubs retain Mock methods (vi.fn())", () => {
     const session = createFactorySession();
     session.setActiveToolsByName(["read"]);
-    expect(session.setActiveToolsByName.mock.calls[0]![0]).toEqual(["read"]);
+    expect(session.setActiveToolsByName.mock.calls[0]?.[0]).toEqual(["read"]);
   });
 
   it("exposes the core's working event bus (subscribe/emit)", () => {

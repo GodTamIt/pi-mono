@@ -1,4 +1,4 @@
-import type { Model, ThinkingLevel } from "@earendil-works/pi-ai";
+import type { Api, Model, ThinkingLevel } from "@earendil-works/pi-ai";
 import type {
   BeforeAgentStartEvent,
   BeforeAgentStartEventResult,
@@ -30,7 +30,7 @@ export const MANAGED_SUBAGENT_TOOLS = [
 type PiThinkingLevel = ReturnType<ExtensionAPI["getThinkingLevel"]>;
 
 interface BaselineState {
-  model: Model<any> | undefined;
+  model: Model<Api> | undefined;
   thinking: PiThinkingLevel;
   systemPrompt: string;
   tools: string[];
@@ -39,7 +39,7 @@ interface BaselineState {
 interface Selection {
   name: string;
   agent: AgentConfig;
-  model: Model<any>;
+  model: Model<Api>;
   thinking: ThinkingLevel | undefined;
   tools: string[];
   stack: string;
@@ -116,7 +116,7 @@ export class PrimaryController {
     }
   }
 
-  beforeAgentStart(event: BeforeAgentStartEvent): BeforeAgentStartEventResult | void {
+  beforeAgentStart(event: BeforeAgentStartEvent): BeforeAgentStartEventResult | undefined {
     this.options.footerStatus.setTaskPrompt(event.prompt);
     const baseline = this.baseline?.systemPrompt;
     if (baseline === undefined) return;
@@ -623,7 +623,7 @@ export class PrimaryController {
   }
 }
 
-function formatModel(model: Model<any> | undefined): string {
+function formatModel(model: Model<Api> | undefined): string {
   return model ? `${model.provider}/${model.id}` : "none";
 }
 

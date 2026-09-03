@@ -54,7 +54,7 @@ export interface AgentToolManager {
       graceTurns?: number | undefined;
     },
     invocation?: {
-      model: import("@earendil-works/pi-ai").Model<any> | undefined;
+      model: import("@earendil-works/pi-ai").Model<import("@earendil-works/pi-ai").Api> | undefined;
       snapshot: import("../types.ts").AgentInvocation;
     },
   ) => Promise<Subagent | undefined>;
@@ -96,7 +96,7 @@ export class AgentTool {
     private readonly runtime: AgentToolRuntime,
     private readonly settings: AgentToolSettings,
     private readonly registry: AgentTypeRegistry,
-    private readonly agentDir: string,
+    agentDir: string,
     private readonly options: AgentToolOptions = {},
     private readonly invocationRows?: InvocationRowRegistry | undefined,
   ) {
@@ -230,7 +230,6 @@ export class AgentTool {
   toToolDefinition() {
     const typeListText = this.typeListText;
     const availableTypesText = this.availableTypesText;
-    const agentDir = this.agentDir;
     const invocationRows = this.invocationRows;
     const getRecord = (id: string) => this.manager.getRecord(id);
 

@@ -35,8 +35,8 @@ export function renderAgentResult(
 export function renderRunning(details: AgentDetails, theme: Theme): string {
   const frame = SPINNER[details.spinnerFrame ?? 0] ?? "";
   const s = renderStats(details, theme);
-  let line = theme.fg("accent", frame) + (s ? " " + s : "");
-  line += "\n" + theme.fg("dim", `  ${GLYPHS.subLine}  ${details.activity ?? "thinking\u2026"}`);
+  let line = theme.fg("accent", frame) + (s ? ` ${s}` : "");
+  line += `\n${theme.fg("dim", `  ${GLYPHS.subLine}  ${details.activity ?? "thinking\u2026"}`)}`;
   return line;
 }
 
@@ -51,7 +51,7 @@ export function renderBackground(
 
   if (expanded && resultText) {
     for (const rawLine of resultText.split("\n")) {
-      line += "\n" + theme.fg("dim", `  ${rawLine}`);
+      line += `\n${theme.fg("dim", `  ${rawLine}`)}`;
     }
     return line;
   }
@@ -60,10 +60,10 @@ export function renderBackground(
   const thinking = details.tags?.find((tag) => tag.startsWith("thinking: "));
   const shortParts = [stack, thinking].filter((part): part is string => part !== undefined);
   if (shortParts.length > 0) {
-    line += "\n" + theme.fg("dim", `  ${shortParts.join(" \u00B7 ")}`);
+    line += `\n${theme.fg("dim", `  ${shortParts.join(" \u00B7 ")}`)}`;
   }
   if (details.modelName) {
-    line += "\n" + theme.fg("dim", `  model: ${details.modelName}`);
+    line += `\n${theme.fg("dim", `  model: ${details.modelName}`)}`;
   }
   return line;
 }
@@ -81,18 +81,18 @@ export function renderCompleted(
     ? theme.fg("warning", GLYPHS.success)
     : theme.fg("success", GLYPHS.success);
   const s = renderStats(details, theme);
-  let line = icon + (s ? " " + s : "");
-  line += " " + theme.fg("dim", "\u00B7") + " " + theme.fg("dim", duration);
+  let line = icon + (s ? ` ${s}` : "");
+  line += ` ${theme.fg("dim", "\u00B7")} ${theme.fg("dim", duration)}`;
 
   if (expanded) {
     if (resultText) {
       for (const l of resultText.split("\n")) {
-        line += "\n" + theme.fg("dim", `  ${l}`);
+        line += `\n${theme.fg("dim", `  ${l}`)}`;
       }
     }
   } else {
     const doneText = isSteered ? "Wrapped up (turn limit)" : "Done";
-    line += "\n" + theme.fg("dim", `  ${GLYPHS.subLine}  ${doneText}`);
+    line += `\n${theme.fg("dim", `  ${GLYPHS.subLine}  ${doneText}`)}`;
   }
   return line;
 }
@@ -100,20 +100,20 @@ export function renderCompleted(
 /** Render stopped status: dim stop icon + stats + "Stopped". */
 export function renderStopped(details: AgentDetails, theme: Theme): string {
   const s = renderStats(details, theme);
-  let line = theme.fg("dim", GLYPHS.stopped) + (s ? " " + s : "");
-  line += "\n" + theme.fg("dim", `  ${GLYPHS.subLine}  Stopped`);
+  let line = theme.fg("dim", GLYPHS.stopped) + (s ? ` ${s}` : "");
+  line += `\n${theme.fg("dim", `  ${GLYPHS.subLine}  Stopped`)}`;
   return line;
 }
 
 /** Render error or aborted status: error icon + stats + status message. */
 export function renderFailed(details: AgentDetails, theme: Theme): string {
   const s = renderStats(details, theme);
-  let line = theme.fg("error", GLYPHS.failure) + (s ? " " + s : "");
+  let line = theme.fg("error", GLYPHS.failure) + (s ? ` ${s}` : "");
 
   if (details.status === "error") {
-    line += "\n" + theme.fg("error", `  ${GLYPHS.subLine}  Error: ${details.error ?? "unknown"}`);
+    line += `\n${theme.fg("error", `  ${GLYPHS.subLine}  Error: ${details.error ?? "unknown"}`)}`;
   } else {
-    line += "\n" + theme.fg("warning", `  ${GLYPHS.subLine}  Aborted (max turns exceeded)`);
+    line += `\n${theme.fg("warning", `  ${GLYPHS.subLine}  Aborted (max turns exceeded)`)}`;
   }
   return line;
 }
@@ -134,5 +134,5 @@ export function renderStats(details: AgentDetails, theme: Theme): string {
   if (details.toolUses > 0)
     parts.push(`${details.toolUses} tool use${details.toolUses === 1 ? "" : "s"}`);
   if (details.tokens) parts.push(details.tokens);
-  return parts.map((p) => theme.fg("dim", p)).join(" " + theme.fg("dim", "\u00B7") + " ");
+  return parts.map((p) => theme.fg("dim", p)).join(` ${theme.fg("dim", "\u00B7")} `);
 }

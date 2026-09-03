@@ -19,6 +19,11 @@ import { makeModel } from "../helpers/make-model.ts";
 const baseModel = makeModel({ id: "base" });
 const primaryModel = makeModel({ id: "primary", reasoning: true });
 
+type CustomUI = (
+  factory: unknown,
+  options?: Parameters<ExtensionContext["ui"]["custom"]>[1],
+) => Promise<string | undefined>;
+
 function config(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
     id: "lead",
@@ -59,7 +64,7 @@ function harness(
   const calls: string[] = [];
   const notify = vi.fn();
   const setStatus = vi.fn();
-  const custom = vi.fn<(...args: any[]) => Promise<string | undefined>>(async () => undefined);
+  const custom = vi.fn<CustomUI>(async () => undefined);
   const pi = {
     getFlag: vi.fn((name: string) => flags[name]),
     getThinkingLevel: vi.fn(() => thinking),
@@ -115,14 +120,13 @@ function harness(
 }
 
 function renderPickerFactory(factory: unknown, width = 80): string[] {
-  let component: { render(width: number): string[] } | undefined;
   const create = factory as (
     tui: { requestRender(): void },
     theme: { fg(_color: string, text: string): string; bold(text: string): string },
     keybindings: object,
     done: (value: string | undefined) => void,
   ) => { render(width: number): string[] };
-  component = create(
+  const component = create(
     { requestRender: () => undefined },
     { fg: (_color, text) => text, bold: (text) => text },
     {},
@@ -457,7 +461,7 @@ describe("PrimaryController", () => {
     } as unknown as ExtensionCommandContext);
 
     expect(h.custom).toHaveBeenCalledOnce();
-    const lines = renderPickerFactory(h.custom.mock.calls[0]![0], 60).join("\n");
+    const lines = renderPickerFactory(h.custom.mock.calls[0]?.[0], 60).join("\n");
     expect(lines).toContain("Select primary agent");
     expect(lines).toContain("Pi default · Default · Current");
     expect(lines).toContain("stack: default");
@@ -476,7 +480,7 @@ describe("PrimaryController", () => {
 
     await h.controller.handleAgentCommand("", commandCtx);
 
-    const lines = renderPickerFactory(h.custom.mock.calls[0]![0], 120).join("\n");
+    const lines = renderPickerFactory(h.custom.mock.calls[0]?.[0], 120).join("\n");
     expect(lines).toContain("Pi default · Default");
     expect(lines).toContain("Lead · Current");
     expect(lines).toContain("stack: default · model: anthropic/primary · thinking: high");
@@ -553,7 +557,7 @@ describe("PrimaryController", () => {
     } as unknown as ExtensionCommandContext);
 
     expect(h.custom).toHaveBeenCalledOnce();
-    const lines = renderPickerFactory(h.custom.mock.calls[0]![0], 120).join("\n");
+    const lines = renderPickerFactory(h.custom.mock.calls[0]?.[0], 120).join("\n");
     expect(lines).toContain("Select stack for Lead");
     expect(lines).not.toContain("Select agent");
     expect(waitForIdle).toHaveBeenCalledOnce();
@@ -612,7 +616,7 @@ describe("PrimaryController", () => {
 
     await h.controller.handleStackCommand("lead", commandCtx);
 
-    const lines = renderPickerFactory(h.custom.mock.calls[0]![0], 120).join("\n");
+    const lines = renderPickerFactory(h.custom.mock.calls[0]?.[0], 120).join("\n");
     expect(lines).toContain("auto");
     expect(lines).toContain("default · Default");
     expect(lines).toContain("light · Current override");

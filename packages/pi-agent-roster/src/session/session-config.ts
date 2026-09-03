@@ -10,7 +10,7 @@
  * before invoking this function, keeping the assembler synchronous.
  */
 
-import type { Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentConfigLookup } from "../config/agent-types.ts";
 import type { AgentConfig, AgentPromptConfig, SubagentType, ThinkingLevel } from "../types.ts";
 import type { EnvInfo } from "./env.ts";
@@ -47,7 +47,7 @@ export interface AssemblerContext {
   /** Parent working directory (overridable via options.cwd). */
   cwd: string;
   /** Content-free runtime model used when the agent has no override. */
-  parentModel?: Model<any> | undefined;
+  parentModel?: Model<Api> | undefined;
   /** Model registry for resolving config.model strings. */
   modelRegistry: ModelRegistry;
 }
@@ -60,7 +60,7 @@ export interface AssemblerOptions {
   /** Override working directory (e.g. for worktree isolation). */
   cwd?: string | undefined;
   /** Explicit model override — wins over agentConfig.model and parent model. */
-  model?: Model<any> | undefined;
+  model?: Model<Api> | undefined;
   /** Explicit thinking level — wins over agentConfig.thinking. */
   thinkingLevel?: ThinkingLevel | undefined;
   /** True when resolution intentionally selected no thinking, preventing config fallback. */
@@ -83,7 +83,7 @@ export interface SessionConfig {
    * Resolved model instance (undefined → use parent model as passed to SDK).
    * The assembler passes it through without inspection.
    */
-  model: Model<any> | undefined;
+  model: Model<Api> | undefined;
   /** Resolved thinking level (undefined → inherit from session). */
   thinkingLevel: ThinkingLevel | undefined;
   /** Per-agent configured max turns (from agentConfig.maxTurns). */
@@ -102,10 +102,10 @@ export interface SessionConfig {
  * that model instead.
  */
 function resolveDefaultModel(
-  parentModel: Model<any> | undefined,
+  parentModel: Model<Api> | undefined,
   registry: AssemblerContext["modelRegistry"],
   configModel?: string | undefined,
-): Model<any> | undefined {
+): Model<Api> | undefined {
   if (configModel) {
     const slashIdx = configModel.indexOf("/");
     if (slashIdx !== -1) {

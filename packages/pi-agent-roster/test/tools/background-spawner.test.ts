@@ -38,7 +38,7 @@ describe("spawnBackground", () => {
   it("passes parentSession.toolCallId to manager.spawn", () => {
     const { manager } = createToolDeps();
     spawnBackground(manager, makeParams({ parentSession: { toolCallId: "tc-99" } }));
-    const spawnOpts = (manager.spawn as ReturnType<typeof vi.fn>).mock.calls[0]![3];
+    const spawnOpts = (manager.spawn as ReturnType<typeof vi.fn>).mock.calls[0]?.[3];
     expect(spawnOpts.parentSession?.toolCallId).toBe("tc-99");
   });
 
@@ -50,8 +50,8 @@ describe("spawnBackground", () => {
         config: makeConfig({ description: "my task" }),
       }),
     );
-    expect(result.content[0]!.text).toContain("agent-1");
-    expect(result.content[0]!.text).toContain("my task");
+    expect(result.content[0]?.text).toContain("agent-1");
+    expect(result.content[0]?.text).toContain("my task");
   });
 
   it("mentions 'queued' in result when record status is queued", () => {
@@ -63,8 +63,8 @@ describe("spawnBackground", () => {
       },
     });
     const result = spawnBackground(deps.manager, makeParams({ settings: { maxConcurrent: 4 } }));
-    expect(result.content[0]!.text).toContain("queued");
-    expect(result.content[0]!.text).toContain("max 4 concurrent");
+    expect(result.content[0]?.text).toContain("queued");
+    expect(result.content[0]?.text).toContain("max 4 concurrent");
     expect(result.details?.status).toBe("queued");
   });
 
@@ -72,7 +72,7 @@ describe("spawnBackground", () => {
     const deps = createToolDeps();
     deps.manager.getRecord = vi.fn().mockReturnValue(createTestSubagent({ status: "running" }));
     const result = spawnBackground(deps.manager, makeParams());
-    expect(result.content[0]!.text).toContain("started");
+    expect(result.content[0]?.text).toContain("started");
     expect(result.details?.status).toBe("running");
   });
 
@@ -89,7 +89,7 @@ describe("spawnBackground", () => {
       },
     });
     const result = spawnBackground(deps.manager, makeParams());
-    expect(result.content[0]!.text).toContain("/sessions/bg.jsonl");
+    expect(result.content[0]?.text).toContain("/sessions/bg.jsonl");
   });
 
   it("returns error text when manager.spawn throws", () => {
@@ -103,6 +103,6 @@ describe("spawnBackground", () => {
       },
     });
     const result = spawnBackground(deps.manager, makeParams());
-    expect(result.content[0]!.text).toContain("spawn failed");
+    expect(result.content[0]?.text).toContain("spawn failed");
   });
 });

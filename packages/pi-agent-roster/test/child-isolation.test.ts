@@ -19,6 +19,11 @@ import {
 
 const CHILD_TASK = "Inspect src/auth.ts and report the exact failing branch.";
 const CHILD_SYSTEM = "CHILD_ONLY_SYSTEM";
+
+function requireDefined<T>(value: T | undefined, label: string): T {
+  if (value === undefined) throw new Error(`${label} was not created`);
+  return value;
+}
 const PARENT_SENTINELS = [
   { kind: "prompt", text: "PARENT_PROMPT_SENTINEL" },
   { kind: "message", text: "PARENT_MESSAGE_SENTINEL" },
@@ -81,14 +86,23 @@ function createHarness(limit = 4) {
         registry: createAgentLookup({ systemPrompt: "STATIC_CHILD_INSTRUCTIONS" }),
       }),
     );
-    const loader = io.createResourceLoader.mock.calls[0]![0];
+    const loaderCall = requireDefined(
+      io.createResourceLoader.mock.calls[0],
+      "resource loader call",
+    );
+    const loader = loaderCall[0];
+    const systemPromptOverride = requireDefined(
+      loader.systemPromptOverride,
+      "system prompt override",
+    );
+    const sessionManager =
+      io.createSessionManager.mock.results[0]?.value ??
+      io.openSessionManager.mock.results[0]?.value;
     constructions.push({
       params,
-      systemPrompt: loader.systemPromptOverride!(),
+      systemPrompt: systemPromptOverride(),
       session,
-      sessionManager:
-        io.createSessionManager.mock.results[0]?.value ??
-        io.openSessionManager.mock.results[0]!.value,
+      sessionManager: requireDefined(sessionManager, "session manager"),
     });
     return subagentSession;
   });
@@ -173,7 +187,9 @@ describe("child isolation boundary", () => {
       "thinkingLevel",
     ]);
     expect(containsReference(record.execution, PARENT_SENTINELS)).toBe(false);
-    assertChildConstructionIsClean(harness.constructions[0]!);
+    assertChildConstructionIsClean(
+      requireDefined(harness.constructions[0], "foreground child construction"),
+    );
     expect(containsReference(toSubagentRecord(record), PARENT_SENTINELS)).toBe(false);
     await harness.manager.dispose();
   });
@@ -203,18 +219,23 @@ describe("child isolation boundary", () => {
         },
       },
     );
-    const queuedRecord = harness.manager.getRecord(queued)!;
+    const queuedRecord = requireDefined(harness.manager.getRecord(queued), "queued child record");
     expect(queuedRecord.status).toBe("queued");
     expect(harness.factory).toHaveBeenCalledTimes(1);
     expect(containsReference(queuedRecord.execution, PARENT_SENTINELS)).toBe(false);
     expect(await queuedRecord.steer("Use the release branch.")).toEqual({ kind: "buffered" });
 
     firstGate.resolve();
-    await harness.manager.getRecord(first)!.promise;
+    const firstRecord = requireDefined(harness.manager.getRecord(first), "first child record");
+    await firstRecord.promise;
     await queuedRecord.promise;
     expect(harness.constructions).toHaveLength(2);
-    assertChildConstructionIsClean(harness.constructions[1]!);
-    expect(harness.constructions[1]!.session.steer).toHaveBeenCalledWith("Use the release branch.");
+    const queuedConstruction = requireDefined(
+      harness.constructions[1],
+      "queued child construction",
+    );
+    assertChildConstructionIsClean(queuedConstruction);
+    expect(queuedConstruction.session.steer).toHaveBeenCalledWith("Use the release branch.");
     await harness.manager.dispose();
   });
 
@@ -223,7 +244,10 @@ describe("child isolation boundary", () => {
     const ctx = parentContext(harness);
     const workspaceCwds = ["/workspace/child-1", "/workspace/child-2"];
     const workspaceProvider = {
-      prepare: vi.fn(async (workspaceCtx) => ({ cwd: workspaceCwds.shift()!, dispose: vi.fn() })),
+      prepare: vi.fn(async () => {
+        const cwd = requireDefined(workspaceCwds.shift(), "workspace cwd");
+        return { cwd, dispose: vi.fn() };
+      }),
     };
     harness.manager.registerWorkspaceProvider(workspaceProvider);
     const runtime = {
@@ -258,7 +282,7 @@ describe("child isolation boundary", () => {
     );
     const service = new SubagentsServiceAdapter(harness.manager, runtime, { registry });
     const id = service.spawn({ type: "worker", task: CHILD_TASK });
-    const record = harness.manager.getRecord(id)!;
+    const record = requireDefined(harness.manager.getRecord(id), "service child record");
     await record.promise;
 
     expect(workspaceProvider.prepare).toHaveBeenCalledWith({
@@ -274,21 +298,29 @@ describe("child isolation boundary", () => {
         runInBackground: true,
       },
     });
-    assertChildConstructionIsClean(harness.constructions[0]!);
-    expect(harness.constructions[0]!.params.cwd).toBe("/workspace/child-1");
-    expect(harness.constructions[0]!.sessionManager.newSession).toHaveBeenCalledWith({
+    const firstConstruction = requireDefined(
+      harness.constructions[0],
+      "service child construction",
+    );
+    assertChildConstructionIsClean(firstConstruction);
+    expect(firstConstruction.params.cwd).toBe("/workspace/child-1");
+    expect(firstConstruction.sessionManager.newSession).toHaveBeenCalledWith({
       parentSession: "parent-lineage-id",
     });
     expect(containsReference(service.inspect(id), PARENT_SENTINELS)).toBe(false);
 
-    const transcript = record.outputFile!;
+    const transcript = requireDefined(record.outputFile, "child transcript");
     await record.releaseSession();
     await service.resume({ id, task: "Resume using only the child transcript." });
-    expect(harness.constructions[1]!.params.resumeTranscriptPath).toBe(transcript);
-    expect(harness.constructions[1]!.params.cwd).toBe("/workspace/child-2");
+    const resumedConstruction = requireDefined(
+      harness.constructions[1],
+      "resumed child construction",
+    );
+    expect(resumedConstruction.params.resumeTranscriptPath).toBe(transcript);
+    expect(resumedConstruction.params.cwd).toBe("/workspace/child-2");
     expect(workspaceProvider.prepare).toHaveBeenCalledTimes(2);
     expect(containsReference(workspaceProvider.prepare.mock.calls, PARENT_SENTINELS)).toBe(false);
-    expect(harness.constructions[1]!.session.prompt).toHaveBeenCalledWith(
+    expect(resumedConstruction.session.prompt).toHaveBeenCalledWith(
       "Resume using only the child transcript.",
     );
     expect(containsReference(service.inspect(id), PARENT_SENTINELS)).toBe(false);

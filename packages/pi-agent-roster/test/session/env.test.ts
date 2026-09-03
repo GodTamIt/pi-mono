@@ -17,8 +17,13 @@ function mockExec(): ShellExec {
         timeout: options?.timeout,
       });
       return { stdout, stderr: "", code: 0 };
-    } catch (err: any) {
-      return { stdout: "", stderr: err.stderr ?? "", code: err.status ?? 1 };
+    } catch (err: unknown) {
+      if (typeof err === "object" && err !== null) {
+        const stderr = "stderr" in err && typeof err.stderr === "string" ? err.stderr : "";
+        const code = "status" in err && typeof err.status === "number" ? err.status : 1;
+        return { stdout: "", stderr, code };
+      }
+      return { stdout: "", stderr: "", code: 1 };
     }
   };
 }

@@ -41,13 +41,13 @@ describe("GetResultTool", () => {
 
   it("returns not-found message for unknown agent ID", async () => {
     const result = await execute(makeManager(), { agent_id: "unknown" });
-    expect(result.content[0]!.text).toContain("Agent not found");
+    expect(result.content[0]?.text).toContain("Agent not found");
   });
 
   it("returns status and result for completed agent", async () => {
     const records = new Map([["agent-1", createTestSubagent()]]);
     const result = await execute(makeManager(records), { agent_id: "agent-1" });
-    const text = result.content[0]!.text;
+    const text = result.content[0]?.text;
     expect(text).toContain("Agent: agent-1");
     expect(text).toContain("completed");
     expect(text).toContain("All done.");
@@ -58,7 +58,7 @@ describe("GetResultTool", () => {
       ["agent-1", createTestSubagent({ status: "running", completedAt: undefined })],
     ]);
     const result = await execute(makeManager(records), { agent_id: "agent-1" });
-    expect(result.content[0]!.text).toContain("still running");
+    expect(result.content[0]?.text).toContain("still running");
   });
 
   it("shows error for failed agent", async () => {
@@ -66,7 +66,7 @@ describe("GetResultTool", () => {
       ["agent-1", createTestSubagent({ status: "error", error: "timeout" })],
     ]);
     const result = await execute(makeManager(records), { agent_id: "agent-1" });
-    expect(result.content[0]!.text).toContain("Error: timeout");
+    expect(result.content[0]?.text).toContain("Error: timeout");
   });
 
   it("marks the record consumed for a completed agent (pull-delivery edge)", async () => {
@@ -108,7 +108,7 @@ describe("GetResultTool", () => {
     const records = new Map([["agent-1", record]]);
     const result = await execute(makeManager(records), { agent_id: "agent-1", wait: true });
     // After waiting, the record is completed and result is shown
-    expect(result.content[0]!.text).toContain("Finished after wait.");
+    expect(result.content[0]?.text).toContain("Finished after wait.");
     expect(record.consumed).toBe(true);
   });
 
@@ -127,7 +127,7 @@ describe("GetResultTool", () => {
       }),
     });
     // The limiter admits the agent only after the parent has begun waiting.
-    const { promise: slot, resolve: openSlot } = Promise.withResolvers<void>(); // eslint-disable-line @typescript-eslint/no-invalid-void-type -- Promise.withResolvers<void> is valid; rule does not allow void in generic fn call type args
+    const { promise: slot, resolve: openSlot } = Promise.withResolvers<undefined>();
     const queuedRun = (async () => {
       await slot;
       await record.run();
@@ -136,10 +136,10 @@ describe("GetResultTool", () => {
     const records = new Map([["agent-1", record]]);
 
     const resultPromise = execute(makeManager(records), { agent_id: "agent-1", wait: true });
-    openSlot();
+    openSlot(undefined);
 
     const result = await resultPromise;
-    expect(result.content[0]!.text).toContain("Finished after the queue.");
+    expect(result.content[0]?.text).toContain("Finished after the queue.");
     expect(record.consumed).toBe(true);
   });
 
@@ -166,7 +166,7 @@ describe("GetResultTool", () => {
     controller.abort();
 
     const result = await resultPromise;
-    expect(result.content[0]!.text).toContain("Status: running");
+    expect(result.content[0]?.text).toContain("Status: running");
     // The parent never collected an outcome, so the completion nudge still owes it one.
     expect(record.consumed).toBe(false);
   });
@@ -178,8 +178,8 @@ describe("GetResultTool", () => {
     record.subagentSession = toSubagentSession(stub);
     const records = new Map([["agent-1", record]]);
     const result = await execute(makeManager(records), { agent_id: "agent-1", verbose: true });
-    expect(result.content[0]!.text).toContain("--- Agent Conversation ---");
-    expect(result.content[0]!.text).toContain("[User]: hello");
+    expect(result.content[0]?.text).toContain("--- Agent Conversation ---");
+    expect(result.content[0]?.text).toContain("[User]: hello");
   });
 
   it("points to the transcript when verbose is requested but the session was released", async () => {
@@ -190,7 +190,7 @@ describe("GetResultTool", () => {
     await record.releaseSession();
     const records = new Map([["agent-1", record]]);
     const result = await execute(makeManager(records), { agent_id: "agent-1", verbose: true });
-    expect(result.content[0]!.text).toContain("Full transcript available at: /tasks/agent.jsonl");
-    expect(result.content[0]!.text).not.toContain("--- Agent Conversation ---");
+    expect(result.content[0]?.text).toContain("Full transcript available at: /tasks/agent.jsonl");
+    expect(result.content[0]?.text).not.toContain("--- Agent Conversation ---");
   });
 });

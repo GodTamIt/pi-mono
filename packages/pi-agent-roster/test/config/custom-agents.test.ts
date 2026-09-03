@@ -4,6 +4,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CustomAgentDiagnosticReporter, loadCustomAgents } from "../../src/config/custom-agents.ts";
 
+function requireDefined<T>(value: T | undefined, label: string): T {
+  if (value === undefined) throw new Error(`${label} was not created`);
+  return value;
+}
+
 describe("loadCustomAgents", () => {
   let tmpDir: string;
   let originalHome: string | undefined;
@@ -51,7 +56,7 @@ run_in_background: true
 You are a security auditor.`,
     );
 
-    const agent = loadCustomAgents(tmpDir).get("auditor")!;
+    const agent = requireDefined(loadCustomAgents(tmpDir).get("auditor"), "auditor agent");
     expect(agent.permission).toEqual({ "*": "deny", read: "allow", audit_tool: "allow" });
     expect(agent.contextFiles).toBe(false);
     expect(agent.promptMode).toBe("replace");
@@ -67,7 +72,7 @@ You are a security auditor.`,
 
   it("defaults to append, all tools allowed, and child context discovery enabled", () => {
     writeAgent("bare", "Just a system prompt, no frontmatter.");
-    const agent = loadCustomAgents(tmpDir).get("bare")!;
+    const agent = requireDefined(loadCustomAgents(tmpDir).get("bare"), "bare agent");
     expect(agent.mode).toBe("subagent");
     expect(agent.permission).toBeUndefined();
     expect(agent.contextFiles).toBe(true);
@@ -161,7 +166,7 @@ Unlimited turns.`,
     );
 
     const result = loadCustomAgents(tmpDir);
-    expect(result.get("unlimited")!.maxTurns).toBeUndefined();
+    expect(requireDefined(result.get("unlimited"), "unlimited agent").maxTurns).toBeUndefined();
   });
 
   it("rejects negative max_turns", () => {
@@ -191,7 +196,7 @@ Extra instructions.`,
     );
 
     const result = loadCustomAgents(tmpDir);
-    expect(result.get("appender")!.promptMode).toBe("append");
+    expect(requireDefined(result.get("appender"), "appender agent").promptMode).toBe("append");
   });
 
   it("rejects an unknown prompt_mode", () => {
@@ -265,7 +270,9 @@ Should be loaded.`,
 
     const result = loadCustomAgents(tmpDir);
     expect(result.has("explore")).toBe(true);
-    expect(result.get("explore")!.description).toBe("Custom Explore");
+    expect(requireDefined(result.get("explore"), "explore agent").description).toBe(
+      "Custom Explore",
+    );
     expect(result.has("custom")).toBe(true);
   });
 
@@ -281,7 +288,7 @@ permission:
     );
 
     const result = loadCustomAgents(tmpDir);
-    expect(result.get("nobody")!.systemPrompt).toBe("");
+    expect(requireDefined(result.get("nobody"), "nobody agent").systemPrompt).toBe("");
   });
 
   it("handles enabled: false frontmatter", () => {
@@ -294,7 +301,7 @@ enabled: false
     );
 
     const result = loadCustomAgents(tmpDir);
-    const agent = result.get("disabled")!;
+    const agent = requireDefined(result.get("disabled"), "disabled agent");
     expect(agent.enabled).toBe(false);
   });
 
@@ -310,13 +317,13 @@ Agent prompt.`,
     );
 
     const result = loadCustomAgents(tmpDir);
-    expect(result.get("myagent")!.displayName).toBe("MyAgent");
+    expect(requireDefined(result.get("myagent"), "myagent agent").displayName).toBe("MyAgent");
   });
 
   it("uses a stable case-insensitive identity when a project file overrides global", () => {
     const globalDir = join(tmpDir, ".pi", "agent", "agents");
     mkdirSync(globalDir, { recursive: true });
-    writeFileSync(globalDir + "/Reviewer.md", "---\ndescription: Global\n---\nGlobal.");
+    writeFileSync(`${globalDir}/Reviewer.md`, "---\ndescription: Global\n---\nGlobal.");
     writeAgent("reviewer", "---\ndescription: Project\n---\nProject.");
 
     const result = loadCustomAgents(tmpDir);
@@ -360,7 +367,10 @@ grace_turns: 3
 Review.`,
     );
 
-    const agent = loadCustomAgents(tmpDir, () => {}).get("reviewer")!;
+    const agent = requireDefined(
+      loadCustomAgents(tmpDir, () => {}).get("reviewer"),
+      "reviewer agent",
+    );
     expect(agent.mode).toBe("all");
     expect(agent.allowedAgents).toEqual(["tests", "explore"]);
     expect(agent.defaultStack).toBe("balanced");
@@ -424,7 +434,9 @@ Review.`,
 
       // Agent is found at $PI_CODING_AGENT_DIR/agents, not at $HOME/.pi/agent/agents
       expect(result.has("via-env")).toBe(true);
-      expect(result.get("via-env")!.description).toBe("Discovered via env var");
+      expect(requireDefined(result.get("via-env"), "via-env agent").description).toBe(
+        "Discovered via env var",
+      );
     } finally {
       if (originalEnv == null) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = originalEnv;

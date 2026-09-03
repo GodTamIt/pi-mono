@@ -1,15 +1,15 @@
-import type { Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentTypeRegistry } from "../config/agent-types.ts";
 import type { ChildRuntimeBaseline } from "../lifecycle/child-runtime-baseline.ts";
 import type { WorkspaceProvider } from "../lifecycle/workspace.ts";
 import type { AgentStackOverrides } from "../stacks/stack-resolver.ts";
-import type { AgentInvocation, SessionContext, Subagent } from "../types.ts";
 import {
-  type PropagatedStackSelection,
   type ModelInfo,
+  type PropagatedStackSelection,
   resolveInvocationForAgent,
   resolveSpawnConfig,
 } from "../tools/spawn-config.ts";
+import type { AgentInvocation, SessionContext, Subagent } from "../types.ts";
 import { describeActivity } from "../ui/display.ts";
 import type { ResumeRequest, SpawnRequest, SubagentRecord, SubagentsService } from "./service.ts";
 
@@ -20,7 +20,7 @@ export interface SubagentManagerLike {
     task: string,
     signal?: AbortSignal,
     budgets?: { maxTurns?: number | undefined; graceTurns?: number | undefined },
-    invocation?: { model: Model<any> | undefined; snapshot: AgentInvocation },
+    invocation?: { model: Model<Api> | undefined; snapshot: AgentInvocation },
   ): Promise<Subagent | undefined>;
   getRecord(id: string): Subagent | undefined;
   listAgents(): Subagent[];

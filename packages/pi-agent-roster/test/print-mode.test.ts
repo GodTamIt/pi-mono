@@ -32,6 +32,7 @@ vi.mock("../src/lifecycle/create-subagent-session.ts", async () => {
   };
 });
 
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import subagentsExtension from "../src/index.ts";
 import { createSubagentSession } from "../src/lifecycle/create-subagent-session.ts";
 import { makeModel } from "./helpers/make-model.ts";
@@ -41,15 +42,21 @@ import {
   toSubagentSession,
 } from "./helpers/mock-session.ts";
 
+type RegisteredTool = {
+  name: string;
+  execute: (...args: unknown[]) => Promise<unknown>;
+};
+type Handler = (...args: unknown[]) => unknown;
+
 function makePi() {
-  const tools = new Map<string, any>();
-  const handlers = new Map<string, any>();
-  const eventHandlers = new Map<string, any>();
+  const tools = new Map<string, RegisteredTool>();
+  const handlers = new Map<string, Handler>();
+  const eventHandlers = new Map<string, Handler>();
 
   return {
     pi: {
       registerMessageRenderer: vi.fn(),
-      registerTool: vi.fn((tool: any) => {
+      registerTool: vi.fn((tool: RegisteredTool) => {
         tools.set(tool.name, tool);
       }),
       registerCommand: vi.fn(),
@@ -61,12 +68,12 @@ function makePi() {
       getAllTools: vi.fn(() => [...tools.values()]),
       setActiveTools: vi.fn(),
       setModel: vi.fn(async () => true),
-      on: vi.fn((event: string, handler: any) => {
+      on: vi.fn((event: string, handler: Handler) => {
         handlers.set(event, handler);
       }),
       events: {
         emit: vi.fn(),
-        on: vi.fn((event: string, handler: any) => {
+        on: vi.fn((event: string, handler: Handler) => {
           eventHandlers.set(event, handler);
           return vi.fn();
         }),
@@ -75,7 +82,7 @@ function makePi() {
       sendMessage: vi.fn(() => {
         throw new Error("stale extension context");
       }),
-    } as any,
+    } as unknown as ExtensionAPI,
     tools,
     handlers,
   };
@@ -103,7 +110,7 @@ function makeHeadlessCtx() {
       getSessionFile: vi.fn(() => "/sessions/parent.jsonl"),
     },
     getSystemPrompt: vi.fn(() => "parent prompt"),
-  } as any;
+  };
 }
 
 describe("print mode background notifications", () => {
@@ -126,6 +133,7 @@ describe("print mode background notifications", () => {
     await handlers.get("session_start")?.({}, ctx);
 
     const agentTool = tools.get("subagent");
+    if (!agentTool) throw new Error("Expected subagent tool");
     await agentTool.execute(
       "tool-call-1",
       {

@@ -266,7 +266,9 @@ describe("NotificationManager", () => {
     const args = makeArgs();
     const system = makeManager(args);
     system.sendCompletion(baseRecord);
-    const content = (args.sendMessage.mock.calls[0]![0] as { content: string }).content;
+    const call = args.sendMessage.mock.calls[0];
+    if (!call) throw new Error("Expected completion notification");
+    const content = (call[0] as { content: string }).content;
     expect(content).toContain("get_subagent_result");
   });
 
@@ -279,7 +281,9 @@ describe("NotificationManager", () => {
       result: undefined,
     });
     system.sendCompletion(record);
-    const content = (args.sendMessage.mock.calls[0]![0] as { content: string }).content;
+    const call = args.sendMessage.mock.calls[0];
+    if (!call) throw new Error("Expected completion notification");
+    const content = (call[0] as { content: string }).content;
     expect(content).toBe(formatTaskNotification(record, 500));
   });
 

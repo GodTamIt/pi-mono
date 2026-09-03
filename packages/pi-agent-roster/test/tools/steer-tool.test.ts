@@ -68,8 +68,8 @@ describe("SteerTool", () => {
       agent_id: "unknown",
       steering: "hi",
     });
-    expect(result.content[0]!.text).toContain("Agent not found");
-    expect(result.content[0]!.text).not.toContain("cleaned up");
+    expect(result.content[0]?.text).toContain("Agent not found");
+    expect(result.content[0]?.text).not.toContain("cleaned up");
   });
 
   it("rejects steering a non-running agent", async () => {
@@ -78,8 +78,8 @@ describe("SteerTool", () => {
       agent_id: "agent-1",
       steering: "hi",
     });
-    expect(result.content[0]!.text).toContain("not running");
-    expect(result.content[0]!.text).toContain("completed");
+    expect(result.content[0]?.text).toContain("not running");
+    expect(result.content[0]?.text).toContain("completed");
   });
 
   it("queues steer when session is not ready", async () => {
@@ -89,7 +89,7 @@ describe("SteerTool", () => {
     const manager = makeManager(records);
     const events = makeEvents();
     const result = await execute(manager, events, { agent_id: "agent-1", steering: "redirect" });
-    expect(result.content[0]!.text).toContain("queued");
+    expect(result.content[0]?.text).toContain("queued");
     expect(record.pendingSteerCount).toBe(1);
     expect(events.emit).toHaveBeenCalledWith("subagents:steered", {
       id: "agent-1",
@@ -113,8 +113,8 @@ describe("SteerTool", () => {
       id: "agent-1",
       steering: "change design",
     });
-    expect(result.content[0]!.text).toContain("Steering message sent");
-    expect(result.content[0]!.text).toContain("3 tool uses");
+    expect(result.content[0]?.text).toContain("Steering message sent");
+    expect(result.content[0]?.text).toContain("3 tool uses");
   });
 
   it("returns error message when steer fails", async () => {
@@ -127,7 +127,7 @@ describe("SteerTool", () => {
       agent_id: "agent-1",
       steering: "hi",
     });
-    expect(result.content[0]!.text).toContain("Failed to steer agent");
-    expect(result.content[0]!.text).toContain("session closed");
+    expect(result.content[0]?.text).toContain("Failed to steer agent");
+    expect(result.content[0]?.text).toContain("session closed");
   });
 });

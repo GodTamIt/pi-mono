@@ -1,4 +1,4 @@
-import type { Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { AgentConfigLookup } from "../../src/config/agent-types.ts";
 import type { AssemblerIO } from "../../src/session/session-config.ts";
@@ -27,9 +27,9 @@ import { assembleSessionConfig } from "../../src/session/session-config.ts";
 const mockEnv = { isGitRepo: false, branch: "", platform: "linux" };
 
 const mockRegistry = {
-  find: vi.fn((): Model<any> | undefined => undefined),
-  getAll: vi.fn((): Model<any>[] => []),
-  getAvailable: vi.fn((): Model<any>[] => []),
+  find: vi.fn((): Model<Api> | undefined => undefined),
+  getAll: vi.fn((): Model<Api>[] => []),
+  getAvailable: vi.fn((): Model<Api>[] => []),
 };
 
 const ctx = {

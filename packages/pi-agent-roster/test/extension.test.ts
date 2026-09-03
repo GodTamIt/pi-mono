@@ -1,7 +1,11 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import extension from "../src/index.ts";
@@ -63,8 +67,15 @@ describe("pi-agent-roster extension", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       const pi = loadInteractiveExtension();
-      const handlers = new Map<string, any>(vi.mocked(pi.on).mock.calls as any);
-      const commands = new Map<string, any>(vi.mocked(pi.registerCommand).mock.calls as any);
+      type EventHandler = (event: unknown, ctx: ExtensionContext) => unknown;
+      type CommandHandler = (args: string, ctx: ExtensionCommandContext) => Promise<void>;
+      type TestCommand = { handler: CommandHandler };
+      const handlers = new Map<string, EventHandler>(
+        vi.mocked(pi.on).mock.calls as unknown as Array<[string, EventHandler]>,
+      );
+      const commands = new Map<string, TestCommand>(
+        vi.mocked(pi.registerCommand).mock.calls as unknown as Array<[string, TestCommand]>,
+      );
       const notify = vi.fn();
       const ctx = {
         cwd,
@@ -72,7 +83,7 @@ describe("pi-agent-roster extension", () => {
         ui: { notify, setStatus: vi.fn() },
         getSystemPrompt: () => "system prompt",
         waitForIdle: async () => undefined,
-      } as any;
+      } as unknown as ExtensionCommandContext;
 
       await handlers.get("session_start")?.({}, ctx);
       await commands.get("agents:reload")?.handler("", ctx);
@@ -102,13 +113,16 @@ describe("pi-agent-roster extension", () => {
       handler: expect.any(Function),
     });
 
-    const agentHandler = vi.mocked(pi.registerShortcut).mock.calls[0]![1].handler;
-    const stackHandler = vi.mocked(pi.registerShortcut).mock.calls[1]![1].handler;
+    const agentShortcut = vi.mocked(pi.registerShortcut).mock.calls[0];
+    const stackShortcut = vi.mocked(pi.registerShortcut).mock.calls[1];
+    if (!agentShortcut || !stackShortcut) throw new Error("shortcuts were not registered");
+    const agentHandler = agentShortcut[1].handler;
+    const stackHandler = stackShortcut[1].handler;
     const notify = vi.fn();
     const idleCtx = {
       isIdle: () => true,
       ui: { notify },
-    } as any;
+    } as unknown as ExtensionContext;
 
     agentHandler(idleCtx);
     stackHandler(idleCtx);
@@ -123,7 +137,7 @@ describe("pi-agent-roster extension", () => {
     const busyCtx = {
       isIdle: () => false,
       ui: { notify },
-    } as any;
+    } as unknown as ExtensionContext;
     agentHandler(busyCtx);
     stackHandler(busyCtx);
 

@@ -13,9 +13,9 @@
  */
 
 import { dirname } from "node:path";
-import type { Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentSession, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { BUILTIN_TOOL_NAMES, type AgentConfigLookup } from "../config/agent-types.ts";
+import { type AgentConfigLookup, BUILTIN_TOOL_NAMES } from "../config/agent-types.ts";
 import {
   resolvePermittedToolNames,
   unknownPermissionToolNames,
@@ -82,7 +82,7 @@ export interface CreateSessionOptions {
   sessionManager: SessionManagerLike;
   settingsManager: SettingsManager;
   modelRegistry: ModelRegistry;
-  model?: Model<any> | undefined;
+  model?: Model<Api> | undefined;
   /** Allowlist: only these tool names are enabled in the session. */
   tools: string[];
   /** Denylist applied after `tools`, on every tool-registry rebuild. */
@@ -149,13 +149,13 @@ export interface CreateSubagentSessionParams {
   baseline: ChildRuntimeBaseline;
   /** Live SDK values resolved only after admission. */
   modelRegistry: ModelRegistry;
-  defaultModel?: Model<any> | undefined;
+  defaultModel?: Model<Api> | undefined;
   type: SubagentType;
   /** Resolved workspace cwd; undefined → parent cwd. */
   cwd?: string | undefined;
   /** Parent session identity (file path + session ID). */
   parentSession?: ParentSessionInfo | undefined;
-  model?: Model<any> | undefined;
+  model?: Model<Api> | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
   invocation?: AgentInvocation | undefined;
   /** Existing child transcript to reconstruct; never a parent transcript. */

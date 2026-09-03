@@ -1,6 +1,11 @@
 import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join, sep } from "node:path";
-import { createJiti } from "jiti";
+import {
+  fauxAssistantMessage,
+  fauxProvider,
+  fauxThinking,
+  fauxToolCall,
+} from "@earendil-works/pi-ai";
 import {
   createAgentSession,
   createEventBus,
@@ -9,12 +14,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import {
-  fauxAssistantMessage,
-  fauxProvider,
-  fauxThinking,
-  fauxToolCall,
-} from "@earendil-works/pi-ai";
+import { createJiti } from "jiti";
 
 const [agentDir, workDir, childWorkDir, parentSessionDir, installedPackage] = process.argv.slice(2);
 if (!agentDir || !workDir || !childWorkDir || !parentSessionDir || !installedPackage) {

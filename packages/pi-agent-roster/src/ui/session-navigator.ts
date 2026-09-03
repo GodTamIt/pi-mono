@@ -18,6 +18,7 @@ import {
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import type { AgentConfigLookup } from "../config/agent-types.ts";
+import { sanitizeTerminalText } from "./display.ts";
 import { type RosterPickerItem, showRosterPicker } from "./roster-picker.ts";
 import {
   fileSnapshotSource,
@@ -27,7 +28,6 @@ import {
   type NavigationIdentity,
   type TranscriptSource,
 } from "./session-navigation.ts";
-import { sanitizeTerminalText } from "./display.ts";
 import { TranscriptContent } from "./transcript-content.ts";
 
 const MIN_VIEWPORT = 3;

@@ -6,7 +6,7 @@
  * Follows the same pattern as pi-permission-system's ExtensionRuntime.
  */
 
-import type { Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import {
   buildChildRuntimeBaseline,
   type ChildRuntimeBaseline,
@@ -61,7 +61,7 @@ export class SubagentRuntime {
     return this.currentCtx.modelRegistry;
   }
 
-  getDefaultModel(): Model<any> | undefined {
+  getDefaultModel(): Model<Api> | undefined {
     return this.currentCtx?.model;
   }
 

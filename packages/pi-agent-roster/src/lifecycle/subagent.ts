@@ -6,7 +6,7 @@
  * Behavior (abort, steer buffering) lives here rather than on SubagentManager.
  */
 
-import type { Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentSessionEvent, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { debugLog } from "../debug.ts";
 import { subscribeSubagentObserver } from "../observation/record-observer.ts";
@@ -77,8 +77,8 @@ export interface SubagentExecution {
 export interface AdmittedSubagentRuntime {
   createSubagentSession: (params: CreateSubagentSessionParams) => Promise<SubagentSession>;
   modelRegistry: ModelRegistry;
-  defaultModel?: Model<any> | undefined;
-  model?: Model<any> | undefined;
+  defaultModel?: Model<Api> | undefined;
+  model?: Model<Api> | undefined;
   observer?: SubagentLifecycleObserver | undefined;
   runConfig?: RunConfig | undefined;
   workspaceProvider?: WorkspaceProvider | undefined;
@@ -324,7 +324,8 @@ export class Subagent {
    */
   async run(): Promise<void> {
     const runtime = this.admitted();
-    const workspaceBracket = this.workspaceBracket!;
+    const workspaceBracket = this.workspaceBracket;
+    if (!workspaceBracket) throw new Error(`Subagent ${this.id} has no workspace bracket`);
     this.markRunning(Date.now());
     runtime.observer?.onStarted?.(this);
     this.listeners.wireSignal(runtime.signal, () => this.abort());
@@ -449,7 +450,7 @@ export class Subagent {
     task: string,
     signal?: AbortSignal,
     budgets?: { maxTurns?: number | undefined; graceTurns?: number | undefined },
-    invocation?: { model: Model<any> | undefined; snapshot: AgentInvocation },
+    invocation?: { model: Model<Api> | undefined; snapshot: AgentInvocation },
   ): Promise<void> {
     const session = this.subagentSession;
     const transcriptPath = session?.outputFile ?? this._releasedOutputFile;
@@ -494,7 +495,12 @@ export class Subagent {
       return this._promise;
     }
 
-    this._promise = this.reconstructAndResume(transcriptPath!, session, task, signal, budgets);
+    if (!transcriptPath) {
+      return Promise.reject(
+        new Error("Subagent not configured for reconstructed resume — missing child transcript"),
+      );
+    }
+    this._promise = this.reconstructAndResume(transcriptPath, session, task, signal, budgets);
     return this._promise;
   }
 
@@ -745,9 +751,11 @@ export class Subagent {
       : result.steered
         ? "steered"
         : "completed";
+    const workspaceBracket = this.workspaceBracket;
+    if (!workspaceBracket) throw new Error(`Subagent ${this.id} has no workspace bracket`);
     const finalResult =
       result.responseText +
-      this.workspaceBracket!.dispose({ status: finalStatus, description: this.description });
+      workspaceBracket.dispose({ status: finalStatus, description: this.description });
 
     if (result.aborted) this.markAborted(finalResult);
     else if (result.steered) this.markSteered(finalResult);

@@ -279,7 +279,9 @@ describe("SessionNavigatorHandler", () => {
   }
 
   function renderCapturedPicker(ui: ReturnType<typeof makeUI>, width = 120): string[] {
-    const factory = ui.custom.mock.calls[0]![0] as (
+    const call = ui.custom.mock.calls[0];
+    if (!call) throw new Error("picker call missing");
+    const factory = call[0] as (
       tui: TUI,
       theme: ReturnType<typeof ansiTheme>,
       kb: unknown,
@@ -290,7 +292,9 @@ describe("SessionNavigatorHandler", () => {
 
   // Invoke the overlay factory captured by the handler's second ui.custom call.
   function renderCapturedOverlay(ui: ReturnType<typeof makeUI>, width = 80): string[] {
-    const factory = ui.custom.mock.calls[1]![0] as (
+    const call = ui.custom.mock.calls[1];
+    if (!call) throw new Error("overlay call missing");
+    const factory = call[0] as (
       tui: TUI,
       theme: ReturnType<typeof ansiTheme>,
       kb: unknown,
@@ -346,7 +350,9 @@ describe("SessionNavigatorHandler", () => {
     });
 
     expect(ui.custom).toHaveBeenCalledTimes(2);
-    expect(ui.custom.mock.calls[1]![1]).toMatchObject({
+    const overlayCall = ui.custom.mock.calls[1];
+    if (!overlayCall) throw new Error("overlay call missing");
+    expect(overlayCall[1]).toMatchObject({
       overlayOptions: { width: 120, maxHeight: "70%" },
     });
     const picker = renderCapturedPicker(ui).join("\n");

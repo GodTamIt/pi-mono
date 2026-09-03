@@ -26,9 +26,9 @@ describe("runForeground", () => {
   it("returns completion message with tool use count on success", async () => {
     const { manager } = createToolDeps();
     const result = await runForeground(manager, makeParams(), undefined, undefined);
-    expect(result.content[0]!.text).toContain("Agent completed");
-    expect(result.content[0]!.text).toContain("3 tool uses");
-    expect(result.content[0]!.text).toContain("All done.");
+    expect(result.content[0]?.text).toContain("Agent completed");
+    expect(result.content[0]?.text).toContain("3 tool uses");
+    expect(result.content[0]?.text).toContain("All done.");
   });
 
   it("marks the returned record consumed (foreground-return delivery edge)", async () => {
@@ -61,8 +61,8 @@ describe("runForeground", () => {
       },
     });
     const result = await runForeground(deps.manager, makeParams(), undefined, undefined);
-    expect(result.content[0]!.text).toContain("Agent failed");
-    expect(result.content[0]!.text).toContain("Context window exceeded");
+    expect(result.content[0]?.text).toContain("Agent failed");
+    expect(result.content[0]?.text).toContain("Context window exceeded");
   });
 
   it("returns error text when spawnAndWait throws", async () => {
@@ -73,7 +73,7 @@ describe("runForeground", () => {
       },
     });
     const result = await runForeground(deps.manager, makeParams(), undefined, undefined);
-    expect(result.content[0]!.text).toContain("runner crashed");
+    expect(result.content[0]?.text).toContain("runner crashed");
   });
 
   it("includes fallback note when fellBack is true", async () => {
@@ -90,14 +90,11 @@ describe("runForeground", () => {
       undefined,
       undefined,
     );
-    expect(result.content[0]!.text).toContain('Unknown agent type "unknown-type"');
+    expect(result.content[0]?.text).toContain('Unknown agent type "unknown-type"');
   });
 
   it("calls onUpdate with streaming details while running", async () => {
-    let resolve!: (r: any) => void;
-    const promise = new Promise<any>((res) => {
-      resolve = res;
-    });
+    const { promise, resolve } = Promise.withResolvers<ReturnType<typeof createTestSubagent>>();
     const deps = createToolDeps({
       manager: {
         ...createToolDeps().manager,

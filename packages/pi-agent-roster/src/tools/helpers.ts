@@ -137,7 +137,7 @@ export function buildAgentGuidelines(registry: TypeListRegistry): string[] {
 /** Derive a short model label from a model string. */
 export function getModelLabelFromConfig(model: string): string {
   // Strip provider prefix (e.g. "anthropic/claude-sonnet-4-6" → "claude-sonnet-4-6")
-  const name = model.includes("/") ? model.split("/").pop()! : model;
+  const name = model.slice(model.lastIndexOf("/") + 1);
   // Strip trailing date suffix (e.g. "claude-haiku-4-5-20251001" → "claude-haiku-4-5")
   return name.replace(/-\d{8}$/, "");
 }

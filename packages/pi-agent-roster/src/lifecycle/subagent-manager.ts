@@ -7,7 +7,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import { debugLog } from "../debug.ts";
 import type { RunConfig } from "../runtime.ts";
 import type { ModelRegistry } from "../session/model-resolver.ts";
@@ -72,7 +72,7 @@ export interface SubagentManagerOptions {
   baseCwd: string;
   /** Live SDK model values, read only after admission. */
   getModelRegistry?: (() => ModelRegistry) | undefined;
-  getDefaultModel?: (() => Model<any> | undefined) | undefined;
+  getDefaultModel?: (() => Model<Api> | undefined) | undefined;
   getRunConfig?: (() => RunConfig) | undefined;
   /** Live accessor for the session-retention windows; defaults applied when absent. */
   getRetentionPolicy?: (() => RetentionPolicy) | undefined;
@@ -81,7 +81,7 @@ export interface SubagentManagerOptions {
 
 export interface AgentSpawnConfig {
   description: string;
-  model?: Model<any> | undefined;
+  model?: Model<Api> | undefined;
   maxTurns?: number | undefined;
   graceTurns?: number | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
@@ -112,7 +112,7 @@ export class SubagentManager {
   private readonly limiter: ConcurrencyLimiter;
   private readonly baseCwd: string;
   private readonly getModelRegistry?: (() => ModelRegistry) | undefined;
-  private readonly getDefaultModel?: (() => Model<any> | undefined) | undefined;
+  private readonly getDefaultModel?: (() => Model<Api> | undefined) | undefined;
   private getRunConfig: (() => RunConfig) | undefined;
   private getRetentionPolicy: (() => RetentionPolicy) | undefined;
   private _workspaceProvider?: WorkspaceProvider | undefined;
@@ -304,7 +304,8 @@ export class SubagentManager {
     options: Omit<AgentSpawnConfig, "isBackground">,
   ): Promise<Subagent> {
     const id = this.spawn(baseline, type, task, { ...options, isBackground: false });
-    const record = this.agents.get(id)!;
+    const record = this.agents.get(id);
+    if (!record) throw new Error(`Spawned subagent ${id} was not registered`);
     await record.promise;
     return record;
   }
@@ -318,7 +319,7 @@ export class SubagentManager {
     task: string,
     signal?: AbortSignal | undefined,
     budgets?: { maxTurns?: number | undefined; graceTurns?: number | undefined },
-    invocation?: { model: Model<any> | undefined; snapshot: AgentInvocation },
+    invocation?: { model: Model<Api> | undefined; snapshot: AgentInvocation },
   ): Promise<Subagent | undefined> {
     const agent = this.agents.get(id);
     if (!agent || agent.isActive() || (!agent.isSessionReady() && !agent.sessionReleased)) {

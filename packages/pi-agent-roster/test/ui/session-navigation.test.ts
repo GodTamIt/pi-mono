@@ -21,7 +21,8 @@ describe("listNavigableAgents", () => {
     const ready = makeNavigable({ id: "ready", isSessionReady: () => true });
     const entries = listNavigableAgents([ready], registry);
     expect(entries).toHaveLength(1);
-    const entry = entries[0]!;
+    const entry = entries[0];
+    if (!entry) throw new Error("live entry missing");
     expect(entry.kind).toBe("live");
     expect(entry.kind === "live" && entry.record).toBe(ready);
   });
@@ -34,7 +35,8 @@ describe("listNavigableAgents", () => {
       description: "Investigate the bug",
       toolUses: 3,
     });
-    const entry = listNavigableAgents([released], registry)[0]!;
+    const entry = listNavigableAgents([released], registry)[0];
+    if (!entry) throw new Error("snapshot entry missing");
     expect(entry.kind).toBe("snapshot");
     expect(entry.kind === "snapshot" && entry.outputFile).toBe("/tasks/released-1.jsonl");
     expect(entry).toMatchObject({
@@ -64,7 +66,8 @@ describe("listNavigableAgents", () => {
       startedAt: 1000,
       completedAt: 4000,
     });
-    const entry = listNavigableAgents([record], registry)[0]!;
+    const entry = listNavigableAgents([record], registry)[0];
+    if (!entry) throw new Error("live entry missing");
     expect(entry).toMatchObject({
       key: "live:child-7",
       id: "child-7",

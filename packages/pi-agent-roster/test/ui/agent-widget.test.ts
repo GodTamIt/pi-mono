@@ -285,7 +285,8 @@ describe("AgentWidget — projection reads progress off Subagent records", () =>
       requestRender: () => {},
     };
     const stubTheme = { fg: (_: string, t: string) => t, bold: (t: string) => t };
-    const lines = renderFn!(stubTui, stubTheme).render();
+    if (typeof renderFn !== "function") throw new Error("widget factory missing");
+    const lines = renderFn(stubTui, stubTheme).render();
     const allText = lines.join("\n");
     expect(allText).toContain("turns: 3/6");
     expect(allText).toContain("tools: 3");
@@ -510,7 +511,8 @@ describe("AgentWidget — background-only filtering", () => {
         requestRender: () => {},
       };
       const stubTheme = { fg: (_: string, t: string) => t, bold: (t: string) => t };
-      return renderFn!(stubTui, stubTheme).render();
+      if (typeof renderFn !== "function") throw new Error("widget factory missing");
+      return renderFn(stubTui, stubTheme).render();
     };
     return { widget, lastContent, renderLines };
   }

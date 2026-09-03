@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { type ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
 import { AgentTypeRegistry } from "../../src/config/agent-types.ts";
@@ -54,10 +54,72 @@ describe("AgentTool", () => {
     const hostile =
       "npm WARN \u001b[31mdeprecated\u001b[0m\u001b]0;npm install\u0007" +
       "\u001b[3Aoverwrite\rprogress\b!";
-    const component = def.renderResult!(
+    const renderResult = def.renderResult;
+    if (!renderResult) throw new Error("renderResult missing");
+    const plainTheme = new Theme(
+      {
+        accent: "",
+        border: "",
+        borderAccent: "",
+        borderMuted: "",
+        success: "",
+        error: "",
+        warning: "",
+        muted: "",
+        dim: "",
+        text: "",
+        thinkingText: "",
+        userMessageText: "",
+        customMessageText: "",
+        customMessageLabel: "",
+        toolTitle: "",
+        toolOutput: "",
+        mdHeading: "",
+        mdLink: "",
+        mdLinkUrl: "",
+        mdCode: "",
+        mdCodeBlock: "",
+        mdCodeBlockBorder: "",
+        mdQuote: "",
+        mdQuoteBorder: "",
+        mdHr: "",
+        mdListBullet: "",
+        toolDiffAdded: "",
+        toolDiffRemoved: "",
+        toolDiffContext: "",
+        syntaxComment: "",
+        syntaxKeyword: "",
+        syntaxFunction: "",
+        syntaxVariable: "",
+        syntaxString: "",
+        syntaxNumber: "",
+        syntaxType: "",
+        syntaxOperator: "",
+        syntaxPunctuation: "",
+        thinkingOff: "",
+        thinkingMinimal: "",
+        thinkingLow: "",
+        thinkingMedium: "",
+        thinkingHigh: "",
+        thinkingXhigh: "",
+        bashMode: "",
+      },
+      {
+        selectedBg: "",
+        userMessageBg: "",
+        customMessageBg: "",
+        toolPendingBg: "",
+        toolSuccessBg: "",
+        toolErrorBg: "",
+      },
+      "truecolor",
+    );
+    vi.spyOn(plainTheme, "fg").mockImplementation((_color, text) => text);
+    vi.spyOn(plainTheme, "bold").mockImplementation((text) => text);
+    const component = renderResult(
       { content: [{ type: "text", text: hostile }], details: undefined },
       {} as never,
-      { fg: (_color: string, text: string) => text, bold: (text: string) => text } as any,
+      plainTheme,
       {} as never,
     );
     const text = component.render(120).join("\n");
@@ -180,7 +242,7 @@ describe("AgentTool — resume path", () => {
       subagent_type: "general-purpose",
       resume: "nonexistent",
     });
-    expect(result.content[0]!.text).toContain("Agent not found");
+    expect(result.content[0]?.text).toContain("Agent not found");
   });
 
   it("returns no-session when agent has no active session", async () => {
@@ -193,7 +255,7 @@ describe("AgentTool — resume path", () => {
       subagent_type: "general-purpose",
       resume: "agent-1",
     });
-    expect(result.content[0]!.text).toContain("no child transcript");
+    expect(result.content[0]?.text).toContain("no child transcript");
   });
 
   it("returns not-found copy without claiming cleanup for an unknown resume ID", async () => {
@@ -205,8 +267,8 @@ describe("AgentTool — resume path", () => {
       subagent_type: "general-purpose",
       resume: "nonexistent",
     });
-    expect(result.content[0]!.text).toContain("Agent not found");
-    expect(result.content[0]!.text).not.toContain("cleaned up");
+    expect(result.content[0]?.text).toContain("Agent not found");
+    expect(result.content[0]?.text).not.toContain("cleaned up");
   });
 
   it("resumes a released agent from its child transcript", async () => {
@@ -223,7 +285,7 @@ describe("AgentTool — resume path", () => {
       subagent_type: "general-purpose",
       resume: "agent-1",
     });
-    expect(result.content[0]!.text).toContain("All done.");
+    expect(result.content[0]?.text).toContain("All done.");
     expect(deps.manager.resume).toHaveBeenCalledWith(
       "agent-1",
       "continue",
@@ -242,7 +304,8 @@ describe("AgentTool — resume path", () => {
       createSubagentSessionStub(createMockSession()),
     );
     deps.manager.getRecord = vi.fn().mockReturnValue(resumeRecord);
-    const parentModel = deps.runtime.getModelInfo().parentModel!;
+    const parentModel = deps.runtime.getModelInfo().parentModel;
+    if (!parentModel) throw new Error("parent model missing");
     const model = { ...parentModel, reasoning: true };
     deps.runtime.getModelInfo = vi.fn(() => ({
       parentModel: model,
@@ -291,7 +354,7 @@ describe("AgentTool — resume path", () => {
       thinking: "turbo",
     });
 
-    expect(result.content[0]!.text).toContain("thinking must be one of");
+    expect(result.content[0]?.text).toContain("thinking must be one of");
     expect(deps.manager.resume).not.toHaveBeenCalled();
   });
 
@@ -311,7 +374,7 @@ describe("AgentTool — resume path", () => {
       subagent_type: "general-purpose",
       resume: "agent-1",
     });
-    expect(result.content[0]!.text).toContain("Resumed output.");
+    expect(result.content[0]?.text).toContain("Resumed output.");
   });
 
   it("marks the resumed record consumed (resume-return delivery edge)", async () => {
@@ -351,10 +414,10 @@ describe("AgentTool — resume path", () => {
       run_in_background: true,
     });
 
-    expect(result.content[0]!.text).toContain("resumed in background");
-    expect(result.content[0]!.text).toContain("Agent ID: agent-1");
-    expect(result.content[0]!.text).toContain("get_subagent_result");
-    expect(result.content[0]!.text).toContain("steer_subagent");
+    expect(result.content[0]?.text).toContain("resumed in background");
+    expect(result.content[0]?.text).toContain("Agent ID: agent-1");
+    expect(result.content[0]?.text).toContain("get_subagent_result");
+    expect(result.content[0]?.text).toContain("steer_subagent");
     expect(resumeRecord.consumed).toBe(false);
     expect(deps.manager.resume).toHaveBeenCalledWith(
       "agent-1",
@@ -383,7 +446,7 @@ describe("AgentTool — model resolution error", () => {
       model: "nonexistent-model-xyz",
     });
     // User-specified model that doesn't resolve → error message
-    expect(result.content[0]!.text).toContain("nonexistent-model-xyz");
+    expect(result.content[0]?.text).toContain("nonexistent-model-xyz");
   });
 });
 
@@ -398,7 +461,7 @@ describe("AgentTool — background execution", () => {
       subagent_type: "general-purpose",
       run_in_background: true,
     });
-    const text = result.content[0]!.text;
+    const text = result.content[0]?.text;
     expect(text).toContain("background");
     expect(text).toContain("agent-1");
     expect(text).toContain("bg task");
@@ -417,7 +480,7 @@ describe("AgentTool — background execution", () => {
       run_in_background: true,
     });
     // Background spawn succeeds — no emitEvent dep required
-    expect(result.content[0]!.text).toContain("background");
+    expect(result.content[0]?.text).toContain("background");
   });
 
   it("passes parentSession.toolCallId to manager.spawn", async () => {
@@ -429,7 +492,7 @@ describe("AgentTool — background execution", () => {
       subagent_type: "general-purpose",
       run_in_background: true,
     });
-    const spawnOpts = (deps.manager.spawn as ReturnType<typeof vi.fn>).mock.calls[0]![3];
+    const spawnOpts = (deps.manager.spawn as ReturnType<typeof vi.fn>).mock.calls[0]?.[3];
     expect(spawnOpts.parentSession?.toolCallId).toBe("tc-1");
   });
 });
@@ -445,7 +508,7 @@ describe("AgentTool — foreground execution", () => {
       description: "fg task",
       subagent_type: "general-purpose",
     });
-    const text = result.content[0]!.text;
+    const text = result.content[0]?.text;
     expect(text).toContain("Agent completed");
     expect(text).toContain("Task complete.");
   });
@@ -460,8 +523,8 @@ describe("AgentTool — foreground execution", () => {
       description: "fg task",
       subagent_type: "general-purpose",
     });
-    expect(result.content[0]!.text).toContain("Agent failed");
-    expect(result.content[0]!.text).toContain("Out of context");
+    expect(result.content[0]?.text).toContain("Agent failed");
+    expect(result.content[0]?.text).toContain("Out of context");
   });
 
   it("returns error when spawnAndWait throws", async () => {
@@ -472,6 +535,6 @@ describe("AgentTool — foreground execution", () => {
       description: "fg task",
       subagent_type: "general-purpose",
     });
-    expect(result.content[0]!.text).toContain("spawn failure");
+    expect(result.content[0]?.text).toContain("spawn failure");
   });
 });

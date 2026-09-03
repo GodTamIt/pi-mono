@@ -102,12 +102,12 @@ export function createNotificationRenderer() {
 
       const preview = sanitizeTerminalText(d.resultPreview, true);
       const previewLines = buildPreviewLines(preview, true);
-      for (const l of previewLines) line += "\n" + theme.fg("dim", `  ${l}`);
+      for (const l of previewLines) line += `\n${theme.fg("dim", `  ${l}`)}`;
 
       // Output file link (if present)
       if (d.outputFile) {
         const outputFile = sanitizeTerminalText(d.outputFile);
-        line += "\n  " + theme.fg("muted", `transcript: ${outputFile}`);
+        line += `\n  ${theme.fg("muted", `transcript: ${outputFile}`)}`;
       }
     }
 

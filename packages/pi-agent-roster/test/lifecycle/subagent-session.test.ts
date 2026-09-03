@@ -10,12 +10,12 @@ import { createChildLifecycleMock } from "../helpers/subagent-session-io.ts";
  * `listeners` lets tests drive turn_end events for turn-limit assertions.
  */
 function createSession(finalText: string) {
-  const listeners: Array<(event: any) => void> = [];
+  const listeners: Array<(event: unknown) => void> = [];
   /** Teardown call order — the shutdown emit must precede session disposal. */
   const calls: string[] = [];
   const session = {
     messages: [] as unknown[],
-    subscribe: vi.fn((listener: (event: any) => void) => {
+    subscribe: vi.fn((listener: (event: unknown) => void) => {
       listeners.push(listener);
       return () => {};
     }),
@@ -47,7 +47,7 @@ function createSession(finalText: string) {
 }
 
 function emitTurnEnd(
-  listeners: Array<(e: any) => void>,
+  listeners: Array<(e: unknown) => void>,
   stopReason: "stop" | "toolUse" = "toolUse",
 ) {
   for (const l of listeners) {

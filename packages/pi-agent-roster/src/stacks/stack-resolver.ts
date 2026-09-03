@@ -1,4 +1,4 @@
-import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
+import { type Api, getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import { type ModelRegistry, resolveModel } from "../session/model-resolver.ts";
 import type { AgentConfig, ThinkingLevel } from "../types.ts";
 
@@ -15,7 +15,7 @@ export interface StackFallbackNotice {
 export interface ResolveAgentStackOptions {
   agent: AgentConfig;
   registry: ModelRegistry;
-  runtimeModel?: Model<any> | undefined;
+  runtimeModel?: Model<Api> | undefined;
   runtimeThinking?: ThinkingLevel | undefined;
   explicitStack?: string | undefined;
   sessionOverride?: string | undefined;
@@ -27,7 +27,7 @@ export interface ResolveAgentStackOptions {
 
 export interface ResolvedAgentStack {
   stack: string;
-  model: Model<any> | undefined;
+  model: Model<Api> | undefined;
   modelName?: string | undefined;
   thinking?: ThinkingLevel | undefined;
   notice?: StackFallbackNotice | undefined;
@@ -127,7 +127,7 @@ export class AgentStackOverrides {
 
 export function clampThinking(
   thinking: ThinkingLevel | undefined,
-  model: Model<any> | undefined,
+  model: Model<Api> | undefined,
 ): ThinkingLevel | undefined {
   if (!thinking || !model) return thinking;
   const supported = getSupportedThinkingLevels(model).filter(
