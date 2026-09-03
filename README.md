@@ -22,7 +22,7 @@ Primary-agent profiles and in-process subagent orchestration for Pi.
 
 [Package guide](./packages/pi-agent-roster/README.md)
 
-### [`@ohgodtamit/pi-usage`](./packages/pi-agent-usage/README.md)
+### [`@ohgodtamit/pi-usage`](./packages/pi-usage/README.md)
 
 Usage dashboards and live provider quota reporting for Pi.
 
@@ -31,7 +31,7 @@ Usage dashboards and live provider quota reporting for Pi.
 - **Live quota signals.** Combine captured rate-limit headers with supported OpenAI Codex, ZAI, OpenRouter, and OpenAI account APIs.
 - **Fast rescans.** Incremental session caching keeps repeat opens responsive while invalidating after new turns.
 
-[Package guide](./packages/pi-agent-usage/README.md)
+[Package guide](./packages/pi-usage/README.md)
 
 ### [`@ohgodtamit/pi-agent-browser`](./packages/pi-agent-browser/README.md)
 

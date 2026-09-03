@@ -2,7 +2,7 @@
 
 ## @ohgodtamit/pi-usage donor
 
-`packages/pi-agent-usage` forks [`@zaganjade/pi-usage@1.9.2`](https://github.com/ZaganJade/pi-extension/tree/2de5ac6bd6a802338d78e9daba1f29a4a74e29d3/usage), by ZaganJade under the MIT License (`Copyright (c) 2026 ZaganJade`), pinned at commit `2de5ac6bd6a802338d78e9daba1f29a4a74e29d3`. The retained donor license and path-level derivation inventory are published in [`packages/pi-agent-usage/THIRD_PARTY_NOTICES.md`](packages/pi-agent-usage/THIRD_PARTY_NOTICES.md).
+`packages/pi-usage` forks [`@zaganjade/pi-usage@1.9.2`](https://github.com/ZaganJade/pi-extension/tree/2de5ac6bd6a802338d78e9daba1f29a4a74e29d3/usage), by ZaganJade under the MIT License (`Copyright (c) 2026 ZaganJade`), pinned at commit `2de5ac6bd6a802338d78e9daba1f29a4a74e29d3`. The retained donor license and path-level derivation inventory are published in [`packages/pi-usage/THIRD_PARTY_NOTICES.md`](packages/pi-usage/THIRD_PARTY_NOTICES.md).
 
 ## pi-agent-browser donor
 

@@ -5,9 +5,9 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/GodTamIt/pi-mono.git",
-    "directory": "packages/pi-agent-usage"
+    "directory": "packages/pi-usage"
   },
-  "homepage": "https://github.com/GodTamIt/pi-mono/tree/master/packages/pi-agent-usage#readme",
+  "homepage": "https://github.com/GodTamIt/pi-mono/tree/master/packages/pi-usage#readme",
   "bugs": {
     "url": "https://github.com/GodTamIt/pi-mono/issues"
   },

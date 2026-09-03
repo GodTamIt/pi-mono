@@ -351,13 +351,13 @@ pi -e npm:@ohgodtamit/pi-usage
 From this repository checkout:
 
 ```bash
-pi install ./packages/pi-agent-usage
+pi install ./packages/pi-usage
 ```
 
 From a local path:
 
 ```bash
-pi install ./packages/pi-agent-usage
+pi install ./packages/pi-usage
 ```
 
 ### Troubleshooting
