@@ -13,8 +13,14 @@
   },
   "license": "MIT",
   "type": "module",
-  "keywords": ["pi-package", "agent-browser", "browser-automation"],
-  "engines": { "node": ">=22.22.2" },
+  "keywords": [
+    "pi-package",
+    "agent-browser",
+    "browser-automation"
+  ],
+  "engines": {
+    "node": ">=22.22.2"
+  },
   "bin": {
     "pi-agent-browser-config": "scripts/config.mjs",
     "pi-agent-browser-doctor": "scripts/doctor.mjs"
@@ -36,7 +42,11 @@
     "docs/SUPPORT_MATRIX.md",
     "docs/TOOL_CONTRACT.md"
   ],
-  "pi": { "extensions": ["./dist/extensions/agent-browser/index.js"] },
+  "pi": {
+    "extensions": [
+      "./dist/extensions/agent-browser/index.js"
+    ]
+  },
   "scripts": {
     "typecheck": "tsc --noEmit --declaration false",
     "unit": "tsx --test --test-concurrency=1 test/agent-browser.upstream-version.test.ts test/doctor.test.ts test/agent-browser.managed-session-policy-lock.test.ts test/agent-browser.prompt-policy.test.ts && tsx --test --test-name-pattern='process start identity discovery' test/agent-browser.process.test.ts && tsx --test --test-name-pattern='compact essential browser prompt' test/agent-browser.extension-validation.test.ts",

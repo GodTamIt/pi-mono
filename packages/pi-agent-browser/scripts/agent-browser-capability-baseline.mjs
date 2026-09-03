@@ -12,7 +12,10 @@ import { TARGET_AGENT_BROWSER_VERSION } from "./agent-browser-target.mjs";
 export const CAPABILITY_BASELINE_SOURCE = "scripts/agent-browser-capability-baseline.mjs";
 export const COMMAND_REFERENCE_DOC_PATH = "docs/COMMAND_REFERENCE.md";
 export const CAPABILITY_BASELINE_BLOCK_MARKER_PREFIX = "agent-browser-capability-baseline";
-export const COMMAND_REFERENCE_BASELINE_BLOCK_IDS = Object.freeze(["upstream-baseline", "capability-token-baseline"]);
+export const COMMAND_REFERENCE_BASELINE_BLOCK_IDS = Object.freeze([
+  "upstream-baseline",
+  "capability-token-baseline",
+]);
 
 const sourceEvidence = Object.freeze({
   repository: "vercel-labs/agent-browser",
@@ -80,7 +83,9 @@ const section = (id, title, docTokens, upstreamExpectations = []) =>
     id,
     title,
     docTokens: Object.freeze(docTokens),
-    upstreamExpectations: Object.freeze(upstreamExpectations.map(([help, token]) => expectation(help, token))),
+    upstreamExpectations: Object.freeze(
+      upstreamExpectations.map(([help, token]) => expectation(help, token)),
+    ),
   });
 const root = (token) => ["root help", token];
 
@@ -90,7 +95,12 @@ const helpCommands = Object.freeze([
   helpCommand("skills list", ["skills", "list"]),
   helpCommand("core skill full", ["skills", "get", "core", "--full"]),
   helpCommand("vercel sandbox skill full", ["skills", "get", "vercel-sandbox", "--full"]),
-  helpCommand("protected Vercel deployments skill full", ["skills", "get", "protected-vercel-deployments", "--full"]),
+  helpCommand("protected Vercel deployments skill full", [
+    "skills",
+    "get",
+    "protected-vercel-deployments",
+    "--full",
+  ]),
   helpCommand("WebMCP generation skill full", ["skills", "get", "webmcp-gen", "--full"]),
   helpCommand("open help", ["open", "--help"]),
   helpCommand("read help", ["read", "--help"]),
@@ -192,7 +202,10 @@ const inventorySections = Object.freeze([
       ["protected Vercel deployments skill full", "vc project token"],
       ["core skill full", "agent-browser frame @e3"],
       ["core skill full", "agent-browser dialog accept"],
-      ["core skill full", "agent-browser --session \"$SESSION\" --restore open https://app.example.com"],
+      [
+        "core skill full",
+        'agent-browser --session "$SESSION" --restore open https://app.example.com',
+      ],
       ["core skill full", "network har start --content all"],
       ["core skill full", "implicit roles work"],
     ],
@@ -491,7 +504,7 @@ const inventorySections = Object.freeze([
       "web-vitals [url] [--json]",
       "a11y [url]",
       "a11y --tags wcag2a,wcag2aa",
-      "a11y --selector \"#main\"",
+      'a11y --selector "#main"',
       "removeinitscript <id>",
     ],
     [
@@ -715,7 +728,7 @@ const inventorySections = Object.freeze([
       "AGENT_BROWSER_NO_WEBMCP",
       "noWebmcp",
       "AGENT_BROWSER_NO_XVFB",
-      "\"webgpu\": true",
+      '"webgpu": true',
       "--cdp <port|url>",
       "--color-scheme <scheme>",
       "AGENT_BROWSER_COLOR_SCHEME",
@@ -935,7 +948,9 @@ export const CAPABILITY_BASELINE = Object.freeze({
   helpCommands,
   inventorySections,
   docRequiredTokens: Object.freeze(inventorySections.flatMap((entry) => entry.docTokens)),
-  upstreamExpectations: Object.freeze(inventorySections.flatMap((entry) => entry.upstreamExpectations)),
+  upstreamExpectations: Object.freeze(
+    inventorySections.flatMap((entry) => entry.upstreamExpectations),
+  ),
 });
 
 export function expectedVersionLabel() {

@@ -8,11 +8,6 @@
     "rootDir": ".",
     "sourceMap": false
   },
-  "include": [
-    "extensions/**/*.ts",
-    "extensions/agent-browser/lib/config-policy.js"
-  ],
-  "exclude": [
-    "test/**"
-  ]
+  "include": ["extensions/**/*.ts", "extensions/agent-browser/lib/config-policy.js"],
+  "exclude": ["test/**"]
 }

@@ -13,24 +13,29 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-	createExtensionHarness,
-	executeRegisteredTool,
-	readInvocationLog,
-	runExtensionEvent,
-	withPatchedEnv,
-	writeFakeAgentBrowserBinary,
+  createExtensionHarness,
+  executeRegisteredTool,
+  readInvocationLog,
+  runExtensionEvent,
+  withPatchedEnv,
+  writeFakeAgentBrowserBinary,
 } from "./helpers/agent-browser-harness.js";
 import { writeFakeLaunchableElectronApp } from "./helpers/extension-validation-fixtures.js";
 
-test("agentBrowserExtension compiles experimental source lookups and reports candidate evidence", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-source-lookup-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await mkdir(join(tempDir, "src"), { recursive: true });
-	await writeFile(join(tempDir, "src", "Panel.tsx"), "export function Panel() { return <button>Save</button>; }\n");
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test("agentBrowserExtension compiles experimental source lookups and reports candidate evidence", {
+  concurrency: false,
+}, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-source-lookup-"));
+  const logPath = join(tempDir, "invocations.log");
+  const basePath = process.env.PATH ?? "";
+  await mkdir(join(tempDir, "src"), { recursive: true });
+  await writeFile(
+    join(tempDir, "src", "Panel.tsx"),
+    "export function Panel() { return <button>Save</button>; }\n",
+  );
+  await writeFakeAgentBrowserBinary(
+    tempDir,
+    `const fs = require("node:fs");
 const args = process.argv.slice(2);
 let stdin = "";
 process.stdin.setEncoding("utf8");
@@ -52,53 +57,105 @@ process.stdin.on("end", () => {
   });
   process.stdout.write(JSON.stringify(results));
 });`,
-	);
+  );
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+  try {
+    await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
+      const harness = createExtensionHarness({ cwd: tempDir });
+      await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-			const result = await executeRegisteredTool(harness.tool, harness.ctx, {
-				sourceLookup: {
-					selector: "#save",
-					reactFiberId: "2",
-					componentName: "Panel",
-				},
-			});
+      const result = await executeRegisteredTool(harness.tool, harness.ctx, {
+        sourceLookup: {
+          selector: "#save",
+          reactFiberId: "2",
+          componentName: "Panel",
+        },
+      });
 
-			assert.equal(result.isError, false);
-			const compiledSourceLookup = result.details?.compiledSourceLookup as { steps?: Array<{ args: string[] }>; stdin?: string } | undefined;
-			assert.deepEqual(compiledSourceLookup?.steps?.map((step) => step.args), [
-				["is", "visible", "#save"],
-				["get", "html", "#save"],
-				["react", "inspect", "2"],
-				["react", "tree"],
-			]);
-			assert.deepEqual(JSON.parse(compiledSourceLookup?.stdin ?? "[]"), compiledSourceLookup?.steps?.map((step) => step.args));
-			const sourceLookup = result.details?.sourceLookup as { status?: string; candidates?: Array<{ source?: string; file?: string; line?: number; column?: number; confidence?: string; componentName?: string }> } | undefined;
-			assert.equal(sourceLookup?.status, "candidates-found");
-			assert.ok(sourceLookup?.candidates?.some((candidate) => candidate.source === "react-inspect" && candidate.file === "src/Button.tsx" && candidate.line === 17 && candidate.confidence === "high"));
-			assert.ok(sourceLookup?.candidates?.some((candidate) => candidate.source === "dom-attribute" && candidate.file === "src/Button.tsx" && candidate.line === 17 && candidate.column === 5));
-			assert.ok(sourceLookup?.candidates?.some((candidate) => candidate.source === "workspace-search" && candidate.componentName === "Panel" && candidate.file?.endsWith("src/Panel.tsx")));
-			const invocations = await readInvocationLog(logPath);
-			assert.deepEqual(invocations[0]?.args.slice(-1), ["batch"]);
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
+      assert.equal(result.isError, false);
+      const compiledSourceLookup = result.details?.compiledSourceLookup as
+        | { steps?: Array<{ args: string[] }>; stdin?: string }
+        | undefined;
+      assert.deepEqual(
+        compiledSourceLookup?.steps?.map((step) => step.args),
+        [
+          ["is", "visible", "#save"],
+          ["get", "html", "#save"],
+          ["react", "inspect", "2"],
+          ["react", "tree"],
+        ],
+      );
+      assert.deepEqual(
+        JSON.parse(compiledSourceLookup?.stdin ?? "[]"),
+        compiledSourceLookup?.steps?.map((step) => step.args),
+      );
+      const sourceLookup = result.details?.sourceLookup as
+        | {
+            status?: string;
+            candidates?: Array<{
+              source?: string;
+              file?: string;
+              line?: number;
+              column?: number;
+              confidence?: string;
+              componentName?: string;
+            }>;
+          }
+        | undefined;
+      assert.equal(sourceLookup?.status, "candidates-found");
+      assert.ok(
+        sourceLookup?.candidates?.some(
+          (candidate) =>
+            candidate.source === "react-inspect" &&
+            candidate.file === "src/Button.tsx" &&
+            candidate.line === 17 &&
+            candidate.confidence === "high",
+        ),
+      );
+      assert.ok(
+        sourceLookup?.candidates?.some(
+          (candidate) =>
+            candidate.source === "dom-attribute" &&
+            candidate.file === "src/Button.tsx" &&
+            candidate.line === 17 &&
+            candidate.column === 5,
+        ),
+      );
+      assert.ok(
+        sourceLookup?.candidates?.some(
+          (candidate) =>
+            candidate.source === "workspace-search" &&
+            candidate.componentName === "Panel" &&
+            candidate.file?.endsWith("src/Panel.tsx"),
+        ),
+      );
+      const invocations = await readInvocationLog(logPath);
+      assert.deepEqual(invocations[0]?.args.slice(-1), ["batch"]);
+    });
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });
 
-test("agentBrowserExtension explains packaged Electron sourceLookup no-candidate boundaries", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-source-lookup-electron-"));
-	const applicationsDir = join(tempDir, "Applications");
-	const logPath = join(tempDir, "invocations.log");
-	const launchLogPath = join(tempDir, "electron-launch.log");
-	const basePath = process.env.PATH ?? "";
-	try {
-		await mkdir(applicationsDir, { recursive: true });
-		const app = await writeFakeLaunchableElectronApp({ applicationsDir, bundleId: "com.example.PackagedElectron", launchLogPath, name: "Packaged Electron" });
-		await writeFakeAgentBrowserBinary(tempDir, `const fs = require("node:fs");
+test("agentBrowserExtension explains packaged Electron sourceLookup no-candidate boundaries", {
+  concurrency: false,
+}, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-source-lookup-electron-"));
+  const applicationsDir = join(tempDir, "Applications");
+  const logPath = join(tempDir, "invocations.log");
+  const launchLogPath = join(tempDir, "electron-launch.log");
+  const basePath = process.env.PATH ?? "";
+  try {
+    await mkdir(applicationsDir, { recursive: true });
+    const app = await writeFakeLaunchableElectronApp({
+      applicationsDir,
+      bundleId: "com.example.PackagedElectron",
+      launchLogPath,
+      name: "Packaged Electron",
+    });
+    await writeFakeAgentBrowserBinary(
+      tempDir,
+      `const fs = require("node:fs");
 const args = process.argv.slice(2);
 let stdin = "";
 process.stdin.setEncoding("utf8");
@@ -144,64 +201,117 @@ process.stdin.on("end", () => {
 	return;
 	}
 	process.stdout.write(JSON.stringify({ success: true, data: { ok: true } }));
-});`);
+});`,
+    );
 
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+    await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
+      const harness = createExtensionHarness({ cwd: tempDir });
+      await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-			const launchResult = await executeRegisteredTool(harness.tool, harness.ctx, { electron: { action: "launch", appPath: app.appPath } });
-			assert.equal(launchResult.isError, false);
-			const launch = (launchResult.details?.electron as { launch: { appPath?: string; executablePath?: string; launchId: string; sessionName: string; userDataDir: string } }).launch;
+      const launchResult = await executeRegisteredTool(harness.tool, harness.ctx, {
+        electron: { action: "launch", appPath: app.appPath },
+      });
+      assert.equal(launchResult.isError, false);
+      const electron = launchResult.details?.electron as
+        | {
+            launch: {
+              appPath?: string;
+              executablePath?: string;
+              launchId: string;
+              sessionName: string;
+              userDataDir: string;
+            };
+          }
+        | undefined;
+      assert.ok(electron);
+      const { launch } = electron;
 
-			const lookupResult = await executeRegisteredTool(harness.tool, harness.ctx, {
-				sourceLookup: { componentName: "MissingPackagedComponent", selector: "#save" },
-			});
-			assert.equal(lookupResult.isError, false);
-			assert.match(lookupResult.content[0]?.text ?? "", /Source lookup found no candidate locations/);
-			assert.match(lookupResult.content[0]?.text ?? "", /workspace scan was limited/);
-			assert.match(lookupResult.content[0]?.text ?? "", /packaged Electron app code may live outside/);
-			const sourceLookup = lookupResult.details?.sourceLookup as {
-				electronContext?: { appName?: string; appPath?: string; executablePath?: string; launchId?: string; sessionName?: string; url?: string };
-				limitations?: string[];
-				status?: string;
-				workspaceRoot?: string;
-			} | undefined;
-			assert.equal(sourceLookup?.status, "no-candidates");
-			assert.equal(sourceLookup?.workspaceRoot, tempDir);
-			assert.deepEqual(sourceLookup?.electronContext, {
-				appName: "Packaged Electron",
-				appPath: launch.appPath,
-				executablePath: launch.executablePath,
-				launchId: launch.launchId,
-				sessionName: launch.sessionName,
-				url: "app://packaged",
-			});
-			assert.ok(sourceLookup?.limitations?.some((item) => item.includes("Pi tool session cwd")));
-			assert.ok(sourceLookup?.limitations?.some((item) => item.includes("app.asar")));
-			const nextActions = lookupResult.details?.nextActions as Array<{ id: string; params?: { args?: string[]; electron?: { action?: string; launchId?: string } } }> | undefined;
-			const actionIds = new Set(nextActions?.map((action) => action.id));
-			assert.equal(actionIds.has("snapshot-electron-session"), true);
-			assert.equal(actionIds.has("probe-electron-launch"), true);
-			assert.equal(actionIds.has("list-electron-tabs"), true);
-			assert.ok(nextActions?.some((action) => action.id === "probe-electron-launch" && action.params?.electron?.launchId === launch.launchId));
-			assert.ok(nextActions?.some((action) => action.id === "snapshot-electron-session" && action.params?.args?.includes(launch.sessionName)));
+      const lookupResult = await executeRegisteredTool(harness.tool, harness.ctx, {
+        sourceLookup: { componentName: "MissingPackagedComponent", selector: "#save" },
+      });
+      assert.equal(lookupResult.isError, false);
+      assert.match(
+        lookupResult.content[0]?.text ?? "",
+        /Source lookup found no candidate locations/,
+      );
+      assert.match(lookupResult.content[0]?.text ?? "", /workspace scan was limited/);
+      assert.match(
+        lookupResult.content[0]?.text ?? "",
+        /packaged Electron app code may live outside/,
+      );
+      const sourceLookup = lookupResult.details?.sourceLookup as
+        | {
+            electronContext?: {
+              appName?: string;
+              appPath?: string;
+              executablePath?: string;
+              launchId?: string;
+              sessionName?: string;
+              url?: string;
+            };
+            limitations?: string[];
+            status?: string;
+            workspaceRoot?: string;
+          }
+        | undefined;
+      assert.equal(sourceLookup?.status, "no-candidates");
+      assert.equal(sourceLookup?.workspaceRoot, tempDir);
+      assert.deepEqual(sourceLookup?.electronContext, {
+        appName: "Packaged Electron",
+        appPath: launch.appPath,
+        executablePath: launch.executablePath,
+        launchId: launch.launchId,
+        sessionName: launch.sessionName,
+        url: "app://packaged",
+      });
+      assert.ok(sourceLookup?.limitations?.some((item) => item.includes("Pi tool session cwd")));
+      assert.ok(sourceLookup?.limitations?.some((item) => item.includes("app.asar")));
+      const nextActions = lookupResult.details?.nextActions as
+        | Array<{
+            id: string;
+            params?: { args?: string[]; electron?: { action?: string; launchId?: string } };
+          }>
+        | undefined;
+      const actionIds = new Set(nextActions?.map((action) => action.id));
+      assert.equal(actionIds.has("snapshot-electron-session"), true);
+      assert.equal(actionIds.has("probe-electron-launch"), true);
+      assert.equal(actionIds.has("list-electron-tabs"), true);
+      assert.ok(
+        nextActions?.some(
+          (action) =>
+            action.id === "probe-electron-launch" &&
+            action.params?.electron?.launchId === launch.launchId,
+        ),
+      );
+      assert.ok(
+        nextActions?.some(
+          (action) =>
+            action.id === "snapshot-electron-session" &&
+            action.params?.args?.includes(launch.sessionName),
+        ),
+      );
 
-			const cleanupResult = await executeRegisteredTool(harness.tool, harness.ctx, { electron: { action: "cleanup", launchId: launch.launchId } });
-			assert.equal(cleanupResult.isError, false);
-			await assert.rejects(stat(launch.userDataDir));
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
+      const cleanupResult = await executeRegisteredTool(harness.tool, harness.ctx, {
+        electron: { action: "cleanup", launchId: launch.launchId },
+      });
+      assert.equal(cleanupResult.isError, false);
+      await assert.rejects(stat(launch.userDataDir));
+    });
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });
 
-test("agentBrowserExtension allows sourceLookup after local-file URL verification", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-source-lookup-file-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	const fileUrl = `file://${join(tempDir, "plain.html")}`;
-	await writeFakeAgentBrowserBinary(tempDir, `const fs = require("node:fs");
+test("agentBrowserExtension allows sourceLookup after local-file URL verification", {
+  concurrency: false,
+}, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-source-lookup-file-"));
+  const logPath = join(tempDir, "invocations.log");
+  const basePath = process.env.PATH ?? "";
+  const fileUrl = `file://${join(tempDir, "plain.html")}`;
+  await writeFakeAgentBrowserBinary(
+    tempDir,
+    `const fs = require("node:fs");
 const args = process.argv.slice(2);
 let stdin = "";
 process.stdin.setEncoding("utf8");
@@ -234,39 +344,56 @@ process.stdin.on("end", () => {
 		return;
 	}
 	process.stdout.write(JSON.stringify({ success: true, data: { ok: true } }));
-});`);
+});`,
+  );
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+  try {
+    await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
+      const harness = createExtensionHarness({ cwd: tempDir });
+      await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-			const urlResult = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["get", "url"], sessionMode: "fresh" });
-			assert.equal(urlResult.isError, false, JSON.stringify(urlResult));
-			assert.equal((urlResult.details?.sessionTabTarget as { url?: string } | undefined)?.url, fileUrl);
+      const urlResult = await executeRegisteredTool(harness.tool, harness.ctx, {
+        args: ["get", "url"],
+        sessionMode: "fresh",
+      });
+      assert.equal(urlResult.isError, false, JSON.stringify(urlResult));
+      assert.equal(
+        (urlResult.details?.sessionTabTarget as { url?: string } | undefined)?.url,
+        fileUrl,
+      );
 
-			const lookupResult = await executeRegisteredTool(harness.tool, harness.ctx, {
-				sourceLookup: { componentName: "MissingLocalComponent", selector: "#save" },
-			});
-			assert.equal(lookupResult.isError, false, JSON.stringify(lookupResult));
-			assert.equal((await readInvocationLog(logPath)).some((entry) => entry.args.includes("batch")), true);
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
+      const lookupResult = await executeRegisteredTool(harness.tool, harness.ctx, {
+        sourceLookup: { componentName: "MissingLocalComponent", selector: "#save" },
+      });
+      assert.equal(lookupResult.isError, false, JSON.stringify(lookupResult));
+      assert.equal(
+        (await readInvocationLog(logPath)).some((entry) => entry.args.includes("batch")),
+        true,
+      );
+    });
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });
 
-
-test("agentBrowserExtension compiles experimental network source lookups and reports failed-request candidates", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-network-source-lookup-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await mkdir(join(tempDir, "src"), { recursive: true });
-	await writeFile(join(tempDir, "src", "api.ts"), "export const endpoint = 'https://user:pass@app.test/api/fail?token=secret&ok=1';\n");
-	await writeFile(join(tempDir, "src", "ok.ts"), "export const endpoint = 'https://app.test/api/ok';\n");
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test("agentBrowserExtension compiles experimental network source lookups and reports failed-request candidates", {
+  concurrency: false,
+}, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-network-source-lookup-"));
+  const logPath = join(tempDir, "invocations.log");
+  const basePath = process.env.PATH ?? "";
+  await mkdir(join(tempDir, "src"), { recursive: true });
+  await writeFile(
+    join(tempDir, "src", "api.ts"),
+    "export const endpoint = 'https://user:pass@app.test/api/fail?token=secret&ok=1';\n",
+  );
+  await writeFile(
+    join(tempDir, "src", "ok.ts"),
+    "export const endpoint = 'https://app.test/api/ok';\n",
+  );
+  await writeFakeAgentBrowserBinary(
+    tempDir,
+    `const fs = require("node:fs");
 const args = process.argv.slice(2);
 let stdin = "";
 process.stdin.setEncoding("utf8");
@@ -292,66 +419,143 @@ process.stdin.on("end", () => {
   });
   process.stdout.write(JSON.stringify(results));
 });`,
-	);
+  );
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+  try {
+    await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
+      const harness = createExtensionHarness({ cwd: tempDir });
+      await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-			const result = await executeRegisteredTool(harness.tool, harness.ctx, {
-				networkSourceLookup: { requestId: "req-1", url: "https://user:pass@app.test/api/fail?token=secret&ok=1" },
-			});
+      const result = await executeRegisteredTool(harness.tool, harness.ctx, {
+        networkSourceLookup: {
+          requestId: "req-1",
+          url: "https://user:pass@app.test/api/fail?token=secret&ok=1",
+        },
+      });
 
-			assert.equal(result.isError, false);
-			const compiled = result.details?.compiledNetworkSourceLookup as { steps?: Array<{ args: string[] }>; stdin?: string } | undefined;
-			assert.deepEqual(compiled?.steps?.[0]?.args, ["network", "request", "req-1"]);
-			assert.deepEqual(compiled?.steps?.[1]?.args.slice(0, 3), ["network", "requests", "--filter"]);
-			assert.match(compiled?.steps?.[1]?.args[3] ?? "", /api\/fail/);
-			assert.match(compiled?.steps?.[1]?.args[3] ?? "", /REDACTED/);
-			const compiledStdinSteps = JSON.parse(compiled?.stdin ?? "[]") as string[][];
-			assert.deepEqual(compiledStdinSteps[0], ["network", "request", "req-1"]);
-			assert.deepEqual(compiledStdinSteps[1]?.slice(0, 3), ["network", "requests", "--filter"]);
-			assert.doesNotMatch(compiled?.stdin ?? "", /secret|user:pass|ok=1/);
-			assert.doesNotMatch(JSON.stringify(result.details?.compiledNetworkSourceLookup), /secret|user:pass|ok=1/);
-			const lookup = result.details?.networkSourceLookup as { status?: string; failedRequests?: Array<{ status?: number; url?: string }>; candidates?: Array<{ source?: string; file?: string; line?: number; requestUrl?: string }> } | undefined;
-			assert.equal(lookup?.status, "failed-requests-found");
-			assert.equal(lookup?.failedRequests?.[0]?.status, 500);
-			assert.doesNotMatch(JSON.stringify(lookup), /secret|user:pass|ok=1/);
-			assert.doesNotMatch(JSON.stringify(result), /secret|user:pass|ok=1/);
-			assert.ok(lookup?.candidates?.some((candidate) => candidate.source === "initiator" && candidate.file === "src/api.ts" && candidate.line === 1));
-			assert.ok(lookup?.candidates?.some((candidate) => candidate.source === "workspace-search" && candidate.file?.endsWith("src/api.ts") && candidate.line === 1));
-			assert.equal(lookup?.candidates?.some((candidate) => candidate.file === "src/ok.ts" || candidate.file?.endsWith("src/ok.ts")), false);
+      assert.equal(result.isError, false);
+      const compiled = result.details?.compiledNetworkSourceLookup as
+        | { steps?: Array<{ args: string[] }>; stdin?: string }
+        | undefined;
+      assert.deepEqual(compiled?.steps?.[0]?.args, ["network", "request", "req-1"]);
+      assert.deepEqual(compiled?.steps?.[1]?.args.slice(0, 3), ["network", "requests", "--filter"]);
+      assert.match(compiled?.steps?.[1]?.args[3] ?? "", /api\/fail/);
+      assert.match(compiled?.steps?.[1]?.args[3] ?? "", /REDACTED/);
+      const compiledStdinSteps = JSON.parse(compiled?.stdin ?? "[]") as string[][];
+      assert.deepEqual(compiledStdinSteps[0], ["network", "request", "req-1"]);
+      assert.deepEqual(compiledStdinSteps[1]?.slice(0, 3), ["network", "requests", "--filter"]);
+      assert.doesNotMatch(compiled?.stdin ?? "", /secret|user:pass|ok=1/);
+      assert.doesNotMatch(
+        JSON.stringify(result.details?.compiledNetworkSourceLookup),
+        /secret|user:pass|ok=1/,
+      );
+      const lookup = result.details?.networkSourceLookup as
+        | {
+            status?: string;
+            failedRequests?: Array<{ status?: number; url?: string }>;
+            candidates?: Array<{
+              source?: string;
+              file?: string;
+              line?: number;
+              requestUrl?: string;
+            }>;
+          }
+        | undefined;
+      assert.equal(lookup?.status, "failed-requests-found");
+      assert.equal(lookup?.failedRequests?.[0]?.status, 500);
+      assert.doesNotMatch(JSON.stringify(lookup), /secret|user:pass|ok=1/);
+      assert.doesNotMatch(JSON.stringify(result), /secret|user:pass|ok=1/);
+      assert.ok(
+        lookup?.candidates?.some(
+          (candidate) =>
+            candidate.source === "initiator" &&
+            candidate.file === "src/api.ts" &&
+            candidate.line === 1,
+        ),
+      );
+      assert.ok(
+        lookup?.candidates?.some(
+          (candidate) =>
+            candidate.source === "workspace-search" &&
+            candidate.file?.endsWith("src/api.ts") &&
+            candidate.line === 1,
+        ),
+      );
+      assert.equal(
+        lookup?.candidates?.some(
+          (candidate) => candidate.file === "src/ok.ts" || candidate.file?.endsWith("src/ok.ts"),
+        ),
+        false,
+      );
 
-			const requestOnlyResult = await executeRegisteredTool(harness.tool, harness.ctx, {
-				networkSourceLookup: { requestId: "req-1" },
-			});
-			assert.equal(requestOnlyResult.isError, false);
-			const requestOnlyCompiled = requestOnlyResult.details?.compiledNetworkSourceLookup as { steps?: Array<{ args: string[] }> } | undefined;
-			assert.deepEqual(requestOnlyCompiled?.steps?.map((step) => step.args), [["network", "request", "req-1"]]);
+      const requestOnlyResult = await executeRegisteredTool(harness.tool, harness.ctx, {
+        networkSourceLookup: { requestId: "req-1" },
+      });
+      assert.equal(requestOnlyResult.isError, false);
+      const requestOnlyCompiled = requestOnlyResult.details?.compiledNetworkSourceLookup as
+        | { steps?: Array<{ args: string[] }> }
+        | undefined;
+      assert.deepEqual(
+        requestOnlyCompiled?.steps?.map((step) => step.args),
+        [["network", "request", "req-1"]],
+      );
 
-			const sessionResult = await executeRegisteredTool(harness.tool, harness.ctx, {
-				networkSourceLookup: { namespace: "review", requestId: "req-1", session: "named" },
-			});
-			assert.equal(sessionResult.isError, false);
-			const sessionCompiled = sessionResult.details?.compiledNetworkSourceLookup as { args?: string[]; steps?: Array<{ args: string[] }> } | undefined;
-			assert.deepEqual(sessionCompiled?.args, ["--namespace", "review", "--session", "named", "batch"]);
-			assert.deepEqual(sessionCompiled?.steps?.map((step) => step.args), [["network", "request", "req-1"]]);
+      const sessionResult = await executeRegisteredTool(harness.tool, harness.ctx, {
+        networkSourceLookup: { namespace: "review", requestId: "req-1", session: "named" },
+      });
+      assert.equal(sessionResult.isError, false);
+      const sessionCompiled = sessionResult.details?.compiledNetworkSourceLookup as
+        | { args?: string[]; steps?: Array<{ args: string[] }> }
+        | undefined;
+      assert.deepEqual(sessionCompiled?.args, [
+        "--namespace",
+        "review",
+        "--session",
+        "named",
+        "batch",
+      ]);
+      assert.deepEqual(
+        sessionCompiled?.steps?.map((step) => step.args),
+        [["network", "request", "req-1"]],
+      );
 
-			const defaultNamespaceResult = await withPatchedEnv({ AGENT_BROWSER_NAMESPACE: "prod" }, async () => executeRegisteredTool(harness.tool, harness.ctx, {
-				networkSourceLookup: { namespace: "", requestId: "req-1", session: "named" },
-			}));
-			assert.equal(defaultNamespaceResult.isError, false);
-			const defaultNamespaceCompiled = defaultNamespaceResult.details?.compiledNetworkSourceLookup as { args?: string[] } | undefined;
-			assert.deepEqual(defaultNamespaceCompiled?.args, ["--namespace", "", "--session", "named", "batch"]);
+      const defaultNamespaceResult = await withPatchedEnv(
+        { AGENT_BROWSER_NAMESPACE: "prod" },
+        async () =>
+          executeRegisteredTool(harness.tool, harness.ctx, {
+            networkSourceLookup: { namespace: "", requestId: "req-1", session: "named" },
+          }),
+      );
+      assert.equal(defaultNamespaceResult.isError, false);
+      const defaultNamespaceCompiled = defaultNamespaceResult.details
+        ?.compiledNetworkSourceLookup as { args?: string[] } | undefined;
+      assert.deepEqual(defaultNamespaceCompiled?.args, [
+        "--namespace",
+        "",
+        "--session",
+        "named",
+        "batch",
+      ]);
 
-			const invocations = await readInvocationLog(logPath);
-			assert.deepEqual(invocations[0]?.args.slice(-1), ["batch"]);
-			assert.deepEqual(invocations[2]?.args.slice(-2), ["get", "url"]);
-			assert.deepEqual(invocations[3]?.args.slice(-5), ["--namespace", "review", "--session", "named", "batch"]);
-			assert.ok(invocations.some((invocation) => JSON.stringify(invocation.args.slice(-5)) === JSON.stringify(["--namespace", "", "--session", "named", "batch"])));
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
+      const invocations = await readInvocationLog(logPath);
+      assert.deepEqual(invocations[0]?.args.slice(-1), ["batch"]);
+      assert.deepEqual(invocations[2]?.args.slice(-2), ["get", "url"]);
+      assert.deepEqual(invocations[3]?.args.slice(-5), [
+        "--namespace",
+        "review",
+        "--session",
+        "named",
+        "batch",
+      ]);
+      assert.ok(
+        invocations.some(
+          (invocation) =>
+            JSON.stringify(invocation.args.slice(-5)) ===
+            JSON.stringify(["--namespace", "", "--session", "named", "batch"]),
+        ),
+      );
+    });
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });

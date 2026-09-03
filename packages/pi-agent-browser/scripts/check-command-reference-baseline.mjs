@@ -71,22 +71,33 @@ export function renderCommandReferenceBaselineBlock(id) {
           `repository: \`${CAPABILITY_BASELINE.sourceEvidence.repository}\``,
           `upstream HEAD: \`${CAPABILITY_BASELINE.sourceEvidence.upstreamHead}\``,
           `upstream package version: \`${CAPABILITY_BASELINE.sourceEvidence.upstreamPackageVersion}\``,
-          ...CAPABILITY_BASELINE.sourceEvidence.inspectedSources.map((source) => `inspected: \`${source}\``),
+          ...CAPABILITY_BASELINE.sourceEvidence.inspectedSources.map(
+            (source) => `inspected: \`${source}\``,
+          ),
         ]),
         "",
         "#### Upstream help commands sampled",
-        bullets(CAPABILITY_BASELINE.helpCommands.map((command) => `${command.label}: \`agent-browser ${command.args.join(" ")}\``)),
+        bullets(
+          CAPABILITY_BASELINE.helpCommands.map(
+            (command) => `${command.label}: \`agent-browser ${command.args.join(" ")}\``,
+          ),
+        ),
         "",
         "#### Inventory sections",
         bullets(
           CAPABILITY_BASELINE.inventorySections.map(
-            (entry) => `${entry.title}: ${entry.docTokens.length} human-doc token(s), ${entry.upstreamExpectations.length} upstream token(s)`,
+            (entry) =>
+              `${entry.title}: ${entry.docTokens.length} human-doc token(s), ${entry.upstreamExpectations.length} upstream token(s)`,
           ),
         ),
         "",
         "#### Human-authored doc tokens required",
         CAPABILITY_BASELINE.inventorySections
-          .map((entry) => [`##### ${entry.title}`, bullets(entry.docTokens.map((token) => `\`${token}\``))].join("\n"))
+          .map((entry) =>
+            [`##### ${entry.title}`, bullets(entry.docTokens.map((token) => `\`${token}\``))].join(
+              "\n",
+            ),
+          )
           .join("\n\n"),
         "",
         "#### Upstream help tokens expected",
@@ -94,7 +105,11 @@ export function renderCommandReferenceBaselineBlock(id) {
           .map((entry) =>
             [
               `##### ${entry.title}`,
-              bullets(entry.upstreamExpectations.map((expectation) => `${expectation.help}: \`${expectation.token}\``)),
+              bullets(
+                entry.upstreamExpectations.map(
+                  (expectation) => `${expectation.help}: \`${expectation.token}\``,
+                ),
+              ),
             ].join("\n"),
           )
           .join("\n\n"),
@@ -121,7 +136,9 @@ function replaceBlock(content, id, path) {
   const startIndex = content.indexOf(start);
   const endIndex = content.indexOf(end);
   if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) {
-    throw new Error(`${path} is missing generated command-reference baseline block markers for ${id}`);
+    throw new Error(
+      `${path} is missing generated command-reference baseline block markers for ${id}`,
+    );
   }
   const afterEndIndex = endIndex + end.length;
   const current = content.slice(startIndex, afterEndIndex);
@@ -155,11 +172,15 @@ export async function main(argv = process.argv.slice(2)) {
 
   const staleBlocks = await processTarget(mode);
   if (staleBlocks.length === 0) {
-    console.log(`agent-browser command-reference baseline docs are ${mode === "check" ? "in sync" : "up to date"}.`);
+    console.log(
+      `agent-browser command-reference baseline docs are ${mode === "check" ? "in sync" : "up to date"}.`,
+    );
     return 0;
   }
   if (mode === "write") {
-    console.log(`Updated generated command-reference baseline blocks:\n${staleBlocks.map((block) => `- ${block}`).join("\n")}`);
+    console.log(
+      `Updated generated command-reference baseline blocks:\n${staleBlocks.map((block) => `- ${block}`).join("\n")}`,
+    );
     return 0;
   }
   throw new Error(

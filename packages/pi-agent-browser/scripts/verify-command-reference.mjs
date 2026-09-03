@@ -66,7 +66,9 @@ Exit codes:
 
 async function runAgentBrowser(args) {
   try {
-    const { stdout, stderr } = await execFile("agent-browser", args, { maxBuffer: 10 * 1024 * 1024 });
+    const { stdout, stderr } = await execFile("agent-browser", args, {
+      maxBuffer: 10 * 1024 * 1024,
+    });
     return `${stdout}${stderr}`;
   } catch (error) {
     throw new Error(
@@ -98,7 +100,9 @@ export async function verifyCommandReference({
   for (const expectation of UPSTREAM_EXPECTATIONS) {
     const helpText = helpByLabel.get(expectation.help) ?? "";
     if (!helpText.includes(expectation.token)) {
-      failures.push(`Upstream ${expectation.help} no longer includes expected token from ${CAPABILITY_BASELINE_SOURCE}: ${expectation.token}`);
+      failures.push(
+        `Upstream ${expectation.help} no longer includes expected token from ${CAPABILITY_BASELINE_SOURCE}: ${expectation.token}`,
+      );
     }
   }
 

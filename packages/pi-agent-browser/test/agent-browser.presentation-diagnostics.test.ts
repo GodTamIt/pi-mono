@@ -13,1011 +13,1479 @@ import test from "node:test";
 import { getArtifactCleanupGuidance } from "../extensions/agent-browser/lib/orchestration/browser-run/diagnostics.js";
 import { buildToolPresentation } from "../extensions/agent-browser/lib/results/presentation.js";
 test("buildToolPresentation redacts scalar extraction results for eval and get commands", async () => {
-	const evalPresentation = await buildToolPresentation({
-		commandInfo: { command: "eval", subcommand: "--stdin" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { origin: "https://example.com/?token=origin-secret", result: '{"token":"scalar-secret","ok":true}' } },
-	});
-	const evalText = (evalPresentation.content[0] as { text: string }).text;
-	assert.doesNotMatch(evalText, /scalar-secret|origin-secret/);
-	assert.match(evalText, /\[REDACTED\]/);
-	assert.doesNotMatch(evalPresentation.summary, /scalar-secret/);
+  const evalPresentation = await buildToolPresentation({
+    commandInfo: { command: "eval", subcommand: "--stdin" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        origin: "https://example.com/?token=origin-secret",
+        result: '{"token":"scalar-secret","ok":true}',
+      },
+    },
+  });
+  const evalText = (evalPresentation.content[0] as { text: string }).text;
+  assert.doesNotMatch(evalText, /scalar-secret|origin-secret/);
+  assert.match(evalText, /\[REDACTED\]/);
+  assert.doesNotMatch(evalPresentation.summary, /scalar-secret/);
 
-	const getPresentation = await buildToolPresentation({
-		commandInfo: { command: "get", subcommand: "text" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { result: "Cookie: sid=get-secret" } },
-	});
-	const getText = (getPresentation.content[0] as { text: string }).text;
-	assert.doesNotMatch(getText, /get-secret/);
-	assert.match(getText, /\[REDACTED\]/);
+  const getPresentation = await buildToolPresentation({
+    commandInfo: { command: "get", subcommand: "text" },
+    cwd: process.cwd(),
+    envelope: { success: true, data: { result: "Cookie: sid=get-secret" } },
+  });
+  const getText = (getPresentation.content[0] as { text: string }).text;
+  assert.doesNotMatch(getText, /get-secret/);
+  assert.match(getText, /\[REDACTED\]/);
 });
 
 test("buildToolPresentation adds clipboard permission guidance for denied clipboard commands", async () => {
-	const presentation = await buildToolPresentation({
-		commandInfo: { command: "clipboard", subcommand: "read" },
-		cwd: process.cwd(),
-		errorText:
-			"NotAllowedError: Failed to execute 'readText' on 'Clipboard': Read permission denied for clipboard-secret.",
-	});
+  const presentation = await buildToolPresentation({
+    commandInfo: { command: "clipboard", subcommand: "read" },
+    cwd: process.cwd(),
+    errorText:
+      "NotAllowedError: Failed to execute 'readText' on 'Clipboard': Read permission denied for clipboard-secret.",
+  });
 
-	assert.equal(presentation.resultCategory, "failure");
-	assert.equal(presentation.failureCategory, "upstream-error");
-	const text = (presentation.content[0] as { text: string }).text;
-	assert.match(text, /Agent-browser clipboard hint:/);
-	assert.match(text, /headless, managed, remote-profile, or file:\/\//);
-	assert.match(text, /snapshot -i/);
-	assert.match(text, /keyboard inserttext/);
-	assert.doesNotMatch(text, /clipboard-secret/);
+  assert.equal(presentation.resultCategory, "failure");
+  assert.equal(presentation.failureCategory, "upstream-error");
+  const text = (presentation.content[0] as { text: string }).text;
+  assert.match(text, /Agent-browser clipboard hint:/);
+  assert.match(text, /headless, managed, remote-profile, or file:\/\//);
+  assert.match(text, /snapshot -i/);
+  assert.match(text, /keyboard inserttext/);
+  assert.doesNotMatch(text, /clipboard-secret/);
 });
 
 test("buildToolPresentation formats scalar extraction results for eval and get commands", async () => {
-	const evalPresentation = await buildToolPresentation({
-		commandInfo: { command: "eval", subcommand: "--stdin" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: {
-				origin: "https://example.com/",
-				result: "Example Domain",
-			},
-		},
-	});
-	assert.equal(evalPresentation.content[0]?.type, "text");
-	assert.equal((evalPresentation.content[0] as { text: string }).text, "Example Domain\n\nOrigin: https://example.com/");
-	assert.equal(evalPresentation.summary, "Eval result: Example Domain");
+  const evalPresentation = await buildToolPresentation({
+    commandInfo: { command: "eval", subcommand: "--stdin" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        origin: "https://example.com/",
+        result: "Example Domain",
+      },
+    },
+  });
+  assert.equal(evalPresentation.content[0]?.type, "text");
+  assert.equal(
+    (evalPresentation.content[0] as { text: string }).text,
+    "Example Domain\n\nOrigin: https://example.com/",
+  );
+  assert.equal(evalPresentation.summary, "Eval result: Example Domain");
 
-	const getPresentation = await buildToolPresentation({
-		commandInfo: { command: "get", subcommand: "title" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: {
-				lifecycle: { reused: true },
-				origin: "https://example.com/",
-				title: "Example Domain",
-			},
-		},
-	});
-	assert.equal(getPresentation.content[0]?.type, "text");
-	assert.equal((getPresentation.content[0] as { text: string }).text, "Example Domain\n\nOrigin: https://example.com/");
-	assert.equal(getPresentation.summary, "Title: Example Domain");
+  const getPresentation = await buildToolPresentation({
+    commandInfo: { command: "get", subcommand: "title" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        lifecycle: { reused: true },
+        origin: "https://example.com/",
+        title: "Example Domain",
+      },
+    },
+  });
+  assert.equal(getPresentation.content[0]?.type, "text");
+  assert.equal(
+    (getPresentation.content[0] as { text: string }).text,
+    "Example Domain\n\nOrigin: https://example.com/",
+  );
+  assert.equal(getPresentation.summary, "Title: Example Domain");
 
-	const getTextPresentation = await buildToolPresentation({
-		commandInfo: { command: "get", subcommand: "text" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { lifecycle: { reused: true }, origin: "https://example.com/", text: "Visible body text" } },
-	});
-	assert.equal((getTextPresentation.content[0] as { text: string }).text, "Visible body text\n\nOrigin: https://example.com/");
-	assert.doesNotMatch((getTextPresentation.content[0] as { text: string }).text, /lifecycle|reused/);
+  const getTextPresentation = await buildToolPresentation({
+    commandInfo: { command: "get", subcommand: "text" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        lifecycle: { reused: true },
+        origin: "https://example.com/",
+        text: "Visible body text",
+      },
+    },
+  });
+  assert.equal(
+    (getTextPresentation.content[0] as { text: string }).text,
+    "Visible body text\n\nOrigin: https://example.com/",
+  );
+  assert.doesNotMatch(
+    (getTextPresentation.content[0] as { text: string }).text,
+    /lifecycle|reused/,
+  );
 });
 
 test("buildToolPresentation compacts common action, wait, close, tab-close, and diagnostic reset results", async () => {
-	const cases: Array<{ commandInfo: { command: string; commandTokens?: string[]; subcommand?: string }; data: Record<string, unknown>; expected: string }> = [
-		{ commandInfo: { command: "fill" }, data: { filled: "#email", lifecycle: { reused: true } }, expected: "Filled: #email\n\nAction dispatched; application change unverified. Verify the expected URL, text, state, or external receipt before relying on it." },
-		{ commandInfo: { command: "wait" }, data: { selector: "#ready", waited: "selector", lifecycle: { reused: true } }, expected: "Wait completed: #ready" },
-		{ commandInfo: { command: "wait" }, data: { waited: "timeout", lifecycle: { reused: true } }, expected: "Fixed wait elapsed; no page condition was verified." },
-		{ commandInfo: { command: "close" }, data: { closed: true, lifecycle: { reused: false }, statePath: "/private/state" }, expected: "Browser session closed." },
-		{ commandInfo: { command: "tab", subcommand: "close" }, data: { closed: true, tabId: "t1", lifecycle: { reused: true } }, expected: "Tab closed: t1" },
-		{ commandInfo: { command: "network", commandTokens: ["network", "requests", "--clear"], subcommand: "requests" }, data: { cleared: true, lifecycle: { reused: true } }, expected: "Network request buffer cleared." },
-		{ commandInfo: { command: "console", commandTokens: ["console", "--clear"], subcommand: "--clear" }, data: { cleared: true, lifecycle: { reused: true } }, expected: "Console buffer cleared." },
-	];
-	for (const { commandInfo, data, expected } of cases) {
-		const presentation = await buildToolPresentation({ commandInfo, cwd: process.cwd(), envelope: { success: true, data } });
-		assert.equal((presentation.content[0] as { text: string }).text, expected);
-		assert.doesNotMatch((presentation.content[0] as { text: string }).text, /lifecycle|statePath|reused/);
-	}
+  const cases: Array<{
+    commandInfo: { command: string; commandTokens?: string[]; subcommand?: string };
+    data: Record<string, unknown>;
+    expected: string;
+  }> = [
+    {
+      commandInfo: { command: "fill" },
+      data: { filled: "#email", lifecycle: { reused: true } },
+      expected:
+        "Filled: #email\n\nAction dispatched; application change unverified. Verify the expected URL, text, state, or external receipt before relying on it.",
+    },
+    {
+      commandInfo: { command: "wait" },
+      data: { selector: "#ready", waited: "selector", lifecycle: { reused: true } },
+      expected: "Wait completed: #ready",
+    },
+    {
+      commandInfo: { command: "wait" },
+      data: { waited: "timeout", lifecycle: { reused: true } },
+      expected: "Fixed wait elapsed; no page condition was verified.",
+    },
+    {
+      commandInfo: { command: "close" },
+      data: { closed: true, lifecycle: { reused: false }, statePath: "/private/state" },
+      expected: "Browser session closed.",
+    },
+    {
+      commandInfo: { command: "tab", subcommand: "close" },
+      data: { closed: true, tabId: "t1", lifecycle: { reused: true } },
+      expected: "Tab closed: t1",
+    },
+    {
+      commandInfo: {
+        command: "network",
+        commandTokens: ["network", "requests", "--clear"],
+        subcommand: "requests",
+      },
+      data: { cleared: true, lifecycle: { reused: true } },
+      expected: "Network request buffer cleared.",
+    },
+    {
+      commandInfo: {
+        command: "console",
+        commandTokens: ["console", "--clear"],
+        subcommand: "--clear",
+      },
+      data: { cleared: true, lifecycle: { reused: true } },
+      expected: "Console buffer cleared.",
+    },
+  ];
+  for (const { commandInfo, data, expected } of cases) {
+    const presentation = await buildToolPresentation({
+      commandInfo,
+      cwd: process.cwd(),
+      envelope: { success: true, data },
+    });
+    assert.equal((presentation.content[0] as { text: string }).text, expected);
+    assert.doesNotMatch(
+      (presentation.content[0] as { text: string }).text,
+      /lifecycle|statePath|reused/,
+    );
+  }
 });
 
 test("buildToolPresentation makes unverified batch mutations prominent", async () => {
-	const presentation = await buildToolPresentation({
-		commandInfo: { command: "batch" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: [
-				{ command: ["click", "@e1"], result: { clicked: "@e1" }, success: true },
-				{ command: ["wait", "1200"], result: { waited: "timeout" }, success: true },
-			],
-		},
-	});
-	const text = (presentation.content[0] as { text: string }).text;
-	assert.match(text, /^Mutation evidence: 1 action result proves dispatch only, not application state change\./);
-	assert.match(text, /fixed waits are not postconditions/);
-	assert.equal(presentation.pageChangeSummary?.observed, false);
-	assert.match(presentation.pageChangeSummary?.summary ?? "", /application change unverified/);
+  const presentation = await buildToolPresentation({
+    commandInfo: { command: "batch" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: [
+        { command: ["click", "@e1"], result: { clicked: "@e1" }, success: true },
+        { command: ["wait", "1200"], result: { waited: "timeout" }, success: true },
+      ],
+    },
+  });
+  const text = (presentation.content[0] as { text: string }).text;
+  assert.match(
+    text,
+    /^Mutation evidence: 1 action result proves dispatch only, not application state change\./,
+  );
+  assert.match(text, /fixed waits are not postconditions/);
+  assert.equal(presentation.pageChangeSummary?.observed, false);
+  assert.match(presentation.pageChangeSummary?.summary ?? "", /application change unverified/);
 });
 
 test("buildToolPresentation warns that keyboard inserttext may not update application state", async () => {
-	const presentation = await buildToolPresentation({
-		commandInfo: { command: "keyboard", subcommand: "inserttext" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { inserted: true } },
-	});
-	const text = (presentation.content[0] as { text: string }).text;
-	assert.match(text, /keyboard inserttext skips key events/);
-	assert.match(text, /does not prove a framework-controlled editor accepted it/);
-	assert.match(text, /use keyboard type when real key events are required/);
+  const presentation = await buildToolPresentation({
+    commandInfo: { command: "keyboard", subcommand: "inserttext" },
+    cwd: process.cwd(),
+    envelope: { success: true, data: { inserted: true } },
+  });
+  const text = (presentation.content[0] as { text: string }).text;
+  assert.match(text, /keyboard inserttext skips key events/);
+  assert.match(text, /does not prove a framework-controlled editor accepted it/);
+  assert.match(text, /use keyboard type when real key events are required/);
 });
 
 test("artifact cleanup guidance ignores wrapper-managed spills", async () => {
-	const guidance = await getArtifactCleanupGuidance({
-		command: "close",
-		cwd: process.cwd(),
-		manifest: {
-			entries: [{ createdAtMs: 1, kind: "spill", path: "/tmp/internal-spill.json", retentionState: "live", storageScope: "persistent-session" }],
-			evictedCount: 0,
-			liveCount: 1,
-			maxEntries: 10,
-			updatedAtMs: 1,
-			version: 1,
-		},
-		succeeded: true,
-	});
-	assert.equal(guidance, undefined);
+  const guidance = await getArtifactCleanupGuidance({
+    command: "close",
+    cwd: process.cwd(),
+    manifest: {
+      entries: [
+        {
+          createdAtMs: 1,
+          kind: "spill",
+          path: "/tmp/internal-spill.json",
+          retentionState: "live",
+          storageScope: "persistent-session",
+        },
+      ],
+      evictedCount: 0,
+      liveCount: 1,
+      maxEntries: 10,
+      updatedAtMs: 1,
+      version: 1,
+    },
+    succeeded: true,
+  });
+  assert.equal(guidance, undefined);
 });
 
 test("buildToolPresentation formats session status and session list", async () => {
-	const current = await buildToolPresentation({
-		commandInfo: { command: "session" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { session: "demo-session" } },
-	});
-	assert.equal(current.summary, "Session: demo-session");
-	assert.equal((current.content[0] as { text: string }).text, "Current session: demo-session");
+  const current = await buildToolPresentation({
+    commandInfo: { command: "session" },
+    cwd: process.cwd(),
+    envelope: { success: true, data: { session: "demo-session" } },
+  });
+  assert.equal(current.summary, "Session: demo-session");
+  assert.equal((current.content[0] as { text: string }).text, "Current session: demo-session");
 
-	const list = await buildToolPresentation({
-		commandInfo: { command: "session", subcommand: "list" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: {
-				sessions: [
-					{ active: true, name: "piab-foreign", title: "Private", url: "https://private.example" },
-					{ active: true, name: "PIAB-case-alias", title: "Private Alias", url: "https://alias.private.example" },
-					{ active: true, name: "work", title: "Example", url: "https://example.com" },
-				],
-			},
-		},
-	});
-	assert.equal(list.summary, "Sessions: 3");
-	assert.match((list.content[0] as { text: string }).text, /piab-foreign/);
-	assert.match((list.content[0] as { text: string }).text, /PIAB-case-alias/);
-	assert.match((list.content[0] as { text: string }).text, /name=work/);
+  const list = await buildToolPresentation({
+    commandInfo: { command: "session", subcommand: "list" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        sessions: [
+          { active: true, name: "piab-foreign", title: "Private", url: "https://private.example" },
+          {
+            active: true,
+            name: "PIAB-case-alias",
+            title: "Private Alias",
+            url: "https://alias.private.example",
+          },
+          { active: true, name: "work", title: "Example", url: "https://example.com" },
+        ],
+      },
+    },
+  });
+  assert.equal(list.summary, "Sessions: 3");
+  assert.match((list.content[0] as { text: string }).text, /piab-foreign/);
+  assert.match((list.content[0] as { text: string }).text, /PIAB-case-alias/);
+  assert.match((list.content[0] as { text: string }).text, /name=work/);
 });
 
 test("buildToolPresentation formats Chrome profile arrays", async () => {
-	const presentation = await buildToolPresentation({
-		commandInfo: { command: "profiles" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: [{ directory: "Default", name: "Default" }] },
-	});
+  const presentation = await buildToolPresentation({
+    commandInfo: { command: "profiles" },
+    cwd: process.cwd(),
+    envelope: { success: true, data: [{ directory: "Default", name: "Default" }] },
+  });
 
-	assert.equal(presentation.summary, "Chrome profiles: 1");
-	assert.equal((presentation.content[0] as { text: string }).text, "1. Default (Default)");
+  assert.equal(presentation.summary, "Chrome profiles: 1");
+  assert.equal((presentation.content[0] as { text: string }).text, "1. Default (Default)");
 });
 
 test("buildToolPresentation formats auth profile lists and show output without expanding secrets", async () => {
-	const list = await buildToolPresentation({
-		commandInfo: { command: "auth", subcommand: "list" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: { profiles: [{ name: "prod", password: "secret", username: "user@example.com" }] },
-		},
-	});
-	assert.equal(list.summary, "Auth profiles: 1");
-	const listText = (list.content[0] as { text: string }).text;
-	assert.match(listText, /prod/);
-	assert.doesNotMatch(listText, /secret|password/);
+  const list = await buildToolPresentation({
+    commandInfo: { command: "auth", subcommand: "list" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: { profiles: [{ name: "prod", password: "secret", username: "user@example.com" }] },
+    },
+  });
+  assert.equal(list.summary, "Auth profiles: 1");
+  const listText = (list.content[0] as { text: string }).text;
+  assert.match(listText, /prod/);
+  assert.doesNotMatch(listText, /secret|password/);
 
-	const show = await buildToolPresentation({
-		commandInfo: { command: "auth", subcommand: "show" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: { name: "prod", password: "secret", token: "bearer-token", url: "https://example.com", username: "user@example.com" },
-		},
-	});
-	assert.equal(show.summary, "Auth profile: prod");
-	const showText = (show.content[0] as { text: string }).text;
-	assert.match(showText, /name: prod/);
-	assert.match(showText, /url: https:\/\/example.com/);
-	assert.match(showText, /username: user@example.com/);
-	assert.doesNotMatch(showText, /secret|password|bearer-token|token/);
+  const show = await buildToolPresentation({
+    commandInfo: { command: "auth", subcommand: "show" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        name: "prod",
+        password: "secret",
+        token: "bearer-token",
+        url: "https://example.com",
+        username: "user@example.com",
+      },
+    },
+  });
+  assert.equal(show.summary, "Auth profile: prod");
+  const showText = (show.content[0] as { text: string }).text;
+  assert.match(showText, /name: prod/);
+  assert.match(showText, /url: https:\/\/example.com/);
+  assert.match(showText, /username: user@example.com/);
+  assert.doesNotMatch(showText, /secret|password|bearer-token|token/);
 });
 
 test("buildToolPresentation formats stateful browser-context results without leaking credentials", async () => {
-	const cases = [
-		{
-			commandInfo: { command: "cookies", subcommand: "get" },
-			data: { cookies: [{ domain: "example.test", httpOnly: true, name: "session_id", path: "/", value: "cookie-secret" }] },
-			summary: "Cookies: 1",
-			matches: [/session_id/, /example\.test/],
-			missing: /cookie-secret/,
-		},
-		{
-			commandInfo: { command: "cookies", subcommand: "set" },
-			data: { domain: "example.test", name: "sid", path: "/", value: "cookie-set-secret" },
-			summary: "sid",
-			matches: [/sid/, /example\.test/],
-			missing: /cookie-set-secret/,
-		},
-		{
-			commandInfo: { command: "storage", subcommand: "local" },
-			data: { entries: [{ key: "theme", value: "dark" }, { key: "jwt", value: "eyJhbGciOiJIUzI1NiJ9.supersecret.signature" }, { key: "authToken", value: "storage-secret-token" }], type: "local" },
-			summary: "Storage entries: 3",
-			matches: [/theme: dark/, /jwt: \[REDACTED\]/, /authToken: \[REDACTED\]/],
-			missing: /supersecret|storage-secret-token|eyJhbGci/,
-		},
-		{
-			commandInfo: { command: "storage", subcommand: "local" },
-			data: { key: "sessionToken", type: "local", value: "direct-storage-secret" },
-			summary: "Storage set: sessionToken",
-			matches: [/local sessionToken: \[REDACTED\]/],
-			missing: /direct-storage-secret/,
-		},
-		{
-			commandInfo: { command: "dialog", subcommand: "status" },
-			data: { message: "Authorization: Bearer dialog-secret", open: true, type: "prompt" },
-			summary: "Dialog open",
-			matches: [/Dialog open/, /Type: prompt/, /Message: \[REDACTED\]/],
-			missing: /dialog-secret/,
-		},
-		{
-			commandInfo: { command: "frame", subcommand: "main" },
-			data: { frame: "main", title: "Main Frame", url: "https://example.test/frame" },
-			summary: "Frame: main",
-			matches: [/Frame: main/, /Main Frame/],
-			missing: undefined,
-		},
-		{
-			commandInfo: { command: "state", subcommand: "list" },
-			data: { states: [{ name: "prod-state.json", url: "https://example.test/?token=state-secret" }] },
-			summary: "States: 1",
-			matches: [/prod-state\.json/, /REDACTED/],
-			missing: /state-secret/,
-		},
-		{
-			commandInfo: { command: "state", subcommand: "show" },
-			data: {
-				encrypted: false,
-				filename: "prod-state.json",
-				size: 512,
-				state: {
-					cookies: [{ domain: "example.test", name: "sid", value: "v1x9p3" }],
-					origins: [{ localStorage: [{ name: "theme", value: "l7q2z8" }], origin: "https://example.test" }],
-				},
-				summary: "1 cookies, 1 origins",
-			},
-			summary: "State show: prod-state.json",
-			matches: [/Saved state: prod-state\.json/, /Summary: 1 cookies, 1 origins/, /Encrypted: no/, /Size: 512 bytes/],
-			missing: /v1x9p3|l7q2z8/,
-		},
-	] as const;
+  const cases = [
+    {
+      commandInfo: { command: "cookies", subcommand: "get" },
+      data: {
+        cookies: [
+          {
+            domain: "example.test",
+            httpOnly: true,
+            name: "session_id",
+            path: "/",
+            value: "cookie-secret",
+          },
+        ],
+      },
+      summary: "Cookies: 1",
+      matches: [/session_id/, /example\.test/],
+      missing: /cookie-secret/,
+    },
+    {
+      commandInfo: { command: "cookies", subcommand: "set" },
+      data: { domain: "example.test", name: "sid", path: "/", value: "cookie-set-secret" },
+      summary: "sid",
+      matches: [/sid/, /example\.test/],
+      missing: /cookie-set-secret/,
+    },
+    {
+      commandInfo: { command: "storage", subcommand: "local" },
+      data: {
+        entries: [
+          { key: "theme", value: "dark" },
+          { key: "jwt", value: "eyJhbGciOiJIUzI1NiJ9.supersecret.signature" },
+          { key: "authToken", value: "storage-secret-token" },
+        ],
+        type: "local",
+      },
+      summary: "Storage entries: 3",
+      matches: [/theme: dark/, /jwt: \[REDACTED\]/, /authToken: \[REDACTED\]/],
+      missing: /supersecret|storage-secret-token|eyJhbGci/,
+    },
+    {
+      commandInfo: { command: "storage", subcommand: "local" },
+      data: { key: "sessionToken", type: "local", value: "direct-storage-secret" },
+      summary: "Storage set: sessionToken",
+      matches: [/local sessionToken: \[REDACTED\]/],
+      missing: /direct-storage-secret/,
+    },
+    {
+      commandInfo: { command: "dialog", subcommand: "status" },
+      data: { message: "Authorization: Bearer dialog-secret", open: true, type: "prompt" },
+      summary: "Dialog open",
+      matches: [/Dialog open/, /Type: prompt/, /Message: \[REDACTED\]/],
+      missing: /dialog-secret/,
+    },
+    {
+      commandInfo: { command: "frame", subcommand: "main" },
+      data: { frame: "main", title: "Main Frame", url: "https://example.test/frame" },
+      summary: "Frame: main",
+      matches: [/Frame: main/, /Main Frame/],
+      missing: undefined,
+    },
+    {
+      commandInfo: { command: "state", subcommand: "list" },
+      data: {
+        states: [{ name: "prod-state.json", url: "https://example.test/?token=state-secret" }],
+      },
+      summary: "States: 1",
+      matches: [/prod-state\.json/, /REDACTED/],
+      missing: /state-secret/,
+    },
+    {
+      commandInfo: { command: "state", subcommand: "show" },
+      data: {
+        encrypted: false,
+        filename: "prod-state.json",
+        size: 512,
+        state: {
+          cookies: [{ domain: "example.test", name: "sid", value: "v1x9p3" }],
+          origins: [
+            { localStorage: [{ name: "theme", value: "l7q2z8" }], origin: "https://example.test" },
+          ],
+        },
+        summary: "1 cookies, 1 origins",
+      },
+      summary: "State show: prod-state.json",
+      matches: [
+        /Saved state: prod-state\.json/,
+        /Summary: 1 cookies, 1 origins/,
+        /Encrypted: no/,
+        /Size: 512 bytes/,
+      ],
+      missing: /v1x9p3|l7q2z8/,
+    },
+  ] as const;
 
-	for (const testCase of cases) {
-		const presentation = await buildToolPresentation({
-			commandInfo: testCase.commandInfo,
-			cwd: process.cwd(),
-			envelope: { success: true, data: testCase.data },
-		});
-		assert.equal(presentation.summary, testCase.summary);
-		const text = (presentation.content[0] as { text: string }).text;
-		for (const pattern of testCase.matches) assert.match(text, pattern);
-		if (testCase.missing) {
-			assert.doesNotMatch(text, testCase.missing);
-			assert.doesNotMatch(JSON.stringify(presentation.data), testCase.missing);
-		}
-	}
+  for (const testCase of cases) {
+    const presentation = await buildToolPresentation({
+      commandInfo: testCase.commandInfo,
+      cwd: process.cwd(),
+      envelope: { success: true, data: testCase.data },
+    });
+    assert.equal(presentation.summary, testCase.summary);
+    const text = (presentation.content[0] as { text: string }).text;
+    for (const pattern of testCase.matches) assert.match(text, pattern);
+    if (testCase.missing) {
+      assert.doesNotMatch(text, testCase.missing);
+      assert.doesNotMatch(JSON.stringify(presentation.data), testCase.missing);
+    }
+  }
 });
 
 test("buildToolPresentation preserves managed restore capabilities and state-list rows", async () => {
-	const restoreKey = `piab-r2-${"a".repeat(32)}`;
-	const list = await buildToolPresentation({
-		commandInfo: { command: "state", subcommand: "list" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: {
-				files: [
-					{ filename: `${restoreKey}-managed.json`, path: `/tmp/${restoreKey}-managed.json`, url: "https://private.example" },
-					{ filename: "caller-owned.json", path: "/tmp/caller-owned.json" },
-				],
-			},
-		},
-	});
-	const listSerialized = JSON.stringify(list);
-	assert.equal(list.summary, "States: 2");
-	assert.match((list.content[0] as { text: string }).text, /caller-owned\.json/);
-	assert.match(listSerialized, /piab-r2-|private\.example|managed\.json/);
+  const restoreKey = `piab-r2-${"a".repeat(32)}`;
+  const list = await buildToolPresentation({
+    commandInfo: { command: "state", subcommand: "list" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        files: [
+          {
+            filename: `${restoreKey}-managed.json`,
+            path: `/tmp/${restoreKey}-managed.json`,
+            url: "https://private.example",
+          },
+          { filename: "caller-owned.json", path: "/tmp/caller-owned.json" },
+        ],
+      },
+    },
+  });
+  const listSerialized = JSON.stringify(list);
+  assert.equal(list.summary, "States: 2");
+  assert.match((list.content[0] as { text: string }).text, /caller-owned\.json/);
+  assert.match(listSerialized, /piab-r2-|private\.example|managed\.json/);
 
-	const sessionInfo = await buildToolPresentation({
-		commandInfo: { command: "session", subcommand: "info" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: { active: true, runtime: { restoreKey }, unrelatedStatePath: `/tmp/piab-r-${"b".repeat(32)}-managed.json`, statePath: `/tmp/${restoreKey}-managed.json` },
-		},
-	});
-	const infoSerialized = JSON.stringify(sessionInfo);
-	assert.match(infoSerialized, /piab-r(?:2)?-[a-f\d]{32}/);
-	assert.doesNotMatch(infoSerialized, /REDACTED MANAGED STATE/);
+  const sessionInfo = await buildToolPresentation({
+    commandInfo: { command: "session", subcommand: "info" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        active: true,
+        runtime: { restoreKey },
+        unrelatedStatePath: `/tmp/piab-r-${"b".repeat(32)}-managed.json`,
+        statePath: `/tmp/${restoreKey}-managed.json`,
+      },
+    },
+  });
+  const infoSerialized = JSON.stringify(sessionInfo);
+  assert.match(infoSerialized, /piab-r(?:2)?-[a-f\d]{32}/);
+  assert.doesNotMatch(infoSerialized, /REDACTED MANAGED STATE/);
 });
 
 test("buildToolPresentation keeps benign storage values visible while redacting likely secrets", async () => {
-	const presentation = await buildToolPresentation({
-		commandInfo: { command: "storage", subcommand: "local" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: {
-				entries: [
-					{ key: "theme", value: "dark" },
-					{ key: "locale", value: "en-US" },
-					{ key: "layout", value: "grid" },
-					{ key: "featureFlag", value: true },
-					{ key: "apiKey", value: "abc123" },
-					{ key: "sid", value: "plain-session-value" },
-					{ key: "email", value: "user@example.test" },
-					{ key: "theme", value: "https://example.test/?token=secret" },
-					{ key: "theme", value: "https://example.test/session/abc123" },
-					{ key: "theme", value: "userId=12345" },
-					{ key: "mode", value: "qa" },
-					{ key: "profile", value: { token: "secret-token" } },
-				],
-				type: "local",
-			},
-		},
-	});
+  const presentation = await buildToolPresentation({
+    commandInfo: { command: "storage", subcommand: "local" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        entries: [
+          { key: "theme", value: "dark" },
+          { key: "locale", value: "en-US" },
+          { key: "layout", value: "grid" },
+          { key: "featureFlag", value: true },
+          { key: "apiKey", value: "abc123" },
+          { key: "sid", value: "plain-session-value" },
+          { key: "email", value: "user@example.test" },
+          { key: "theme", value: "https://example.test/?token=secret" },
+          { key: "theme", value: "https://example.test/session/abc123" },
+          { key: "theme", value: "userId=12345" },
+          { key: "mode", value: "qa" },
+          { key: "profile", value: { token: "secret-token" } },
+        ],
+        type: "local",
+      },
+    },
+  });
 
-	const text = (presentation.content[0] as { text: string }).text;
-	const details = JSON.stringify(presentation.data);
-	assert.match(text, /theme: dark/);
-	assert.match(text, /locale: en-US/);
-	assert.match(text, /layout: grid/);
-	assert.match(text, /featureFlag: true/);
-	assert.match(text, /mode: qa/);
-	assert.match(details, /"value":"dark"/);
-	assert.match(details, /"value":"en-US"/);
-	assert.match(details, /"value":"grid"/);
-	assert.match(details, /"value":true/);
-	assert.match(details, /"value":"qa"/);
-	assert.doesNotMatch(text, /abc123|plain-session-value|user@example|token=secret|userId=12345|session\/abc123|secret-token/);
-	assert.doesNotMatch(details, /abc123|plain-session-value|user@example|token=secret|userId=12345|session\/abc123|secret-token/);
-	assert.match(details, /valueRedacted/);
+  const text = (presentation.content[0] as { text: string }).text;
+  const details = JSON.stringify(presentation.data);
+  assert.match(text, /theme: dark/);
+  assert.match(text, /locale: en-US/);
+  assert.match(text, /layout: grid/);
+  assert.match(text, /featureFlag: true/);
+  assert.match(text, /mode: qa/);
+  assert.match(details, /"value":"dark"/);
+  assert.match(details, /"value":"en-US"/);
+  assert.match(details, /"value":"grid"/);
+  assert.match(details, /"value":true/);
+  assert.match(details, /"value":"qa"/);
+  assert.doesNotMatch(
+    text,
+    /abc123|plain-session-value|user@example|token=secret|userId=12345|session\/abc123|secret-token/,
+  );
+  assert.doesNotMatch(
+    details,
+    /abc123|plain-session-value|user@example|token=secret|userId=12345|session\/abc123|secret-token/,
+  );
+  assert.match(details, /valueRedacted/);
 });
 
 test("buildToolPresentation adds routed pending network diagnostics", async () => {
-	const presentation = await buildToolPresentation({
-		commandInfo: { command: "network", subcommand: "requests" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: { requests: [{ method: "GET", requestId: "r1", resourceType: "fetch", url: "https://example.test/api/items" }] },
-		},
-		networkRouteDiagnostics: [{ mode: "body", reason: "pending-routed-request", requestId: "r1", requestUrl: "https://example.test/api/items", routePattern: "**/api/**", summary: "pending" }],
-		sessionName: "pi-agent-browser-test",
-	});
+  const presentation = await buildToolPresentation({
+    commandInfo: { command: "network", subcommand: "requests" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        requests: [
+          {
+            method: "GET",
+            requestId: "r1",
+            resourceType: "fetch",
+            url: "https://example.test/api/items",
+          },
+        ],
+      },
+    },
+    networkRouteDiagnostics: [
+      {
+        mode: "body",
+        reason: "pending-routed-request",
+        requestId: "r1",
+        requestUrl: "https://example.test/api/items",
+        routePattern: "**/api/**",
+        summary: "pending",
+      },
+    ],
+    sessionName: "pi-agent-browser-test",
+  });
 
-	const text = (presentation.content[0] as { text: string }).text;
-	assert.match(text, /Network route diagnostics/);
-	assert.match(text, /pending-routed-request/);
-	assert.deepEqual(presentation.networkRouteDiagnostics?.map((item) => item.reason), ["pending-routed-request"]);
-	assert.deepEqual(presentation.nextActions?.slice(0, 2).map((action) => action.id), ["inspect-routed-network-request", "start-network-har-capture-for-route-mock"]);
-	assert.deepEqual(presentation.nextActions?.[0]?.params?.args, ["--session", "pi-agent-browser-test", "network", "request", "r1"]);
+  const text = (presentation.content[0] as { text: string }).text;
+  assert.match(text, /Network route diagnostics/);
+  assert.match(text, /pending-routed-request/);
+  assert.deepEqual(
+    presentation.networkRouteDiagnostics?.map((item) => item.reason),
+    ["pending-routed-request"],
+  );
+  assert.deepEqual(
+    presentation.nextActions?.slice(0, 2).map((action) => action.id),
+    ["inspect-routed-network-request", "start-network-har-capture-for-route-mock"],
+  );
+  assert.deepEqual(presentation.nextActions?.[0]?.params?.args, [
+    "--session",
+    "pi-agent-browser-test",
+    "network",
+    "request",
+    "r1",
+  ]);
 });
 
 test("buildToolPresentation flags routed requests that return failed statuses", async () => {
-	const presentation = await buildToolPresentation({
-		commandInfo: { command: "network", subcommand: "requests" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: { requests: [{ method: "GET", requestId: "r404", resourceType: "fetch", status: 404, url: "https://example.test/api/stress" }] },
-		},
-		networkRouteDiagnostics: [{ mode: "body", reason: "unfulfilled-routed-request", requestId: "r404", requestUrl: "https://example.test/api/stress", routePattern: "**/api/stress", summary: "failed" }],
-		sessionName: "pi-agent-browser-test",
-	});
+  const presentation = await buildToolPresentation({
+    commandInfo: { command: "network", subcommand: "requests" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        requests: [
+          {
+            method: "GET",
+            requestId: "r404",
+            resourceType: "fetch",
+            status: 404,
+            url: "https://example.test/api/stress",
+          },
+        ],
+      },
+    },
+    networkRouteDiagnostics: [
+      {
+        mode: "body",
+        reason: "unfulfilled-routed-request",
+        requestId: "r404",
+        requestUrl: "https://example.test/api/stress",
+        routePattern: "**/api/stress",
+        summary: "failed",
+      },
+    ],
+    sessionName: "pi-agent-browser-test",
+  });
 
-	const text = (presentation.content[0] as { text: string }).text;
-	assert.match(text, /unfulfilled-routed-request/);
-	assert.match(text, /treat failed, pending, or CORS-looking rows as unfulfilled/);
-	assert.deepEqual(presentation.networkRouteDiagnostics?.map((item) => item.reason), ["unfulfilled-routed-request"]);
-	assert.deepEqual(presentation.nextActions?.slice(0, 2).map((action) => action.id), ["inspect-routed-network-request", "start-network-har-capture-for-route-mock"]);
+  const text = (presentation.content[0] as { text: string }).text;
+  assert.match(text, /unfulfilled-routed-request/);
+  assert.match(text, /treat failed, pending, or CORS-looking rows as unfulfilled/);
+  assert.deepEqual(
+    presentation.networkRouteDiagnostics?.map((item) => item.reason),
+    ["unfulfilled-routed-request"],
+  );
+  assert.deepEqual(
+    presentation.nextActions?.slice(0, 2).map((action) => action.id),
+    ["inspect-routed-network-request", "start-network-har-capture-for-route-mock"],
+  );
 });
 
 test("buildToolPresentation hides data image network noise from preview while preserving raw details", async () => {
-	const presentation = await buildToolPresentation({
-		commandInfo: { command: "network", subcommand: "requests" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: {
-				requests: [
-					{ method: "GET", requestId: "img-1", resourceType: "Image", status: 500, url: "data:image/png;base64,abcdef" },
-					{ method: "GET", requestId: "api-1", resourceType: "fetch", status: 200, url: "https://example.test/api/items" },
-				],
-			},
-		},
-	});
+  const presentation = await buildToolPresentation({
+    commandInfo: { command: "network", subcommand: "requests" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        requests: [
+          {
+            method: "GET",
+            requestId: "img-1",
+            resourceType: "Image",
+            status: 500,
+            url: "data:image/png;base64,abcdef",
+          },
+          {
+            method: "GET",
+            requestId: "api-1",
+            resourceType: "fetch",
+            status: 200,
+            url: "https://example.test/api/items",
+          },
+        ],
+      },
+    },
+  });
 
-	const text = (presentation.content[0] as { text: string }).text;
-	assert.match(text, /Diagnostic noise hidden from preview: 1 data:image\/artifact request row/);
-	assert.match(text, /2\. 200 GET https:\/\/example\.test\/api\/items/);
-	assert.doesNotMatch(text, /data:image\/png/);
-	assert.doesNotMatch(text, /Network failure summary/);
-	assert.match(JSON.stringify(presentation.data), /data:image\/png/);
-	assert.deepEqual(presentation.nextActions?.map((action) => action.id), ["inspect-network-request", "filter-network-requests-by-path", "clear-network-requests-before-repro", "start-network-har-capture"]);
+  const text = (presentation.content[0] as { text: string }).text;
+  assert.match(text, /Diagnostic noise hidden from preview: 1 data:image\/artifact request row/);
+  assert.match(text, /2\. 200 GET https:\/\/example\.test\/api\/items/);
+  assert.doesNotMatch(text, /data:image\/png/);
+  assert.doesNotMatch(text, /Network failure summary/);
+  assert.match(JSON.stringify(presentation.data), /data:image\/png/);
+  assert.deepEqual(
+    presentation.nextActions?.map((action) => action.id),
+    [
+      "inspect-network-request",
+      "filter-network-requests-by-path",
+      "clear-network-requests-before-repro",
+      "start-network-har-capture",
+    ],
+  );
 });
 
 test("buildToolPresentation treats stream enable already-enabled as idempotent", async () => {
-	const presentation = await buildToolPresentation({
-		commandInfo: { command: "stream", subcommand: "enable" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { alreadyEnabled: true, enabled: true } },
-		sessionName: "pi-agent-browser-test",
-	});
+  const presentation = await buildToolPresentation({
+    commandInfo: { command: "stream", subcommand: "enable" },
+    cwd: process.cwd(),
+    envelope: { success: true, data: { alreadyEnabled: true, enabled: true } },
+    sessionName: "pi-agent-browser-test",
+  });
 
-	assert.equal(presentation.summary, "Stream already enabled");
-	assert.match((presentation.content[0] as { text: string }).text, /idempotent no-op/);
-	assert.deepEqual(presentation.nextActions?.map((action) => action.id), ["check-stream-status-after-noop", "disable-existing-stream-when-done"]);
+  assert.equal(presentation.summary, "Stream already enabled");
+  assert.match((presentation.content[0] as { text: string }).text, /idempotent no-op/);
+  assert.deepEqual(
+    presentation.nextActions?.map((action) => action.id),
+    ["check-stream-status-after-noop", "disable-existing-stream-when-done"],
+  );
 });
 
 test("buildToolPresentation redacts stateful batch details", async () => {
-	const presentation = await buildToolPresentation({
-		commandInfo: { command: "batch" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: [
-				{
-					command: ["cookies", "set", "sid", "cookie-secret"],
-					result: { domain: "example.test", name: "sid", value: "cookie-secret" },
-					success: true,
-				},
-				{
-					command: ["storage", "local", "set", "authToken", "storage-secret"],
-					result: { entries: [{ key: "authToken", value: "storage-secret" }], type: "local" },
-					success: true,
-				},
-			],
-		},
-	});
+  const presentation = await buildToolPresentation({
+    commandInfo: { command: "batch" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: [
+        {
+          command: ["cookies", "set", "sid", "cookie-secret"],
+          result: { domain: "example.test", name: "sid", value: "cookie-secret" },
+          success: true,
+        },
+        {
+          command: ["storage", "local", "set", "authToken", "storage-secret"],
+          result: { entries: [{ key: "authToken", value: "storage-secret" }], type: "local" },
+          success: true,
+        },
+      ],
+    },
+  });
 
-	const serialized = JSON.stringify({ batchSteps: presentation.batchSteps, data: presentation.data });
-	assert.doesNotMatch((presentation.content[0] as { text: string }).text, /cookie-secret|storage-secret/);
-	assert.doesNotMatch(serialized, /cookie-secret|storage-secret/);
-	assert.match(serialized, /\[REDACTED\]/);
+  const serialized = JSON.stringify({
+    batchSteps: presentation.batchSteps,
+    data: presentation.data,
+  });
+  assert.doesNotMatch(
+    (presentation.content[0] as { text: string }).text,
+    /cookie-secret|storage-secret/,
+  );
+  assert.doesNotMatch(serialized, /cookie-secret|storage-secret/);
+  assert.match(serialized, /\[REDACTED\]/);
 });
 
 test("buildToolPresentation redacts failed stateful batch details", async () => {
-	const presentation = await buildToolPresentation({
-		commandInfo: { command: "batch" },
-		cwd: process.cwd(),
-		envelope: {
-			success: false,
-			data: [
-				{
-					command: ["cookies", "set", "sid", "cookie-secret"],
-					error: { message: "failed cookie-secret", value: "cookie-secret" },
-					success: false,
-				},
-			],
-		},
-	});
+  const presentation = await buildToolPresentation({
+    commandInfo: { command: "batch" },
+    cwd: process.cwd(),
+    envelope: {
+      success: false,
+      data: [
+        {
+          command: ["cookies", "set", "sid", "cookie-secret"],
+          error: { message: "failed cookie-secret", value: "cookie-secret" },
+          success: false,
+        },
+      ],
+    },
+  });
 
-	const serialized = JSON.stringify({ batchFailure: presentation.batchFailure, batchSteps: presentation.batchSteps, data: presentation.data });
-	assert.doesNotMatch((presentation.content[0] as { text: string }).text, /cookie-secret/);
-	assert.doesNotMatch(serialized, /cookie-secret/);
-	assert.match(serialized, /\[REDACTED\]/);
+  const serialized = JSON.stringify({
+    batchFailure: presentation.batchFailure,
+    batchSteps: presentation.batchSteps,
+    data: presentation.data,
+  });
+  assert.doesNotMatch((presentation.content[0] as { text: string }).text, /cookie-secret/);
+  assert.doesNotMatch(serialized, /cookie-secret/);
+  assert.match(serialized, /\[REDACTED\]/);
 });
 
 test("buildToolPresentation formats redacted network payload, response, and error previews", async () => {
-	const longResponse = `{"items":["${"x".repeat(400)}"],"token":"response-secret"}`;
-	const presentation = await buildToolPresentation({
-		commandInfo: { command: "network", subcommand: "requests" },
-		cwd: process.cwd(),
-		sessionName: "work",
-		envelope: {
-			success: true,
-			data: {
-				requests: [
-					{ headers: { "User-Agent": "secret-agent" }, method: "GET", requestId: "req-1", resourceType: "Document", status: 200, url: "https://example.com/" },
-					{
-						error: "net::ERR_FAILED Authorization: Bearer error-secret",
-						method: "POST",
-						postData: { name: "demo", token: "body-secret", url: "https://api.example.test/callback?token=nested-url-secret" },
-						requestId: "req-2",
-						resourceType: "Fetch",
-						responseBody: longResponse,
-						responseHeaders: { "Set-Cookie": "session=header-secret" },
-						status: 201,
-						url: "https://api.example.test/items?token=url-secret&sentry_key=sentry-secret&writeKey=write-secret",
-					},
-				],
-			},
-		},
-	});
+  const longResponse = `{"items":["${"x".repeat(400)}"],"token":"response-secret"}`;
+  const presentation = await buildToolPresentation({
+    commandInfo: { command: "network", subcommand: "requests" },
+    cwd: process.cwd(),
+    sessionName: "work",
+    envelope: {
+      success: true,
+      data: {
+        requests: [
+          {
+            headers: { "User-Agent": "secret-agent" },
+            method: "GET",
+            requestId: "req-1",
+            resourceType: "Document",
+            status: 200,
+            url: "https://example.com/",
+          },
+          {
+            error: "net::ERR_FAILED Authorization: Bearer error-secret",
+            method: "POST",
+            postData: {
+              name: "demo",
+              token: "body-secret",
+              url: "https://api.example.test/callback?token=nested-url-secret",
+            },
+            requestId: "req-2",
+            resourceType: "Fetch",
+            responseBody: longResponse,
+            responseHeaders: { "Set-Cookie": "session=header-secret" },
+            status: 201,
+            url: "https://api.example.test/items?token=url-secret&sentry_key=sentry-secret&writeKey=write-secret",
+          },
+        ],
+      },
+    },
+  });
 
-	assert.equal(presentation.summary, "Network requests: 2");
-	const text = (presentation.content[0] as { text: string }).text;
-	assert.match(text, /Network failure summary: 1 actionable, 0 benign low-impact \(1 total\)\./);
-	assert.match(text, /2\. 201 POST https:\/\/api\.example\.test\/items\?token=%5BREDACTED%5D&sentry_key=%5BREDACTED%5D&writeKey=%5BREDACTED%5D \(Fetch\) \[req-2\] \[actionable: document, script, API, or non-benign request failure\]/);
-	assert.match(text, /1\. 200 GET https:\/\/example.com\/ \(Document\) \[req-1\]/);
-	assert.ok(text.indexOf("2. 201 POST") < text.indexOf("1. 200 GET"));
-	assert.match(text, /Payload: .*name.*demo/);
-	assert.match(text, /Payload: .*\[REDACTED\]/);
-	assert.match(text, /Payload: .*https:\/\/api\.example\.test\/callback\?token=%5BREDACTED%5D/);
-	assert.match(text, /Response: /);
-	assert.match(text, /Response: .*…/);
-	assert.match(text, /Error: net::ERR_FAILED Authorization: Bearer \[REDACTED\]/);
-	assert.doesNotMatch(text, /User-Agent|secret-agent|body-secret|response-secret|header-secret|url-secret|nested-url-secret|error-secret|sentry-secret|write-secret|Set-Cookie/);
-	assert.deepEqual(presentation.nextActions?.map((action) => action.id), [
-		"inspect-actionable-network-request",
-		"trace-actionable-network-source",
-		"filter-network-requests-by-path",
-		"clear-network-requests-before-repro",
-		"start-network-har-capture",
-	]);
-	assert.deepEqual(presentation.nextActions?.[0]?.params?.args, ["--session", "work", "network", "request", "req-2"]);
-	assert.deepEqual(presentation.nextActions?.[1]?.params?.networkSourceLookup, { requestId: "req-2", session: "work" });
-	assert.deepEqual(presentation.nextActions?.[2]?.params?.args, ["--session", "work", "network", "requests", "--filter", "/items"]);
-	assert.deepEqual(presentation.nextActions?.[3]?.params?.args, ["--session", "work", "network", "requests", "--clear"]);
-	assert.deepEqual(presentation.nextActions?.[4]?.params?.args, ["--session", "work", "network", "har", "start"]);
-	assert.doesNotMatch(JSON.stringify(presentation.nextActions), /url-secret|nested-url-secret|error-secret|sentry-secret|write-secret/);
+  assert.equal(presentation.summary, "Network requests: 2");
+  const text = (presentation.content[0] as { text: string }).text;
+  assert.match(text, /Network failure summary: 1 actionable, 0 benign low-impact \(1 total\)\./);
+  assert.match(
+    text,
+    /2\. 201 POST https:\/\/api\.example\.test\/items\?token=%5BREDACTED%5D&sentry_key=%5BREDACTED%5D&writeKey=%5BREDACTED%5D \(Fetch\) \[req-2\] \[actionable: document, script, API, or non-benign request failure\]/,
+  );
+  assert.match(text, /1\. 200 GET https:\/\/example.com\/ \(Document\) \[req-1\]/);
+  assert.ok(text.indexOf("2. 201 POST") < text.indexOf("1. 200 GET"));
+  assert.match(text, /Payload: .*name.*demo/);
+  assert.match(text, /Payload: .*\[REDACTED\]/);
+  assert.match(text, /Payload: .*https:\/\/api\.example\.test\/callback\?token=%5BREDACTED%5D/);
+  assert.match(text, /Response: /);
+  assert.match(text, /Response: .*…/);
+  assert.match(text, /Error: net::ERR_FAILED Authorization: Bearer \[REDACTED\]/);
+  assert.doesNotMatch(
+    text,
+    /User-Agent|secret-agent|body-secret|response-secret|header-secret|url-secret|nested-url-secret|error-secret|sentry-secret|write-secret|Set-Cookie/,
+  );
+  assert.deepEqual(
+    presentation.nextActions?.map((action) => action.id),
+    [
+      "inspect-actionable-network-request",
+      "trace-actionable-network-source",
+      "filter-network-requests-by-path",
+      "clear-network-requests-before-repro",
+      "start-network-har-capture",
+    ],
+  );
+  assert.deepEqual(presentation.nextActions?.[0]?.params?.args, [
+    "--session",
+    "work",
+    "network",
+    "request",
+    "req-2",
+  ]);
+  assert.deepEqual(presentation.nextActions?.[1]?.params?.networkSourceLookup, {
+    requestId: "req-2",
+    session: "work",
+  });
+  assert.deepEqual(presentation.nextActions?.[2]?.params?.args, [
+    "--session",
+    "work",
+    "network",
+    "requests",
+    "--filter",
+    "/items",
+  ]);
+  assert.deepEqual(presentation.nextActions?.[3]?.params?.args, [
+    "--session",
+    "work",
+    "network",
+    "requests",
+    "--clear",
+  ]);
+  assert.deepEqual(presentation.nextActions?.[4]?.params?.args, [
+    "--session",
+    "work",
+    "network",
+    "har",
+    "start",
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(presentation.nextActions),
+    /url-secret|nested-url-secret|error-secret|sentry-secret|write-secret/,
+  );
 });
 
 test("buildToolPresentation returns bounded network request next actions for benign and successful API rows", async () => {
-	const benignPresentation = await buildToolPresentation({
-		commandInfo: { command: "network", subcommand: "requests" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: {
-				requests: [
-					{ method: "GET", mimeType: "image/x-icon", requestId: "icon-1", resourceType: "image", status: 404, url: "https://example.test/favicon.ico" },
-				],
-			},
-		},
-	});
-	assert.deepEqual(benignPresentation.nextActions?.map((action) => action.id), [
-		"inspect-benign-network-request",
-		"filter-network-requests-by-path",
-		"clear-network-requests-before-repro",
-		"start-network-har-capture",
-	]);
-	assert.deepEqual(benignPresentation.nextActions?.[0]?.params?.args, ["network", "request", "icon-1"]);
-	assert.equal(benignPresentation.nextActions?.some((action) => action.id.includes("source")), false);
+  const benignPresentation = await buildToolPresentation({
+    commandInfo: { command: "network", subcommand: "requests" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        requests: [
+          {
+            method: "GET",
+            mimeType: "image/x-icon",
+            requestId: "icon-1",
+            resourceType: "image",
+            status: 404,
+            url: "https://example.test/favicon.ico",
+          },
+        ],
+      },
+    },
+  });
+  assert.deepEqual(
+    benignPresentation.nextActions?.map((action) => action.id),
+    [
+      "inspect-benign-network-request",
+      "filter-network-requests-by-path",
+      "clear-network-requests-before-repro",
+      "start-network-har-capture",
+    ],
+  );
+  assert.deepEqual(benignPresentation.nextActions?.[0]?.params?.args, [
+    "network",
+    "request",
+    "icon-1",
+  ]);
+  assert.equal(
+    benignPresentation.nextActions?.some((action) => action.id.includes("source")),
+    false,
+  );
 
-	const apiPresentation = await buildToolPresentation({
-		commandInfo: { command: "network", subcommand: "requests" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: {
-				requests: [
-					{ method: "GET", requestId: "api-1", resourceType: "fetch", status: 200, url: "https://example.test/api/items?token=url-secret" },
-				],
-			},
-		},
-		sessionName: "work",
-	});
-	assert.deepEqual(apiPresentation.nextActions?.map((action) => action.id), [
-		"inspect-network-request",
-		"filter-network-requests-by-path",
-		"clear-network-requests-before-repro",
-		"start-network-har-capture",
-	]);
-	assert.deepEqual(apiPresentation.nextActions?.[0]?.params?.args, ["--session", "work", "network", "request", "api-1"]);
-	assert.deepEqual(apiPresentation.nextActions?.[1]?.params?.args, ["--session", "work", "network", "requests", "--filter", "/api/items"]);
-	assert.deepEqual(apiPresentation.nextActions?.[2]?.params?.args, ["--session", "work", "network", "requests", "--clear"]);
-	assert.deepEqual(apiPresentation.nextActions?.[3]?.params?.args, ["--session", "work", "network", "har", "start"]);
-	assert.equal(apiPresentation.nextActions?.some((action) => action.id.includes("source")), false);
-	assert.doesNotMatch(JSON.stringify(apiPresentation.nextActions), /url-secret/);
+  const apiPresentation = await buildToolPresentation({
+    commandInfo: { command: "network", subcommand: "requests" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        requests: [
+          {
+            method: "GET",
+            requestId: "api-1",
+            resourceType: "fetch",
+            status: 200,
+            url: "https://example.test/api/items?token=url-secret",
+          },
+        ],
+      },
+    },
+    sessionName: "work",
+  });
+  assert.deepEqual(
+    apiPresentation.nextActions?.map((action) => action.id),
+    [
+      "inspect-network-request",
+      "filter-network-requests-by-path",
+      "clear-network-requests-before-repro",
+      "start-network-har-capture",
+    ],
+  );
+  assert.deepEqual(apiPresentation.nextActions?.[0]?.params?.args, [
+    "--session",
+    "work",
+    "network",
+    "request",
+    "api-1",
+  ]);
+  assert.deepEqual(apiPresentation.nextActions?.[1]?.params?.args, [
+    "--session",
+    "work",
+    "network",
+    "requests",
+    "--filter",
+    "/api/items",
+  ]);
+  assert.deepEqual(apiPresentation.nextActions?.[2]?.params?.args, [
+    "--session",
+    "work",
+    "network",
+    "requests",
+    "--clear",
+  ]);
+  assert.deepEqual(apiPresentation.nextActions?.[3]?.params?.args, [
+    "--session",
+    "work",
+    "network",
+    "har",
+    "start",
+  ]);
+  assert.equal(
+    apiPresentation.nextActions?.some((action) => action.id.includes("source")),
+    false,
+  );
+  assert.doesNotMatch(JSON.stringify(apiPresentation.nextActions), /url-secret/);
 
-	for (const [requestId, url, forbiddenPattern] of [
-		["reset-1", "https://example.test/reset/token/abc123?code=url-secret", /reset\/token|abc123|url-secret/],
-		["reset-2", "https://example.test/reset-password/abc123?code=url-secret", /reset-password|abc123|url-secret/],
-		["session-1", "https://example.test/accounts/session-id/abc123?code=url-secret", /session-id|abc123|url-secret/],
-		["camel-1", "https://example.test/account/passwordReset/abc123?code=url-secret", /passwordReset|abc123|url-secret/],
-		["camel-2", "https://example.test/account/resetToken/abc123?code=url-secret", /resetToken|abc123|url-secret/],
-		["camel-3", "https://example.test/account/sessionId/abc123?code=url-secret", /sessionId|abc123|url-secret/],
-		["camel-4", "https://example.test/account/apiKey/abc123?code=url-secret", /apiKey|abc123|url-secret/],
-		["opaque-1", "https://example.test/files/0123456789abcdef?code=url-secret", /0123456789abcdef|url-secret/],
-	] as const) {
-		const sensitivePathPresentation = await buildToolPresentation({
-			commandInfo: { command: "network", subcommand: "requests" },
-			cwd: process.cwd(),
-			envelope: {
-				success: true,
-				data: {
-					requests: [
-						{ method: "GET", requestId, status: 200, url },
-					],
-				},
-			},
-		});
-		assert.deepEqual(sensitivePathPresentation.nextActions?.map((action) => action.id), ["inspect-network-request", "clear-network-requests-before-repro", "start-network-har-capture"]);
-		assert.deepEqual(sensitivePathPresentation.nextActions?.[0]?.params?.args, ["network", "request", requestId]);
-		assert.deepEqual(sensitivePathPresentation.nextActions?.[1]?.params?.args, ["network", "requests", "--clear"]);
-		assert.doesNotMatch(JSON.stringify(sensitivePathPresentation.nextActions), forbiddenPattern);
-	}
+  for (const [requestId, url, forbiddenPattern] of [
+    [
+      "reset-1",
+      "https://example.test/reset/token/abc123?code=url-secret",
+      /reset\/token|abc123|url-secret/,
+    ],
+    [
+      "reset-2",
+      "https://example.test/reset-password/abc123?code=url-secret",
+      /reset-password|abc123|url-secret/,
+    ],
+    [
+      "session-1",
+      "https://example.test/accounts/session-id/abc123?code=url-secret",
+      /session-id|abc123|url-secret/,
+    ],
+    [
+      "camel-1",
+      "https://example.test/account/passwordReset/abc123?code=url-secret",
+      /passwordReset|abc123|url-secret/,
+    ],
+    [
+      "camel-2",
+      "https://example.test/account/resetToken/abc123?code=url-secret",
+      /resetToken|abc123|url-secret/,
+    ],
+    [
+      "camel-3",
+      "https://example.test/account/sessionId/abc123?code=url-secret",
+      /sessionId|abc123|url-secret/,
+    ],
+    [
+      "camel-4",
+      "https://example.test/account/apiKey/abc123?code=url-secret",
+      /apiKey|abc123|url-secret/,
+    ],
+    [
+      "opaque-1",
+      "https://example.test/files/0123456789abcdef?code=url-secret",
+      /0123456789abcdef|url-secret/,
+    ],
+  ] as const) {
+    const sensitivePathPresentation = await buildToolPresentation({
+      commandInfo: { command: "network", subcommand: "requests" },
+      cwd: process.cwd(),
+      envelope: {
+        success: true,
+        data: {
+          requests: [{ method: "GET", requestId, status: 200, url }],
+        },
+      },
+    });
+    assert.deepEqual(
+      sensitivePathPresentation.nextActions?.map((action) => action.id),
+      [
+        "inspect-network-request",
+        "clear-network-requests-before-repro",
+        "start-network-har-capture",
+      ],
+    );
+    assert.deepEqual(sensitivePathPresentation.nextActions?.[0]?.params?.args, [
+      "network",
+      "request",
+      requestId,
+    ]);
+    assert.deepEqual(sensitivePathPresentation.nextActions?.[1]?.params?.args, [
+      "network",
+      "requests",
+      "--clear",
+    ]);
+    assert.doesNotMatch(JSON.stringify(sensitivePathPresentation.nextActions), forbiddenPattern);
+  }
 });
 
 test("buildToolPresentation keeps failed network rows visible when successful rows would fill the preview", async () => {
-	const requests = Array.from({ length: 45 }, (_, index) => ({
-		method: "GET",
-		requestId: `ok-${index}`,
-		resourceType: "Script",
-		status: 200,
-		url: `https://example.test/static/${index}.js`,
-	}));
-	requests.push({
-		method: "GET",
-		requestId: "late-failure",
-		resourceType: "Script",
-		status: 404,
-		url: "https://example.test/missing.js",
-	});
-	const presentation = await buildToolPresentation({
-		commandInfo: { command: "network", subcommand: "requests" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { requests } },
-	});
+  const requests = Array.from({ length: 45 }, (_, index) => ({
+    method: "GET",
+    requestId: `ok-${index}`,
+    resourceType: "Script",
+    status: 200,
+    url: `https://example.test/static/${index}.js`,
+  }));
+  requests.push({
+    method: "GET",
+    requestId: "late-failure",
+    resourceType: "Script",
+    status: 404,
+    url: "https://example.test/missing.js",
+  });
+  const presentation = await buildToolPresentation({
+    commandInfo: { command: "network", subcommand: "requests" },
+    cwd: process.cwd(),
+    envelope: { success: true, data: { requests } },
+  });
 
-	const text = (presentation.content[0] as { text: string }).text;
-	assert.match(text, /46\. 404 GET https:\/\/example\.test\/missing\.js \(Script\) \[late-failure\] \[actionable: document, script, API, or non-benign request failure\]/);
-	assert.ok(text.indexOf("46. 404 GET") < text.indexOf("1. 200 GET"));
-	assert.match(text, /failed requests are shown first when present/);
+  const text = (presentation.content[0] as { text: string }).text;
+  assert.match(
+    text,
+    /46\. 404 GET https:\/\/example\.test\/missing\.js \(Script\) \[late-failure\] \[actionable: document, script, API, or non-benign request failure\]/,
+  );
+  assert.ok(text.indexOf("46. 404 GET") < text.indexOf("1. 200 GET"));
+  assert.match(text, /failed requests are shown first when present/);
 });
 
 test("buildToolPresentation formats vitals metrics and unavailable results", async () => {
-	const metricsPresentation = await buildToolPresentation({
-		commandInfo: { command: "vitals" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { cls: 0.01, fcp: 234.4, lcp: 1234.2, ttfb: 45.8, url: "https://example.test/" } },
-	});
-	assert.equal(metricsPresentation.summary, "Vitals: LCP: 1234ms, FCP: 234ms, TTFB: 46ms, CLS: 0.01");
-	assert.match((metricsPresentation.content[0] as { text: string }).text, /Vitals for https:\/\/example\.test\//);
-	assert.match((metricsPresentation.content[0] as { text: string }).text, /LCP: 1234ms/);
+  const metricsPresentation = await buildToolPresentation({
+    commandInfo: { command: "vitals" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: { cls: 0.01, fcp: 234.4, lcp: 1234.2, ttfb: 45.8, url: "https://example.test/" },
+    },
+  });
+  assert.equal(
+    metricsPresentation.summary,
+    "Vitals: LCP: 1234ms, FCP: 234ms, TTFB: 46ms, CLS: 0.01",
+  );
+  assert.match(
+    (metricsPresentation.content[0] as { text: string }).text,
+    /Vitals for https:\/\/example\.test\//,
+  );
+  assert.match((metricsPresentation.content[0] as { text: string }).text, /LCP: 1234ms/);
 
-	const nestedPresentation = await buildToolPresentation({
-		commandInfo: { command: "web-vitals" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { metrics: { LCP: { value: 987.6 }, FCP: 101.2, CLS: { value: 0.02 } }, url: "https://example.test/" } },
-	});
-	assert.equal(nestedPresentation.summary, "Vitals: LCP: 988ms, FCP: 101ms, CLS: 0.02");
+  const nestedPresentation = await buildToolPresentation({
+    commandInfo: { command: "web-vitals" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        metrics: { LCP: { value: 987.6 }, FCP: 101.2, CLS: { value: 0.02 } },
+        url: "https://example.test/",
+      },
+    },
+  });
+  assert.equal(nestedPresentation.summary, "Vitals: LCP: 988ms, FCP: 101ms, CLS: 0.02");
 
-	const unavailablePresentation = await buildToolPresentation({
-		commandInfo: { command: "vitals" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { message: "No performance entries yet", url: "https://example.test/" } },
-	});
-	assert.equal(unavailablePresentation.summary, "Vitals: metrics unavailable");
-	assert.match((unavailablePresentation.content[0] as { text: string }).text, /Metrics unavailable: No performance entries yet/);
+  const unavailablePresentation = await buildToolPresentation({
+    commandInfo: { command: "vitals" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: { message: "No performance entries yet", url: "https://example.test/" },
+    },
+  });
+  assert.equal(unavailablePresentation.summary, "Vitals: metrics unavailable");
+  assert.match(
+    (unavailablePresentation.content[0] as { text: string }).text,
+    /Metrics unavailable: No performance entries yet/,
+  );
 });
 
 test("buildToolPresentation formats singular network request details without expanding headers", async () => {
-	const presentation = await buildToolPresentation({
-		commandInfo: { command: "network", subcommand: "request" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: {
-				headers: { Authorization: "Bearer header-secret" },
-				method: "POST",
-				mimeType: "application/json",
-				postData: "{\"name\":\"demo\",\"token\":\"payload-secret\"}",
-				requestId: "detail-1",
-				resourceType: "Fetch",
-				responseBody: "{\"ok\":true,\"secret\":\"response-secret\"}",
-				responseHeaders: { "Set-Cookie": "session=header-secret" },
-				status: 200,
-				url: "https://api.example.test/items?token=url-secret",
-			},
-		},
-	});
+  const presentation = await buildToolPresentation({
+    commandInfo: { command: "network", subcommand: "request" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        headers: { Authorization: "Bearer header-secret" },
+        method: "POST",
+        mimeType: "application/json",
+        postData: '{"name":"demo","token":"payload-secret"}',
+        requestId: "detail-1",
+        resourceType: "Fetch",
+        responseBody: '{"ok":true,"secret":"response-secret"}',
+        responseHeaders: { "Set-Cookie": "session=header-secret" },
+        status: 200,
+        url: "https://api.example.test/items?token=url-secret",
+      },
+    },
+  });
 
-	const text = (presentation.content[0] as { text: string }).text;
-	assert.match(text, /1\. 200 POST https:\/\/api\.example\.test\/items\?token=%5BREDACTED%5D \(Fetch\) \[detail-1\]/);
-	assert.match(text, /Payload: .*\[REDACTED\]/);
-	assert.match(text, /Response: .*\[REDACTED\]/);
-	assert.doesNotMatch(text, /Authorization|Set-Cookie|header-secret|payload-secret|response-secret|url-secret/);
+  const text = (presentation.content[0] as { text: string }).text;
+  assert.match(
+    text,
+    /1\. 200 POST https:\/\/api\.example\.test\/items\?token=%5BREDACTED%5D \(Fetch\) \[detail-1\]/,
+  );
+  assert.match(text, /Payload: .*\[REDACTED\]/);
+  assert.match(text, /Response: .*\[REDACTED\]/);
+  assert.doesNotMatch(
+    text,
+    /Authorization|Set-Cookie|header-secret|payload-secret|response-secret|url-secret/,
+  );
 });
 
 test("buildToolPresentation formats console and errors previews", async () => {
-	const consolePresentation = await buildToolPresentation({
-		commandInfo: { command: "console" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: { messages: [{ args: [{ secret: true }], text: "hello", type: "log" }, { text: "boom", type: "error" }] },
-		},
-	});
-	assert.equal(consolePresentation.summary, "Console messages: 2");
-	const consoleText = (consolePresentation.content[0] as { text: string }).text;
-	assert.match(consoleText, /\[log\] hello/);
-	assert.match(consoleText, /\[error\] boom/);
-	assert.doesNotMatch(consoleText, /secret|args/);
+  const consolePresentation = await buildToolPresentation({
+    commandInfo: { command: "console" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        messages: [
+          { args: [{ secret: true }], text: "hello", type: "log" },
+          { text: "boom", type: "error" },
+        ],
+      },
+    },
+  });
+  assert.equal(consolePresentation.summary, "Console messages: 2");
+  const consoleText = (consolePresentation.content[0] as { text: string }).text;
+  assert.match(consoleText, /\[log\] hello/);
+  assert.match(consoleText, /\[error\] boom/);
+  assert.doesNotMatch(consoleText, /secret|args/);
 
-	const errorsPresentation = await buildToolPresentation({
-		commandInfo: { command: "errors" },
-		cwd: process.cwd(),
-		envelope: {
-			success: true,
-			data: { errors: [{ column: 5, line: 10, text: "Error: delayed\n    at stack", url: "https://example.com/app.js" }] },
-		},
-	});
-	assert.equal(errorsPresentation.summary, "Page errors: 1");
-	assert.equal(
-		(errorsPresentation.content[0] as { text: string }).text,
-		"1. Error: delayed (https://example.com/app.js:line 10:column 5)",
-	);
+  const errorsPresentation = await buildToolPresentation({
+    commandInfo: { command: "errors" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: {
+        errors: [
+          {
+            column: 5,
+            line: 10,
+            text: "Error: delayed\n    at stack",
+            url: "https://example.com/app.js",
+          },
+        ],
+      },
+    },
+  });
+  assert.equal(errorsPresentation.summary, "Page errors: 1");
+  assert.equal(
+    (errorsPresentation.content[0] as { text: string }).text,
+    "1. Error: delayed (https://example.com/app.js:line 10:column 5)",
+  );
 });
 
 test("buildToolPresentation labels diagnostic clear output as reset scoped", async () => {
-	const networkReset = await buildToolPresentation({
-		commandInfo: { command: "network", commandTokens: ["network", "requests", "--clear"], subcommand: "requests" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { requests: [{ method: "GET", status: 500, url: "https://old.example.test/api" }] } },
-	});
-	assert.equal(networkReset.summary, "Network requests reset: 1 cleared");
-	assert.match((networkReset.content[0] as { text: string }).text, /Treat these as reset output, not current-page request failures/);
+  const networkReset = await buildToolPresentation({
+    commandInfo: {
+      command: "network",
+      commandTokens: ["network", "requests", "--clear"],
+      subcommand: "requests",
+    },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: { requests: [{ method: "GET", status: 500, url: "https://old.example.test/api" }] },
+    },
+  });
+  assert.equal(networkReset.summary, "Network requests reset: 1 cleared");
+  assert.match(
+    (networkReset.content[0] as { text: string }).text,
+    /Treat these as reset output, not current-page request failures/,
+  );
 
-	const consoleReset = await buildToolPresentation({
-		commandInfo: { command: "console", commandTokens: ["console", "--clear"], subcommand: "--clear" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { messages: [{ text: "old boom", type: "error" }] } },
-	});
-	assert.equal(consoleReset.summary, "Console reset: 1 cleared");
-	assert.match((consoleReset.content[0] as { text: string }).text, /Treat these as reset output, not current-page console errors/);
+  const consoleReset = await buildToolPresentation({
+    commandInfo: {
+      command: "console",
+      commandTokens: ["console", "--clear"],
+      subcommand: "--clear",
+    },
+    cwd: process.cwd(),
+    envelope: { success: true, data: { messages: [{ text: "old boom", type: "error" }] } },
+  });
+  assert.equal(consoleReset.summary, "Console reset: 1 cleared");
+  assert.match(
+    (consoleReset.content[0] as { text: string }).text,
+    /Treat these as reset output, not current-page console errors/,
+  );
 
-	const errorsReset = await buildToolPresentation({
-		commandInfo: { command: "errors", commandTokens: ["errors", "--clear"], subcommand: "--clear" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { errors: [{ text: "old ReferenceError" }] } },
-	});
-	assert.equal(errorsReset.summary, "Page errors reset: 1 cleared");
-	assert.match((errorsReset.content[0] as { text: string }).text, /Treat these as reset output, not current-page errors/);
+  const errorsReset = await buildToolPresentation({
+    commandInfo: { command: "errors", commandTokens: ["errors", "--clear"], subcommand: "--clear" },
+    cwd: process.cwd(),
+    envelope: { success: true, data: { errors: [{ text: "old ReferenceError" }] } },
+  });
+  assert.equal(errorsReset.summary, "Page errors reset: 1 cleared");
+  assert.match(
+    (errorsReset.content[0] as { text: string }).text,
+    /Treat these as reset output, not current-page errors/,
+  );
 });
 
 test("buildToolPresentation redacts dashboard and doctor diagnostic strings", async () => {
-	const dashboardPresentation = await buildToolPresentation({
-		commandInfo: { command: "dashboard" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { port: 9222, reason: "Authorization: Bearer dash-secret Cookie: sid=dash-cookie" } },
-	});
-	const dashboardText = (dashboardPresentation.content[0] as { text: string }).text;
-	assert.doesNotMatch(dashboardText, /dash-secret|dash-cookie/);
-	assert.doesNotMatch(dashboardPresentation.summary, /dash-secret|dash-cookie/);
-	assert.match(dashboardText, /\[REDACTED\]/);
+  const dashboardPresentation = await buildToolPresentation({
+    commandInfo: { command: "dashboard" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: { port: 9222, reason: "Authorization: Bearer dash-secret Cookie: sid=dash-cookie" },
+    },
+  });
+  const dashboardText = (dashboardPresentation.content[0] as { text: string }).text;
+  assert.doesNotMatch(dashboardText, /dash-secret|dash-cookie/);
+  assert.doesNotMatch(dashboardPresentation.summary, /dash-secret|dash-cookie/);
+  assert.match(dashboardText, /\[REDACTED\]/);
 
-	const doctorPresentation = await buildToolPresentation({
-		commandInfo: { command: "doctor" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { status: "Authorization: Bearer doctor-secret Cookie: sid=doctor-cookie" } },
-	});
-	const doctorText = (doctorPresentation.content[0] as { text: string }).text;
-	assert.doesNotMatch(doctorText, /doctor-secret|doctor-cookie/);
-	assert.doesNotMatch(doctorPresentation.summary, /doctor-secret|doctor-cookie/);
-	assert.match(doctorText, /\[REDACTED\]/);
+  const doctorPresentation = await buildToolPresentation({
+    commandInfo: { command: "doctor" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: { status: "Authorization: Bearer doctor-secret Cookie: sid=doctor-cookie" },
+    },
+  });
+  const doctorText = (doctorPresentation.content[0] as { text: string }).text;
+  assert.doesNotMatch(doctorText, /doctor-secret|doctor-cookie/);
+  assert.doesNotMatch(doctorPresentation.summary, /doctor-secret|doctor-cookie/);
+  assert.match(doctorText, /\[REDACTED\]/);
 });
 
 test("buildToolPresentation formats dashboard and doctor status", async () => {
-	const dashboard = await buildToolPresentation({
-		commandInfo: { command: "dashboard", subcommand: "start" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { pid: 123, port: 4848 } },
-	});
-	assert.equal(dashboard.summary, "Dashboard running on port 4848");
-	assert.equal((dashboard.content[0] as { text: string }).text, "Port: 4848\nPID: 123");
+  const dashboard = await buildToolPresentation({
+    commandInfo: { command: "dashboard", subcommand: "start" },
+    cwd: process.cwd(),
+    envelope: { success: true, data: { pid: 123, port: 4848 } },
+  });
+  assert.equal(dashboard.summary, "Dashboard running on port 4848");
+  assert.equal((dashboard.content[0] as { text: string }).text, "Port: 4848\nPID: 123");
 
-	const stopped = await buildToolPresentation({
-		commandInfo: { command: "dashboard", subcommand: "stop" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { reason: "not running", stopped: false } },
-	});
-	assert.equal(stopped.summary, "Dashboard not stopped: not running");
-	assert.match((stopped.content[0] as { text: string }).text, /Reason: not running/);
+  const stopped = await buildToolPresentation({
+    commandInfo: { command: "dashboard", subcommand: "stop" },
+    cwd: process.cwd(),
+    envelope: { success: true, data: { reason: "not running", stopped: false } },
+  });
+  assert.equal(stopped.summary, "Dashboard not stopped: not running");
+  assert.match((stopped.content[0] as { text: string }).text, /Reason: not running/);
 
-	const doctor = await buildToolPresentation({
-		commandInfo: { command: "doctor" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { checks: [{ name: "binary" }], environment: { token: "secret" }, status: "ok" } },
-	});
-	assert.equal(doctor.summary, "Doctor: ok");
-	assert.equal((doctor.content[0] as { text: string }).text, "Status: ok\nChecks: 1\n1. [info] binary");
+  const doctor = await buildToolPresentation({
+    commandInfo: { command: "doctor" },
+    cwd: process.cwd(),
+    envelope: {
+      success: true,
+      data: { checks: [{ name: "binary" }], environment: { token: "secret" }, status: "ok" },
+    },
+  });
+  assert.equal(doctor.summary, "Doctor: ok");
+  assert.equal(
+    (doctor.content[0] as { text: string }).text,
+    "Status: ok\nChecks: 1\n1. [info] binary",
+  );
 });
 
 test("buildToolPresentation summarizes non-core command families and redacts diagnostic data", async () => {
-	const cases = [
-		{
-			commandInfo: { command: "network", subcommand: "route" },
-			data: { body: { token: "route-secret" }, routed: "https://api.example.test/**?token=route-url-secret" },
-			expectedSummary: "Network route: https://api.example.test/**?token=%5BREDACTED%5D",
-			expectedText: /routed.*api\.example\.test/,
-			forbidden: /route-secret|route-url-secret/,
-		},
-		{
-			commandInfo: { command: "network", subcommand: "unroute" },
-			data: { unrouted: "**/*.js" },
-			expectedSummary: "Network unroute: **/*.js",
-			expectedText: /unrouted.*\*\*\/\*\.js/,
-			forbidden: /never-match-secret/,
-		},
-		{
-			commandInfo: { command: "diff", subcommand: "snapshot" },
-			data: { added: 1, removed: 0, token: "diff-secret" },
-			expectedSummary: "Snapshot diff completed",
-			expectedText: /added.*1/,
-			forbidden: /diff-secret/,
-		},
-		{
-			commandInfo: { command: "diff", subcommand: "url" },
-			data: { differenceCount: 2, url: "https://example.test/?token=diff-url-secret" },
-			expectedSummary: "URL diff completed",
-			expectedText: /differenceCount.*2/,
-			forbidden: /diff-url-secret/,
-		},
-		{
-			commandInfo: { command: "trace", subcommand: "start" },
-			data: { status: "started" },
-			expectedSummary: "Trace: started",
-			expectedText: /started/,
-			forbidden: /never-match-secret/,
-		},
-		{
-			commandInfo: { command: "profiler", subcommand: "start" },
-			data: { status: "started" },
-			expectedSummary: "Profiler: started",
-			expectedText: /started/,
-			forbidden: /never-match-secret/,
-		},
-		{
-			commandInfo: { command: "highlight", subcommand: "#pay" },
-			data: { highlighted: "#pay" },
-			expectedSummary: "Element highlighted",
-			expectedText: /highlighted.*#pay/,
-			forbidden: /never-match-secret/,
-		},
-		{
-			commandInfo: { command: "inspect" },
-			data: { opened: true },
-			expectedSummary: "DevTools inspect opened",
-			expectedText: /opened.*true/,
-			forbidden: /never-match-secret/,
-		},
-		{
-			commandInfo: { command: "clipboard", subcommand: "read" },
-			data: { text: "clipboard Authorization: Bearer clipboard-secret" },
-			expectedSummary: "Clipboard read",
-			expectedText: /\[REDACTED\]/,
-			forbidden: /clipboard-secret/,
-		},
-		{
-			commandInfo: { command: "stream", subcommand: "enable" },
-			data: { connected: true, enabled: true, port: 7788, screencasting: true },
-			expectedSummary: "Stream enabled on port 7788",
-			expectedText: /WebSocket URL: ws:\/\/127\.0\.0\.1:7788/,
-			forbidden: /never-match-secret/,
-		},
-		{
-			commandInfo: { command: "stream", subcommand: "disable" },
-			data: { connected: false, enabled: false, screencasting: false },
-			expectedSummary: "Stream disabled",
-			expectedText: /Enabled: false/,
-			forbidden: /never-match-secret/,
-		},
-		{
-			commandInfo: { command: "chat", subcommand: "summarize" },
-			data: { model: "anthropic/claude", response: "Done with Bearer chat-secret" },
-			expectedSummary: "Chat response",
-			expectedText: /Bearer \[REDACTED\]/,
-			forbidden: /chat-secret/,
-		},
-	] as const;
+  const cases = [
+    {
+      commandInfo: { command: "network", subcommand: "route" },
+      data: {
+        body: { token: "route-secret" },
+        routed: "https://api.example.test/**?token=route-url-secret",
+      },
+      expectedSummary: "Network route: https://api.example.test/**?token=%5BREDACTED%5D",
+      expectedText: /routed.*api\.example\.test/,
+      forbidden: /route-secret|route-url-secret/,
+    },
+    {
+      commandInfo: { command: "network", subcommand: "unroute" },
+      data: { unrouted: "**/*.js" },
+      expectedSummary: "Network unroute: **/*.js",
+      expectedText: /unrouted.*\*\*\/\*\.js/,
+      forbidden: /never-match-secret/,
+    },
+    {
+      commandInfo: { command: "diff", subcommand: "snapshot" },
+      data: { added: 1, removed: 0, token: "diff-secret" },
+      expectedSummary: "Snapshot diff completed",
+      expectedText: /added.*1/,
+      forbidden: /diff-secret/,
+    },
+    {
+      commandInfo: { command: "diff", subcommand: "url" },
+      data: { differenceCount: 2, url: "https://example.test/?token=diff-url-secret" },
+      expectedSummary: "URL diff completed",
+      expectedText: /differenceCount.*2/,
+      forbidden: /diff-url-secret/,
+    },
+    {
+      commandInfo: { command: "trace", subcommand: "start" },
+      data: { status: "started" },
+      expectedSummary: "Trace: started",
+      expectedText: /started/,
+      forbidden: /never-match-secret/,
+    },
+    {
+      commandInfo: { command: "profiler", subcommand: "start" },
+      data: { status: "started" },
+      expectedSummary: "Profiler: started",
+      expectedText: /started/,
+      forbidden: /never-match-secret/,
+    },
+    {
+      commandInfo: { command: "highlight", subcommand: "#pay" },
+      data: { highlighted: "#pay" },
+      expectedSummary: "Element highlighted",
+      expectedText: /highlighted.*#pay/,
+      forbidden: /never-match-secret/,
+    },
+    {
+      commandInfo: { command: "inspect" },
+      data: { opened: true },
+      expectedSummary: "DevTools inspect opened",
+      expectedText: /opened.*true/,
+      forbidden: /never-match-secret/,
+    },
+    {
+      commandInfo: { command: "clipboard", subcommand: "read" },
+      data: { text: "clipboard Authorization: Bearer clipboard-secret" },
+      expectedSummary: "Clipboard read",
+      expectedText: /\[REDACTED\]/,
+      forbidden: /clipboard-secret/,
+    },
+    {
+      commandInfo: { command: "stream", subcommand: "enable" },
+      data: { connected: true, enabled: true, port: 7788, screencasting: true },
+      expectedSummary: "Stream enabled on port 7788",
+      expectedText: /WebSocket URL: ws:\/\/127\.0\.0\.1:7788/,
+      forbidden: /never-match-secret/,
+    },
+    {
+      commandInfo: { command: "stream", subcommand: "disable" },
+      data: { connected: false, enabled: false, screencasting: false },
+      expectedSummary: "Stream disabled",
+      expectedText: /Enabled: false/,
+      forbidden: /never-match-secret/,
+    },
+    {
+      commandInfo: { command: "chat", subcommand: "summarize" },
+      data: { model: "anthropic/claude", response: "Done with Bearer chat-secret" },
+      expectedSummary: "Chat response",
+      expectedText: /Bearer \[REDACTED\]/,
+      forbidden: /chat-secret/,
+    },
+  ] as const;
 
-	for (const item of cases) {
-		const presentation = await buildToolPresentation({
-			commandInfo: item.commandInfo,
-			cwd: process.cwd(),
-			envelope: { success: true, data: item.data },
-		});
-		const text = (presentation.content[0] as { text: string }).text;
-		const serialized = JSON.stringify({ data: presentation.data, summary: presentation.summary, text });
-		const label = `${item.commandInfo.command} ${"subcommand" in item.commandInfo ? item.commandInfo.subcommand : ""}`;
-		assert.equal(presentation.summary, item.expectedSummary, label);
-		assert.match(text, item.expectedText, label);
-		assert.doesNotMatch(serialized, item.forbidden, label);
-	}
+  for (const item of cases) {
+    const presentation = await buildToolPresentation({
+      commandInfo: item.commandInfo,
+      cwd: process.cwd(),
+      envelope: { success: true, data: item.data },
+    });
+    const text = (presentation.content[0] as { text: string }).text;
+    const serialized = JSON.stringify({
+      data: presentation.data,
+      summary: presentation.summary,
+      text,
+    });
+    const label = `${item.commandInfo.command} ${"subcommand" in item.commandInfo ? item.commandInfo.subcommand : ""}`;
+    assert.equal(presentation.summary, item.expectedSummary, label);
+    assert.match(text, item.expectedText, label);
+    assert.doesNotMatch(serialized, item.forbidden, label);
+  }
 });
 
 test("buildToolPresentation compacts large diagnostic output and preserves spill path", async () => {
-	const messages = Array.from({ length: 180 }, (_, index) => ({ text: `diagnostic console row ${index + 1} ${"x".repeat(120)}`, type: "log" }));
-	const presentation = await buildToolPresentation({
-		commandInfo: { command: "console" },
-		cwd: process.cwd(),
-		envelope: { success: true, data: { messages } },
-	});
+  const messages = Array.from({ length: 180 }, (_, index) => ({
+    text: `diagnostic console row ${index + 1} ${"x".repeat(120)}`,
+    type: "log",
+  }));
+  const presentation = await buildToolPresentation({
+    commandInfo: { command: "console" },
+    cwd: process.cwd(),
+    envelope: { success: true, data: { messages } },
+  });
 
-	assert.equal(presentation.content[0]?.type, "text");
-	const text = (presentation.content[0] as { text: string }).text;
-	assert.match(text, /Large console output compacted/);
-	assert.match(text, /Full output path: /);
-	assert.equal(typeof presentation.fullOutputPath, "string");
-	assert.equal((presentation.data as { compacted: boolean }).compacted, true);
+  assert.equal(presentation.content[0]?.type, "text");
+  const text = (presentation.content[0] as { text: string }).text;
+  assert.match(text, /Large console output compacted/);
+  assert.match(text, /Full output path: /);
+  assert.equal(typeof presentation.fullOutputPath, "string");
+  assert.equal((presentation.data as { compacted: boolean }).compacted, true);
 
-	const spillPath = presentation.fullOutputPath;
-	assert.ok(spillPath);
-	assert.match(text, new RegExp(spillPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-	assert.match(await readFile(String(spillPath), "utf8"), /diagnostic console row 180/);
-	await rm(String(spillPath), { force: true });
+  const spillPath = presentation.fullOutputPath;
+  assert.ok(spillPath);
+  assert.match(text, new RegExp(spillPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(await readFile(String(spillPath), "utf8"), /diagnostic console row 180/);
+  await rm(String(spillPath), { force: true });
 });
 
 test("buildToolPresentation keeps failed batch context inline when compacting", async () => {
-	const largeSuccessfulSteps = Array.from({ length: 90 }, (_, index) => ({
-		command: ["eval", "--stdin"],
-		result: { result: `large successful batch row ${index + 1} ${"x".repeat(120)}` },
-		success: true,
-	}));
-	const presentation = await buildToolPresentation({
-		commandInfo: { command: "batch" },
-		cwd: process.cwd(),
-		envelope: {
-			success: false,
-			data: [
-				...largeSuccessfulSteps,
-				{ command: ["wait", "--text", "Checkout complete"], error: "Timed out waiting for text: Checkout complete", success: false },
-			],
-		},
-	});
+  const largeSuccessfulSteps = Array.from({ length: 90 }, (_, index) => ({
+    command: ["eval", "--stdin"],
+    result: { result: `large successful batch row ${index + 1} ${"x".repeat(120)}` },
+    success: true,
+  }));
+  const presentation = await buildToolPresentation({
+    commandInfo: { command: "batch" },
+    cwd: process.cwd(),
+    envelope: {
+      success: false,
+      data: [
+        ...largeSuccessfulSteps,
+        {
+          command: ["wait", "--text", "Checkout complete"],
+          error: "Timed out waiting for text: Checkout complete",
+          success: false,
+        },
+      ],
+    },
+  });
 
-	assert.equal(presentation.content[0]?.type, "text");
-	const text = (presentation.content[0] as { text: string }).text;
-	assert.match(text, /Large batch output compacted/);
-	assert.match(text, /Failure context:/);
-	assert.match(text, /First failing step: 91/);
-	assert.match(text, /Failure category: timeout/);
-	assert.match(text, /Failure detail: Error: Timed out waiting for text: Checkout complete/);
-	assert.match(text, /Full output path: /);
-	assert.equal(presentation.batchFailure?.failedStep.index, 90);
-	assert.equal(typeof presentation.fullOutputPath, "string");
-	const spillPath = presentation.fullOutputPath;
-	assert.ok(spillPath);
-	assert.match(await readFile(String(spillPath), "utf8"), /large successful batch row 90/);
-	await rm(String(spillPath), { force: true });
+  assert.equal(presentation.content[0]?.type, "text");
+  const text = (presentation.content[0] as { text: string }).text;
+  assert.match(text, /Large batch output compacted/);
+  assert.match(text, /Failure context:/);
+  assert.match(text, /First failing step: 91/);
+  assert.match(text, /Failure category: timeout/);
+  assert.match(text, /Failure detail: Error: Timed out waiting for text: Checkout complete/);
+  assert.match(text, /Full output path: /);
+  assert.equal(presentation.batchFailure?.failedStep.index, 90);
+  assert.equal(typeof presentation.fullOutputPath, "string");
+  const spillPath = presentation.fullOutputPath;
+  assert.ok(spillPath);
+  assert.match(await readFile(String(spillPath), "utf8"), /large successful batch row 90/);
+  await rm(String(spillPath), { force: true });
 });
 
 test("buildToolPresentation bounds long failed command text when compacting batch output", async () => {
-	const longArgument = `checkout-${"z".repeat(900)}-END_OF_UNBOUNDED_ARGUMENT`;
-	const largeSuccessfulSteps = Array.from({ length: 90 }, (_, index) => ({
-		command: ["eval", "--stdin"],
-		result: { result: `large successful batch row ${index + 1} ${"x".repeat(120)}` },
-		success: true,
-	}));
-	const presentation = await buildToolPresentation({
-		commandInfo: { command: "batch" },
-		cwd: process.cwd(),
-		envelope: {
-			success: false,
-			data: [
-				...largeSuccessfulSteps,
-				{ command: ["wait", "--text", longArgument], error: "Timed out waiting for text.", success: false },
-			],
-		},
-	});
+  const longArgument = `checkout-${"z".repeat(900)}-END_OF_UNBOUNDED_ARGUMENT`;
+  const largeSuccessfulSteps = Array.from({ length: 90 }, (_, index) => ({
+    command: ["eval", "--stdin"],
+    result: { result: `large successful batch row ${index + 1} ${"x".repeat(120)}` },
+    success: true,
+  }));
+  const presentation = await buildToolPresentation({
+    commandInfo: { command: "batch" },
+    cwd: process.cwd(),
+    envelope: {
+      success: false,
+      data: [
+        ...largeSuccessfulSteps,
+        {
+          command: ["wait", "--text", longArgument],
+          error: "Timed out waiting for text.",
+          success: false,
+        },
+      ],
+    },
+  });
 
-	assert.equal(presentation.content[0]?.type, "text");
-	const text = (presentation.content[0] as { text: string }).text;
-	assert.match(text, /Large batch output compacted/);
-	assert.match(text, /Failure context:/);
-	assert.match(text, /First failing step: 91 — wait --text checkout-z+…/);
-	assert.equal(text.includes(longArgument), false);
-	assert.equal(text.includes("END_OF_UNBOUNDED_ARGUMENT"), false);
-	assert.ok(text.length < 4500, `compacted inline output was unexpectedly large: ${text.length}`);
-	const spillPath = presentation.fullOutputPath;
-	assert.ok(spillPath);
-	assert.match(await readFile(String(spillPath), "utf8"), /END_OF_UNBOUNDED_ARGUMENT/);
-	await rm(String(spillPath), { force: true });
+  assert.equal(presentation.content[0]?.type, "text");
+  const text = (presentation.content[0] as { text: string }).text;
+  assert.match(text, /Large batch output compacted/);
+  assert.match(text, /Failure context:/);
+  assert.match(text, /First failing step: 91 — wait --text checkout-z+…/);
+  assert.equal(text.includes(longArgument), false);
+  assert.equal(text.includes("END_OF_UNBOUNDED_ARGUMENT"), false);
+  assert.ok(text.length < 4500, `compacted inline output was unexpectedly large: ${text.length}`);
+  const spillPath = presentation.fullOutputPath;
+  assert.ok(spillPath);
+  assert.match(await readFile(String(spillPath), "utf8"), /END_OF_UNBOUNDED_ARGUMENT/);
+  await rm(String(spillPath), { force: true });
 });

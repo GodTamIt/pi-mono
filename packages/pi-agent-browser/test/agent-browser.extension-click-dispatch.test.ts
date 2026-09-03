@@ -11,21 +11,23 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-	createExtensionHarness,
-	executeRegisteredTool,
-	readInvocationLog,
-	runExtensionEvent,
-	withPatchedEnv,
-	writeFakeAgentBrowserBinary,
+  createExtensionHarness,
+  executeRegisteredTool,
+  readInvocationLog,
+  runExtensionEvent,
+  withPatchedEnv,
+  writeFakeAgentBrowserBinary,
 } from "./helpers/agent-browser-harness.js";
 
-test("agentBrowserExtension cleans up click dispatch probes after failed clicks", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-failure-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test("agentBrowserExtension cleans up click dispatch probes after failed clicks", {
+  concurrency: false,
+}, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-failure-"));
+  const logPath = join(tempDir, "invocations.log");
+  const basePath = process.env.PATH ?? "";
+  await writeFakeAgentBrowserBinary(
+    tempDir,
+    `const fs = require("node:fs");
 const args = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, stdin }) + "\\n");
@@ -45,37 +47,46 @@ if (args.includes("eval")) {
 } else {
   process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
 }`,
-	);
+  );
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+  try {
+    await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
+      const harness = createExtensionHarness({ cwd: tempDir });
+      await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-			await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
-			const click = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["click", "@e1"] });
-			assert.equal(click.isError, true);
-			assert.equal(click.details?.clickDispatch, undefined);
+      await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
+      const click = await executeRegisteredTool(harness.tool, harness.ctx, {
+        args: ["click", "@e1"],
+      });
+      assert.equal(click.isError, true);
+      assert.equal(click.details?.clickDispatch, undefined);
 
-			const invocations = await readInvocationLog(logPath);
-			const evalInvocations = invocations.filter((entry) => entry.args.includes("eval"));
-			assert.equal(invocations.filter((entry) => entry.args.includes("click")).length, 1);
-			assert.ok(evalInvocations.some((entry) => (entry.stdin ?? "").includes("window[marker] = state")));
-			assert.ok(evalInvocations.some((entry) => (entry.stdin ?? "").includes("cleaned-up")));
-			assert.equal(evalInvocations.some((entry) => (entry.stdin ?? "").includes("no-native-event-observed")), false);
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
+      const invocations = await readInvocationLog(logPath);
+      const evalInvocations = invocations.filter((entry) => entry.args.includes("eval"));
+      assert.equal(invocations.filter((entry) => entry.args.includes("click")).length, 1);
+      assert.ok(
+        evalInvocations.some((entry) => (entry.stdin ?? "").includes("window[marker] = state")),
+      );
+      assert.ok(evalInvocations.some((entry) => (entry.stdin ?? "").includes("cleaned-up")));
+      assert.equal(
+        evalInvocations.some((entry) => (entry.stdin ?? "").includes("no-native-event-observed")),
+        false,
+      );
+    });
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });
 
-test("agentBrowserExtension cleans up click dispatch probes during successful dispatch checks", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-success-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test("agentBrowserExtension cleans up click dispatch probes during successful dispatch checks", {
+  concurrency: false,
+}, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-success-"));
+  const logPath = join(tempDir, "invocations.log");
+  const basePath = process.env.PATH ?? "";
+  await writeFakeAgentBrowserBinary(
+    tempDir,
+    `const fs = require("node:fs");
 const args = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, stdin }) + "\\n");
@@ -96,39 +107,52 @@ if (args.includes("eval")) {
 } else {
   process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
 }`,
-	);
+  );
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+  try {
+    await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
+      const harness = createExtensionHarness({ cwd: tempDir });
+      await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-			await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
-			const click = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["click", "@e1"] });
-			assert.equal(click.isError, false);
-			assert.equal(click.details?.clickDispatch, undefined);
+      await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
+      const click = await executeRegisteredTool(harness.tool, harness.ctx, {
+        args: ["click", "@e1"],
+      });
+      assert.equal(click.isError, false);
+      assert.equal(click.details?.clickDispatch, undefined);
 
-			const invocations = await readInvocationLog(logPath);
-			const evalInvocations = invocations.filter((entry) => entry.args.includes("eval"));
-			const checkInvocation = evalInvocations.find((entry) => (entry.stdin ?? "").includes("native-event-observed"));
-			assert.equal(evalInvocations.length, 2, "successful dispatch should not run a redundant cleanup eval");
-			assert.equal(evalInvocations.some((entry) => (entry.stdin ?? "").includes("cleaned-up")), false);
-			assert.ok(checkInvocation, "expected a click dispatch check eval");
-			assert.ok((checkInvocation.stdin ?? "").includes("state.cleanup"));
-			assert.ok((checkInvocation.stdin ?? "").includes("delete window[marker]"));
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
+      const invocations = await readInvocationLog(logPath);
+      const evalInvocations = invocations.filter((entry) => entry.args.includes("eval"));
+      const checkInvocation = evalInvocations.find((entry) =>
+        (entry.stdin ?? "").includes("native-event-observed"),
+      );
+      assert.equal(
+        evalInvocations.length,
+        2,
+        "successful dispatch should not run a redundant cleanup eval",
+      );
+      assert.equal(
+        evalInvocations.some((entry) => (entry.stdin ?? "").includes("cleaned-up")),
+        false,
+      );
+      assert.ok(checkInvocation, "expected a click dispatch check eval");
+      assert.ok((checkInvocation.stdin ?? "").includes("state.cleanup"));
+      assert.ok((checkInvocation.stdin ?? "").includes("delete window[marker]"));
+    });
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });
 
-test("agentBrowserExtension probes ref clicks with current snapshot accessibility metadata", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-ref-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test("agentBrowserExtension probes ref clicks with current snapshot accessibility metadata", {
+  concurrency: false,
+}, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-ref-"));
+  const logPath = join(tempDir, "invocations.log");
+  const basePath = process.env.PATH ?? "";
+  await writeFakeAgentBrowserBinary(
+    tempDir,
+    `const fs = require("node:fs");
 const args = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, stdin }) + "\\n");
@@ -151,41 +175,54 @@ if (args.includes("snapshot")) {
 } else {
   process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
 }`,
-	);
+  );
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+  try {
+    await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
+      const harness = createExtensionHarness({ cwd: tempDir });
+      await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-			const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
-			assert.equal(snapshot.isError, false);
+      const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
+        args: ["snapshot", "-i"],
+      });
+      assert.equal(snapshot.isError, false);
 
-			const click = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["click", "@e4"] });
-			assert.equal(click.isError, true);
-			assert.match((click.content[0] as { text: string }).text, /Click dispatch diagnostic:/);
-			assert.deepEqual((click.details?.clickDispatch as { target?: unknown } | undefined)?.target, {
-				kind: "accessible",
-				name: "RPS (3)",
-				refId: "e4",
-				role: "button",
-			});
+      const click = await executeRegisteredTool(harness.tool, harness.ctx, {
+        args: ["click", "@e4"],
+      });
+      assert.equal(click.isError, true);
+      assert.match((click.content[0] as { text: string }).text, /Click dispatch diagnostic:/);
+      assert.deepEqual((click.details?.clickDispatch as { target?: unknown } | undefined)?.target, {
+        kind: "accessible",
+        name: "RPS (3)",
+        refId: "e4",
+        role: "button",
+      });
 
-			const invocations = await readInvocationLog(logPath);
-			assert.ok(invocations.some((entry) => entry.args.includes("eval") && (entry.stdin ?? "").includes("expectedRole") && (entry.stdin ?? "").includes("RPS (3)")));
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
+      const invocations = await readInvocationLog(logPath);
+      assert.ok(
+        invocations.some(
+          (entry) =>
+            entry.args.includes("eval") &&
+            (entry.stdin ?? "").includes("expectedRole") &&
+            (entry.stdin ?? "").includes("RPS (3)"),
+        ),
+      );
+    });
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });
 
-test("agentBrowserExtension probes duplicate-name ref clicks with snapshot order", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-duplicate-ref-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test("agentBrowserExtension probes duplicate-name ref clicks with snapshot order", {
+  concurrency: false,
+}, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-duplicate-ref-"));
+  const logPath = join(tempDir, "invocations.log");
+  const basePath = process.env.PATH ?? "";
+  await writeFakeAgentBrowserBinary(
+    tempDir,
+    `const fs = require("node:fs");
 const args = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, stdin }) + "\\n");
@@ -211,46 +248,58 @@ if (args.includes("snapshot")) {
 } else {
   process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
 }`,
-	);
+  );
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+  try {
+    await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
+      const harness = createExtensionHarness({ cwd: tempDir });
+      await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-			const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
-			assert.equal(snapshot.isError, false);
+      const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
+        args: ["snapshot", "-i"],
+      });
+      assert.equal(snapshot.isError, false);
 
-			const click = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["click", "@e2"] });
-			assert.equal(click.isError, true);
-			assert.deepEqual((click.details?.clickDispatch as { target?: unknown } | undefined)?.target, {
-				duplicateIndex: 1,
-				kind: "accessible",
-				name: "Add to cart",
-				refId: "e2",
-				role: "button",
-			});
+      const click = await executeRegisteredTool(harness.tool, harness.ctx, {
+        args: ["click", "@e2"],
+      });
+      assert.equal(click.isError, true);
+      assert.deepEqual((click.details?.clickDispatch as { target?: unknown } | undefined)?.target, {
+        duplicateIndex: 1,
+        kind: "accessible",
+        name: "Add to cart",
+        refId: "e2",
+        role: "button",
+      });
 
-			const invocations = await readInvocationLog(logPath);
-			const installInvocation = invocations.find((entry) => entry.args.includes("eval") && (entry.stdin ?? "").includes("window[marker] = state"));
-			assert.ok(installInvocation, "expected a click dispatch install eval");
-			const installScript = installInvocation.stdin ?? "";
-			assert.ok(installScript.includes("duplicateIndex"));
-			assert.match(installScript, /(?:const|let|var)?\s*duplicateIndex\s*=\s*1\b|"duplicateIndex"\s*:\s*1\b/);
-			assert.ok(installScript.includes("candidates[duplicateIndex]"));
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
+      const invocations = await readInvocationLog(logPath);
+      const installInvocation = invocations.find(
+        (entry) =>
+          entry.args.includes("eval") && (entry.stdin ?? "").includes("window[marker] = state"),
+      );
+      assert.ok(installInvocation, "expected a click dispatch install eval");
+      const installScript = installInvocation.stdin ?? "";
+      assert.ok(installScript.includes("duplicateIndex"));
+      assert.match(
+        installScript,
+        /(?:const|let|var)?\s*duplicateIndex\s*=\s*1\b|"duplicateIndex"\s*:\s*1\b/,
+      );
+      assert.ok(installScript.includes("candidates[duplicateIndex]"));
+    });
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });
 
-test("agentBrowserExtension does not run click-dispatch probes for unresolved find locators", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-find-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test("agentBrowserExtension does not run click-dispatch probes for unresolved find locators", {
+  concurrency: false,
+}, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-find-"));
+  const logPath = join(tempDir, "invocations.log");
+  const basePath = process.env.PATH ?? "";
+  await writeFakeAgentBrowserBinary(
+    tempDir,
+    `const fs = require("node:fs");
 const args = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, stdin }) + "\\n");
@@ -261,31 +310,41 @@ if (args.includes("eval")) {
 } else {
   process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
 }`,
-	);
+  );
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+  try {
+    await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
+      const harness = createExtensionHarness({ cwd: tempDir });
+      await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-			const click = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["find", "text", "Add to cart", "click"] });
-			assert.equal(click.isError, false);
-			assert.equal(click.details?.clickDispatch, undefined);
-			const invocations = await readInvocationLog(logPath);
-			assert.equal(invocations.some((entry) => entry.args.includes("eval") && (entry.stdin ?? "").includes("window[marker] = state")), false);
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
+      const click = await executeRegisteredTool(harness.tool, harness.ctx, {
+        args: ["find", "text", "Add to cart", "click"],
+      });
+      assert.equal(click.isError, false);
+      assert.equal(click.details?.clickDispatch, undefined);
+      const invocations = await readInvocationLog(logPath);
+      assert.equal(
+        invocations.some(
+          (entry) =>
+            entry.args.includes("eval") && (entry.stdin ?? "").includes("window[marker] = state"),
+        ),
+        false,
+      );
+    });
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });
 
-test("agentBrowserExtension reports click dispatch diagnostic when upstream reports success without dispatching DOM events", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test("agentBrowserExtension reports click dispatch diagnostic when upstream reports success without dispatching DOM events", {
+  concurrency: false,
+}, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-"));
+  const logPath = join(tempDir, "invocations.log");
+  const basePath = process.env.PATH ?? "";
+  await writeFakeAgentBrowserBinary(
+    tempDir,
+    `const fs = require("node:fs");
 const args = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, stdin }) + "\\n");
@@ -311,51 +370,81 @@ if (args.includes("snapshot")) {
 } else {
   process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
 }`,
-	);
+  );
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+  try {
+    await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
+      const harness = createExtensionHarness({ cwd: tempDir });
+      await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-			await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
-			const click = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["click", "@e1"] });
-			assert.equal(click.isError, true);
-			assert.match((click.content[0] as { text: string }).text, /Click dispatch diagnostic:/);
-			assert.equal((click.details?.clickDispatch as { status?: string } | undefined)?.status, "no-native-event-observed");
-			assert.equal((click.details?.clickDispatch as { target?: { kind?: string; refId?: string } } | undefined)?.target?.kind, "accessible");
-			assert.equal((click.details?.clickDispatch as { target?: { kind?: string; refId?: string } } | undefined)?.target?.refId, "e1");
-			assert.deepEqual((click.details?.clickDispatch as { scrollContainer?: unknown } | undefined)?.scrollContainer, {
-				selector: "#todos",
-				summary: "Target appears outside nested scroll container #todos; use scrollintoview on the target or scroll that container before retrying.",
-				targetOutsideContainer: true,
-				targetOutsideViewport: true,
-			});
-			assert.match(click.content[0]?.text ?? "", /nested scroll container #todos/);
-			const nextActionIds = ((click.details?.nextActions as Array<{ id?: string }> | undefined) ?? []).map((action) => action.id);
-			assert.ok(nextActionIds.includes("scroll-target-into-view-after-dispatch-miss"));
-			assert.ok(nextActionIds.includes("retry-click-after-dispatch-miss"));
+      await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
+      const click = await executeRegisteredTool(harness.tool, harness.ctx, {
+        args: ["click", "@e1"],
+      });
+      assert.equal(click.isError, true);
+      assert.match((click.content[0] as { text: string }).text, /Click dispatch diagnostic:/);
+      assert.equal(
+        (click.details?.clickDispatch as { status?: string } | undefined)?.status,
+        "no-native-event-observed",
+      );
+      assert.equal(
+        (click.details?.clickDispatch as { target?: { kind?: string; refId?: string } } | undefined)
+          ?.target?.kind,
+        "accessible",
+      );
+      assert.equal(
+        (click.details?.clickDispatch as { target?: { kind?: string; refId?: string } } | undefined)
+          ?.target?.refId,
+        "e1",
+      );
+      assert.deepEqual(
+        (click.details?.clickDispatch as { scrollContainer?: unknown } | undefined)
+          ?.scrollContainer,
+        {
+          selector: "#todos",
+          summary:
+            "Target appears outside nested scroll container #todos; use scrollintoview on the target or scroll that container before retrying.",
+          targetOutsideContainer: true,
+          targetOutsideViewport: true,
+        },
+      );
+      assert.match(click.content[0]?.text ?? "", /nested scroll container #todos/);
+      const nextActionIds = (
+        (click.details?.nextActions as Array<{ id?: string }> | undefined) ?? []
+      ).map((action) => action.id);
+      assert.ok(nextActionIds.includes("scroll-target-into-view-after-dispatch-miss"));
+      assert.ok(nextActionIds.includes("retry-click-after-dispatch-miss"));
 
-			const invocations = await readInvocationLog(logPath);
-			assert.equal(invocations.filter((entry) => entry.args.includes("click")).length, 1);
-			assert.ok(invocations.some((entry) => entry.args.includes("eval") && (entry.stdin ?? "").includes("window[marker] = state")));
-			const checkInvocation = invocations.find((entry) => entry.args.includes("eval") && (entry.stdin ?? "").includes("no-native-event-observed"));
-			assert.ok(checkInvocation, "expected a click dispatch check eval");
-			assert.ok((checkInvocation.stdin ?? "").includes("state.cleanup"));
-			assert.ok((checkInvocation.stdin ?? "").includes("delete window[marker]"));
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
+      const invocations = await readInvocationLog(logPath);
+      assert.equal(invocations.filter((entry) => entry.args.includes("click")).length, 1);
+      assert.ok(
+        invocations.some(
+          (entry) =>
+            entry.args.includes("eval") && (entry.stdin ?? "").includes("window[marker] = state"),
+        ),
+      );
+      const checkInvocation = invocations.find(
+        (entry) =>
+          entry.args.includes("eval") && (entry.stdin ?? "").includes("no-native-event-observed"),
+      );
+      assert.ok(checkInvocation, "expected a click dispatch check eval");
+      assert.ok((checkInvocation.stdin ?? "").includes("state.cleanup"));
+      assert.ok((checkInvocation.stdin ?? "").includes("delete window[marker]"));
+    });
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });
 
-test("agentBrowserExtension observes live URL after href-less CSS clicks", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-css-click-url-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test("agentBrowserExtension observes live URL after href-less CSS clicks", {
+  concurrency: false,
+}, async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-css-click-url-"));
+  const logPath = join(tempDir, "invocations.log");
+  const basePath = process.env.PATH ?? "";
+  await writeFakeAgentBrowserBinary(
+    tempDir,
+    `const fs = require("node:fs");
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args }) + "\\n");
 if (args.includes("open")) {
@@ -369,30 +458,52 @@ if (args.includes("open")) {
 } else {
   process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
 }`,
-	);
+  );
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+  try {
+    await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
+      const harness = createExtensionHarness({ cwd: tempDir });
+      await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-			const opened = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["open", "https://shop.example/login"] });
-			assert.equal(opened.isError, false);
-			assert.equal((opened.details?.sessionTabTarget as { url?: string } | undefined)?.url, "https://shop.example/login");
+      const opened = await executeRegisteredTool(harness.tool, harness.ctx, {
+        args: ["open", "https://shop.example/login"],
+      });
+      assert.equal(opened.isError, false);
+      assert.equal(
+        (opened.details?.sessionTabTarget as { url?: string } | undefined)?.url,
+        "https://shop.example/login",
+      );
 
-			const click = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["click", "#login-button"] });
-			assert.equal(click.isError, false);
-			assert.equal(click.details?.clickDispatch, undefined);
-			assert.deepEqual(click.details?.sessionTabTarget, { title: "Inventory", url: "https://shop.example/inventory" });
-			assert.equal((click.details?.pageChangeSummary as { changeType?: string; url?: string } | undefined)?.changeType, "navigation");
-			assert.equal((click.details?.pageChangeSummary as { url?: string } | undefined)?.url, "https://shop.example/inventory");
+      const click = await executeRegisteredTool(harness.tool, harness.ctx, {
+        args: ["click", "#login-button"],
+      });
+      assert.equal(click.isError, false);
+      assert.equal(click.details?.clickDispatch, undefined);
+      assert.deepEqual(click.details?.sessionTabTarget, {
+        title: "Inventory",
+        url: "https://shop.example/inventory",
+      });
+      assert.equal(
+        (click.details?.pageChangeSummary as { changeType?: string; url?: string } | undefined)
+          ?.changeType,
+        "navigation",
+      );
+      assert.equal(
+        (click.details?.pageChangeSummary as { url?: string } | undefined)?.url,
+        "https://shop.example/inventory",
+      );
 
-			const invocations = await readInvocationLog(logPath);
-			assert.equal(invocations.filter((entry) => entry.args.includes("click")).length, 1);
-			assert.ok(invocations.some((entry) => entry.args.includes("get") && entry.args.includes("url")));
-			assert.equal(invocations.some((entry) => entry.args.includes("eval")), false);
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
+      const invocations = await readInvocationLog(logPath);
+      assert.equal(invocations.filter((entry) => entry.args.includes("click")).length, 1);
+      assert.ok(
+        invocations.some((entry) => entry.args.includes("get") && entry.args.includes("url")),
+      );
+      assert.equal(
+        invocations.some((entry) => entry.args.includes("eval")),
+        false,
+      );
+    });
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
 });

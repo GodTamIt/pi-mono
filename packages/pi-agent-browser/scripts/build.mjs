@@ -19,22 +19,31 @@ const require = createRequire(import.meta.url);
 const tscPath = require.resolve("typescript/bin/tsc");
 
 async function main() {
-	await rm(join(process.cwd(), "dist"), { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
-	try {
-		const { stderr, stdout } = await execFile(process.execPath, [tscPath, "-p", "tsconfig.build.json"], {
-			cwd: process.cwd(),
-			maxBuffer: 10 * 1024 * 1024,
-		});
-		if (stdout) process.stdout.write(stdout);
-		if (stderr) process.stderr.write(stderr);
-	} catch (error) {
-		if (error?.stdout) process.stdout.write(error.stdout);
-		if (error?.stderr) process.stderr.write(error.stderr);
-		throw error;
-	}
+  await rm(join(process.cwd(), "dist"), {
+    force: true,
+    maxRetries: 5,
+    recursive: true,
+    retryDelay: 100,
+  });
+  try {
+    const { stderr, stdout } = await execFile(
+      process.execPath,
+      [tscPath, "-p", "tsconfig.build.json"],
+      {
+        cwd: process.cwd(),
+        maxBuffer: 10 * 1024 * 1024,
+      },
+    );
+    if (stdout) process.stdout.write(stdout);
+    if (stderr) process.stderr.write(stderr);
+  } catch (error) {
+    if (error?.stdout) process.stdout.write(error.stdout);
+    if (error?.stderr) process.stderr.write(error.stderr);
+    throw error;
+  }
 }
 
 main().catch((error) => {
-	console.error(error instanceof Error ? error.message : String(error));
-	process.exitCode = 1;
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
 });

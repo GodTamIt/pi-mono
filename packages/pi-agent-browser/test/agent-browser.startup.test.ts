@@ -16,21 +16,27 @@ const execFile = promisify(execFileCallback);
 const STARTUP_BUDGET_MS = process.platform === "android" ? 1_000 : 250;
 
 type StartupMeasurement = {
-	events: number;
-	importMs: number;
-	tools: string[];
-	totalMs: number;
+  events: number;
+  importMs: number;
+  tools: string[];
+  totalMs: number;
 };
 
 async function getPackageExtensionEntrypoint(): Promise<string> {
-	const packageJson = JSON.parse(await readFile("package.json", "utf8")) as { pi?: { extensions?: string[] } };
-	const entrypoint = packageJson.pi?.extensions?.[0];
-	assert.equal(typeof entrypoint, "string", "package.json pi.extensions[0] should name the packaged extension entrypoint");
-	return entrypoint as string;
+  const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
+    pi?: { extensions?: string[] };
+  };
+  const entrypoint = packageJson.pi?.extensions?.[0];
+  assert.equal(
+    typeof entrypoint,
+    "string",
+    "package.json pi.extensions[0] should name the packaged extension entrypoint",
+  );
+  return entrypoint as string;
 }
 
 async function measureColdStartup(entrypoint: string): Promise<StartupMeasurement> {
-	const script = `
+  const script = `
 const start = performance.now();
 const extension = await import(${JSON.stringify(entrypoint)});
 const imported = performance.now();
@@ -49,29 +55,41 @@ console.log(JSON.stringify({
   totalMs: registered - start,
 }));
 `;
-	const result = await execFile(execPath, ["--input-type=module", "-e", script], {
-		cwd: cwd(),
-		timeout: 10_000,
-	});
-	return JSON.parse(result.stdout.trim()) as StartupMeasurement;
+  const result = await execFile(execPath, ["--input-type=module", "-e", script], {
+    cwd: cwd(),
+    timeout: 10_000,
+  });
+  return JSON.parse(result.stdout.trim()) as StartupMeasurement;
 }
 
 test("agent_browser cold startup stays below the issue #84 regression budget", async () => {
-	const entrypoint = await getPackageExtensionEntrypoint();
-	assert.equal(entrypoint, "./dist/extensions/agent-browser/index.js");
-	// Concurrent cold imports measure scheduler contention rather than one Pi startup on thermally constrained Android devices.
-	const measurements = process.platform === "android"
-		? [await measureColdStartup(entrypoint), await measureColdStartup(entrypoint), await measureColdStartup(entrypoint)]
-		: await Promise.all([measureColdStartup(entrypoint), measureColdStartup(entrypoint), measureColdStartup(entrypoint)]);
-	const totals = measurements.map((measurement) => measurement.totalMs);
-	const maxTotal = Math.max(...totals);
+  const entrypoint = await getPackageExtensionEntrypoint();
+  assert.equal(entrypoint, "./dist/extensions/agent-browser/index.js");
+  // Concurrent cold imports measure scheduler contention rather than one Pi startup on thermally constrained Android devices.
+  const measurements =
+    process.platform === "android"
+      ? [
+          await measureColdStartup(entrypoint),
+          await measureColdStartup(entrypoint),
+          await measureColdStartup(entrypoint),
+        ]
+      : await Promise.all([
+          measureColdStartup(entrypoint),
+          measureColdStartup(entrypoint),
+          measureColdStartup(entrypoint),
+        ]);
+  const totals = measurements.map((measurement) => measurement.totalMs);
+  const maxTotal = Math.max(...totals);
 
-	for (const measurement of measurements) {
-		assert.ok(measurement.events > 0, "extension factory should register lifecycle handlers");
-		assert.ok(measurement.tools.includes("agent_browser"), "extension factory should register the native browser tool");
-	}
-	assert.ok(
-		maxTotal < STARTUP_BUDGET_MS,
-		`cold startup exceeded ${STARTUP_BUDGET_MS}ms: ${totals.map((value) => value.toFixed(1)).join(", ")}`,
-	);
+  for (const measurement of measurements) {
+    assert.ok(measurement.events > 0, "extension factory should register lifecycle handlers");
+    assert.ok(
+      measurement.tools.includes("agent_browser"),
+      "extension factory should register the native browser tool",
+    );
+  }
+  assert.ok(
+    maxTotal < STARTUP_BUDGET_MS,
+    `cold startup exceeded ${STARTUP_BUDGET_MS}ms: ${totals.map((value) => value.toFixed(1)).join(", ")}`,
+  );
 });

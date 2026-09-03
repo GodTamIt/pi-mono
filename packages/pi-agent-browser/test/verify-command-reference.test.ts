@@ -34,7 +34,12 @@ function completeDoc(): string {
 }
 
 function fakeRunWithVersion(version: string): (args: readonly string[]) => Promise<string> {
-  const helpByCommand = new Map(CAPABILITY_BASELINE.helpCommands.map((command) => [command.args.join(" "), fakeHelpFor(command.label)]));
+  const helpByCommand = new Map(
+    CAPABILITY_BASELINE.helpCommands.map((command) => [
+      command.args.join(" "),
+      fakeHelpFor(command.label),
+    ]),
+  );
 
   return async (args: readonly string[]) => {
     const key = args.join(" ");
@@ -80,7 +85,9 @@ test("stripGeneratedCapabilityBaselineBlocks removes generated content before hu
 });
 
 test("command reference clarifies get selector requirements", () => {
-  const doc = stripGeneratedCapabilityBaselineBlocks(readFileSync("docs/COMMAND_REFERENCE.md", "utf8"));
+  const doc = stripGeneratedCapabilityBaselineBlocks(
+    readFileSync("docs/COMMAND_REFERENCE.md", "utf8"),
+  );
 
   assert.match(doc, /selector is not optional for DOM getters/);
   assert.match(doc, /`get text\/html\/value\/count <selector>`/);
@@ -120,9 +127,17 @@ test("verifyCommandReference reports missing upstream token", async () => {
     throw new Error(`Unexpected command in fake run: ${key}`);
   };
 
-  const failures = await verifyCommandReference({ cwd: "/repo", run, readDoc: async () => completeDoc() });
+  const failures = await verifyCommandReference({
+    cwd: "/repo",
+    run,
+    readDoc: async () => completeDoc(),
+  });
 
-  assert.ok(failures.some((entry) => entry.includes("Upstream root help no longer includes expected token")));
+  assert.ok(
+    failures.some((entry) =>
+      entry.includes("Upstream root help no longer includes expected token"),
+    ),
+  );
 });
 
 test("verifyCommandReference reports missing doc token", async () => {
@@ -133,5 +148,9 @@ test("verifyCommandReference reports missing doc token", async () => {
     readDoc: async () => docMissingToken,
   });
 
-  assert.ok(failures.some((entry) => entry.includes("docs/COMMAND_REFERENCE.md is missing human-authored token: skills list")));
+  assert.ok(
+    failures.some((entry) =>
+      entry.includes("docs/COMMAND_REFERENCE.md is missing human-authored token: skills list"),
+    ),
+  );
 });
