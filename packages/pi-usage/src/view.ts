@@ -8,7 +8,13 @@
  */
 import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
-import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import {
+  Key,
+  matchesKey,
+  stripTerminalSequences,
+  truncateToWidth,
+  visibleWidth,
+} from "@earendil-works/pi-tui";
 import {
   type AttributionMaps,
   agentStats,
@@ -66,6 +72,30 @@ import {
 import type { ProviderQuota } from "./provider.ts";
 
 export type { ViewKey } from "./mascot.ts";
+
+/**
+ * Control characters (besides ESC, which introduces legitimate theme SGR)
+ * that would move the cursor or occupy extra physical rows, desyncing
+ * pi-tui's one-string-per-row render accounting.
+ */
+const ROW_BREAKING_CHARS = /[\x00-\x08\x0a-\x1a\x1c-\x1f\x7f-\x9f]/g;
+
+/** Flatten a composed line to one physical row; tabs match pi-tui's width model. */
+function flattenLine(line: string): string {
+  return line.replace(/\t/g, "   ").replace(ROW_BREAKING_CHARS, "");
+}
+
+/**
+ * Sanitize untrusted session metadata (task text, agent/parent labels,
+ * statuses) for single-line rendering: drop smuggled terminal escapes and
+ * collapse all whitespace — newlines included — into single spaces. Without
+ * this, one logical "line" wraps into extra physical rows and the host's
+ * differential renderer clears and redraws the wrong rows.
+ */
+function inlineText(text: string): string {
+  const collapsed = stripTerminalSequences(text).replace(/\s+/g, " ");
+  return flattenLine(collapsed).replace(/\x1b/g, "").trim();
+}
 
 /** Sort field for the Models table. */
 type SortKey = "value" | "name";
@@ -445,9 +475,14 @@ export class UsageView {
     }
   }
 
-  /** Final width clamp so one long line can never break the TUI layout. */
+  /**
+   * Final width clamp so one long line can never break the TUI layout. Also
+   * flattens every line to a single physical row (pi-tui's render contract);
+   * theme SGR escapes survive, stray control characters do not.
+   */
   private clampLine(line: string, width: number): string {
-    return visibleWidth(line) > width ? truncateToWidth(line, width) : line;
+    const flat = flattenLine(line);
+    return visibleWidth(flat) > width ? truncateToWidth(flat, width) : flat;
   }
 
   invalidate(): void {
@@ -949,13 +984,15 @@ export class UsageView {
       const duration =
         child.endedAt > child.startedAt ? formatDuration(child.endedAt - child.startedAt) : "—";
       const mode = child.isBackground == null ? "" : child.isBackground ? " bg" : " fg";
-      return { value, duration, status: `${child.status}${mode}` };
+      return { value, duration, status: `${inlineText(child.status) || "unknown"}${mode}` };
     };
     if (w < 54) {
       // Narrow terminals: two-line rows keep the task name readable.
       for (const child of win.children.slice(0, 20)) {
         const row = childRow(child);
-        lines.push(`  ${theme.fg("text", truncateToWidth(child.task, Math.max(10, w - 4)))}`);
+        lines.push(
+          `  ${theme.fg("text", truncateToWidth(inlineText(child.task) || "(untitled)", Math.max(10, w - 4)))}`,
+        );
         lines.push(
           `  ${theme.fg("dim", `${row.value} · ${row.duration} · `)}${theme.fg("success", row.status)}`,
         );
@@ -968,7 +1005,7 @@ export class UsageView {
       for (const child of win.children.slice(0, 20)) {
         const row = childRow(child);
         lines.push(
-          `  ${theme.fg("text", truncateToWidth(child.task, taskW).padEnd(taskW))} ${theme.fg("muted", truncateToWidth(row.value, 8).padStart(8))} ${theme.fg("dim", truncateToWidth(row.duration, 7).padStart(7))} ${theme.fg("success", truncateToWidth(row.status, 12))}`,
+          `  ${theme.fg("text", truncateToWidth(inlineText(child.task) || "(untitled)", taskW).padEnd(taskW))} ${theme.fg("muted", truncateToWidth(row.value, 8).padStart(8))} ${theme.fg("dim", truncateToWidth(row.duration, 7).padStart(7))} ${theme.fg("success", truncateToWidth(row.status, 12))}`,
         );
       }
     }
@@ -2366,7 +2403,7 @@ export class UsageView {
 
     for (const [key, bucket] of shown) {
       const value = bucketValue(bucket);
-      const name = truncateToWidth(labelFn(key), labelW).padEnd(labelW);
+      const name = truncateToWidth(inlineText(labelFn(key)) || "—", labelW).padEnd(labelW);
       const pct = percent(value, total);
       const ratio = total > 0 ? value / total : 0;
       const filled = Math.max(ratio > 0 ? 1 : 0, Math.round(ratio * barW));

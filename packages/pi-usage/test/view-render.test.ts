@@ -1,5 +1,5 @@
 import type { Usage } from "@earendil-works/pi-ai";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import type { ChildSessionSummary, Report, TurnEntry } from "../src/aggregate.ts";
 import { UsageView, type ViewKey } from "../src/view.ts";
@@ -177,6 +177,66 @@ describe("UsageView rendering", () => {
     const footer = narrow[narrow.length - 2];
     expect(visibleWidth(footer)).toBeLessThanOrEqual(40);
     expect(footer).toContain("q");
+  });
+
+  it("keeps one physical row per line when Delegation metadata contains control characters", () => {
+    // Regression: session-derived task/parent/agent/status text can carry
+    // newlines, tabs, and escape bytes. visibleWidth() counts \n as 0, so a
+    // poisoned "line" passed the width clamp yet wrapped into extra physical
+    // rows, desyncing pi-tui's differential renderer (stale rows, duplicated
+    // header) after leaving or closing the Delegation tab.
+    const poisoned: Report = {
+      ...report,
+      children: children.map((c, i) =>
+        i === 0
+          ? {
+              ...c,
+              task: "first line\nsecond line\t\x1b[2J\x1b[31mred",
+              parentLabel: "parent\nlabel",
+              agentType: "agent\r\ntype",
+              status: "done\n\x1b[2J",
+            }
+          : c,
+      ),
+    };
+    // Strip legitimate SGR (truncateToWidth appends resets); any control
+    // char left over — or a stray ESC — is leaked session data.
+    const expectRowContract = (lines: string[], width: number) => {
+      for (const line of lines) {
+        expect(stripTerminalSequences(line)).not.toMatch(/[\x00-\x1f\x7f-\x9f]/);
+        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
+    };
+
+    // Navigate forward onto Delegation (1 → 2 → 3) and check every frame.
+    const view = makeView(poisoned, "overview");
+    expectRowContract(view.render(100), 100);
+    view.handleInput("\t");
+    expect(view.activeView).toBe("models");
+    expectRowContract(view.render(100), 100);
+    view.handleInput("\t");
+    expect(view.activeView).toBe("delegation");
+    const delegation = view.render(100);
+    expectRowContract(delegation, 100);
+    const joined = delegation.join("\n");
+    expect(joined).toContain("first line second line");
+    expect(joined).toContain("parent label");
+    expect(joined).toContain("agent type");
+    expect(joined).not.toContain("\x1b[2J");
+
+    // Portable (RPC) rendering obeys the same single-row contract.
+    expectRowContract(view.renderPortable(100), 100);
+
+    // Back out in reverse (shift+tab), jump back in, then leave forward.
+    view.handleInput("\x1b[Z");
+    expect(view.activeView).toBe("models");
+    expectRowContract(view.render(100), 100);
+    view.handleInput("3");
+    expect(view.activeView).toBe("delegation");
+    expectRowContract(view.render(40), 40);
+    view.handleInput("\t");
+    expect(view.activeView).toBe("daily");
+    expectRowContract(view.render(100), 100);
   });
 
   it("shares semantic actions with terminal key handling without changing TUI controls", () => {
