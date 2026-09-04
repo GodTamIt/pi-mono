@@ -38,7 +38,7 @@ const PROMPT_ARTIFACT_AFFIRMATIVE_PREFIX_PATTERN =
 const PROMPT_ARTIFACT_AFFIRMATIVE_LEAD_IN_PATTERN =
   /^(?:please\s+)?(?:capture|create|export|generate|output|record|render|save|screenshot|start|take|write)\b.*(?:[,\-:–—]|\b(?:and|then))\s*$/i;
 const PROMPT_ARTIFACT_LIST_CONNECTOR_PATTERN =
-  /^[\s"'`()\[\]{},;:.*!?\/&+>-]*(?:(?:and|or)[\s"'`()\[\]{},;:.*!?\/&+>-]*)?$/i;
+  /^[\s"'`()\x5B\x5D{},;:.*!?/&+>-]*(?:(?:and|or)[\s"'`()\x5B\x5D{},;:.*!?/&+>-]*)?$/i;
 const PROMPT_ARTIFACT_LIST_PREFIX_PATTERN = /^\s*(?:(?:[-*+]|\d+[.)])\s*)/;
 const PROMPT_ARTIFACT_OPTIONAL_RECORDING_PATTERN =
   /\b(?:if|when)\s+(?:recordings?\s+)?(?:(?:are|is)\s+)?available\b/i;
@@ -68,7 +68,7 @@ function getPromptArtifactTrailingClause(context: string): string {
 function hasPromptArtifactOutputIntent(context: string): boolean {
   const clause = getPromptArtifactIntentClause(context)
     .replace(/\[[^\]\r\n]*\]\(\s*$/, "")
-    .replace(/[([{\"'`]+\s*$/, "");
+    .replace(/[([{"'`]+\s*$/, "");
   const intentMatch =
     clause.match(PROMPT_ARTIFACT_OUTPUT_INTENT_PATTERN) ??
     clause.match(PROMPT_ARTIFACT_COLON_OUTPUT_INTENT_PATTERN);
@@ -129,8 +129,8 @@ function extractPromptRequestedArtifacts(prompt: string): PromptRequestedArtifac
     ) {
       if (listContinuation?.kind === "recording") {
         for (const artifactIndex of listArtifactIndexes) {
-          if (artifacts[artifactIndex]?.kind === "recording")
-            artifacts[artifactIndex]!.required = false;
+          const artifact = artifacts[artifactIndex];
+          if (artifact?.kind === "recording") artifact.required = false;
         }
         listContinuation = { ...listContinuation, required: false };
       } else {
@@ -151,7 +151,7 @@ function extractPromptRequestedArtifacts(prompt: string): PromptRequestedArtifac
     const pathlessLine = stripPromptArtifactListPrefix(
       line.replace(PROMPT_ARTIFACT_PATH_PATTERN, ""),
     );
-    const remainder = pathlessLine.replace(/[\s"'`()\[\],;:.*!?>-]+/g, "").toLowerCase();
+    const remainder = pathlessLine.replace(/[\s"'`()\x5B\x5D,;:.*!?>-]+/g, "").toLowerCase();
     const listSyntax = pathlessLine
       .replace(PROMPT_ARTIFACT_OPTIONAL_RECORDING_PATTERN, "")
       .replace(PROMPT_ARTIFACT_EXPLICIT_OPTIONAL_PATTERN, "");
@@ -170,7 +170,9 @@ function extractPromptRequestedArtifacts(prompt: string): PromptRequestedArtifac
     let previousKind: PromptRequestedArtifact["kind"] | undefined;
     let previousPathEnd = 0;
     for (let matchIndex = 0; matchIndex < pathMatches.length; matchIndex += 1) {
-      const { end, path, start } = pathMatches[matchIndex]!;
+      const pathMatch = pathMatches[matchIndex];
+      if (!pathMatch) continue;
+      const { end, path, start } = pathMatch;
       const localContext = stripPromptArtifactListPrefix(line.slice(previousPathEnd, start));
       const intentContext =
         matchIndex === 0 &&
@@ -240,7 +242,8 @@ function extractPromptRequestedArtifacts(prompt: string): PromptRequestedArtifac
       previousPathEnd = end;
     }
     for (const candidate of candidates) {
-      const match = pathMatches[candidate.matchIndex]!;
+      const match = pathMatches[candidate.matchIndex];
+      if (!match) continue;
       const nextStart = pathMatches[candidate.matchIndex + 1]?.start ?? line.length;
       if (
         PROMPT_ARTIFACT_OPTIONAL_RECORDING_PATTERN.test(
@@ -261,13 +264,15 @@ function extractPromptRequestedArtifacts(prompt: string): PromptRequestedArtifac
         seen.set(key, artifactIndex);
         artifacts.push({ kind: candidate.kind, path: candidate.path, required });
       } else if (required) {
-        artifacts[artifactIndex]!.required = true;
+        const artifact = artifacts[artifactIndex];
+        if (artifact) artifact.required = true;
       }
       lineArtifactIndexes.push(artifactIndex);
     }
     const lastCandidate = candidates.at(-1);
-    if (isPathList && lastCandidate?.matchIndex === pathMatches.length - 1) {
-      const lastArtifact = artifacts[lineArtifactIndexes.at(-1)!]!;
+    const lastArtifactIndex = lineArtifactIndexes.at(-1);
+    const lastArtifact = lastArtifactIndex === undefined ? undefined : artifacts[lastArtifactIndex];
+    if (isPathList && lastCandidate?.matchIndex === pathMatches.length - 1 && lastArtifact) {
       listContinuation = { kind: lastArtifact.kind, required: lastArtifact.required };
       if (candidates[0]?.continuedFromPriorLine) {
         for (const artifactIndex of lineArtifactIndexes) listArtifactIndexes.push(artifactIndex);

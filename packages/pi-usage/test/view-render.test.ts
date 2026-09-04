@@ -236,6 +236,7 @@ describe("UsageView rendering", () => {
     // char left over — or a stray ESC — is leaked session data.
     const expectRowContract = (lines: string[], width: number) => {
       for (const line of lines) {
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: This assertion intentionally detects leaked control characters.
         expect(stripTerminalSequences(line)).not.toMatch(/[\x00-\x1f\x7f-\x9f]/);
         expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       }

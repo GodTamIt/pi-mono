@@ -55,7 +55,7 @@ function isPidAlive(pid: number | undefined): boolean | undefined {
     return true;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    return code === "EPERM" ? true : false;
+    return code === "EPERM";
   }
 }
 

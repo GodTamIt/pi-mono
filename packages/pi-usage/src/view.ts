@@ -80,6 +80,7 @@ export type { ViewKey } from "./mascot.ts";
  * that would move the cursor or occupy extra physical rows, desyncing
  * pi-tui's one-string-per-row render accounting.
  */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: These ranges intentionally match display control characters.
 const ROW_BREAKING_CHARS = /[\x00-\x08\x0a-\x1a\x1c-\x1f\x7f-\x9f]/g;
 
 /** Flatten a composed line to one physical row; tabs match pi-tui's width model. */
@@ -96,6 +97,7 @@ function flattenLine(line: string): string {
  */
 function inlineText(text: string): string {
   const collapsed = stripTerminalSequences(text).replace(/\s+/g, " ");
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: This pattern intentionally removes stray terminal escapes.
   return flattenLine(collapsed).replace(/\x1b/g, "").trim();
 }
 

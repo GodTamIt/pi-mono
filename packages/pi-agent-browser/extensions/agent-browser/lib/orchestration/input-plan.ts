@@ -15,13 +15,13 @@ import {
   compileAgentBrowserScript,
   type CompiledAgentBrowserScript,
 } from "../input-modes/script.js";
-import {
-  type CompiledAgentBrowserElectron,
-  type CompiledAgentBrowserJob,
-  type CompiledAgentBrowserNetworkSourceLookup,
-  type CompiledAgentBrowserQaPreset,
-  type CompiledAgentBrowserSemanticAction,
-  type CompiledAgentBrowserSourceLookup,
+import type {
+  CompiledAgentBrowserElectron,
+  CompiledAgentBrowserJob,
+  CompiledAgentBrowserNetworkSourceLookup,
+  CompiledAgentBrowserQaPreset,
+  CompiledAgentBrowserSemanticAction,
+  CompiledAgentBrowserSourceLookup,
 } from "../input-modes/types.js";
 export interface AgentBrowserExecuteParams {
   args?: string[];

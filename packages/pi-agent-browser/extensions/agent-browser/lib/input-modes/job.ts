@@ -630,7 +630,7 @@ export function analyzeQaPresetResults(
       const visibleTextPassed = qaVisibleTextWaitPassed(items[index], step);
       if (visibleTextPassed === true) return;
       const actual = extractQaTextAssertionResultText(items[index]);
-      if (!actual || !actual.includes(expected))
+      if (!actual?.includes(expected))
         failedChecks.push(`expected text not found: ${formatQaExpectedTextPreview(expected)}`);
     });
   }

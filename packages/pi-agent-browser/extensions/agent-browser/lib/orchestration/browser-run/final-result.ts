@@ -13,13 +13,13 @@ import {
   isCompiledSemanticActionFindCommand,
 } from "../../input-modes/semantic-action.js";
 import { redactNetworkSourceLookupSurface } from "../../input-modes/lookups.js";
-import {
-  type CompiledAgentBrowserElectron,
-  type CompiledAgentBrowserSemanticAction,
+import type {
+  CompiledAgentBrowserElectron,
+  CompiledAgentBrowserSemanticAction,
 } from "../../input-modes/types.js";
 import { buildAgentBrowserNextActions } from "../../results/action-recommendations.js";
 import { buildAgentBrowserResultCategoryDetails } from "../../results/categories.js";
-import { type AgentBrowserEnvelope, type AgentBrowserNextAction } from "../../results/contracts.js";
+import type { AgentBrowserEnvelope, AgentBrowserNextAction } from "../../results/contracts.js";
 import { formatSessionArtifactRetentionSummary } from "../../results/artifact-manifest.js";
 import {
   alignPageChangeSummaryNextActionIds,

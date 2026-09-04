@@ -63,7 +63,7 @@ export function normalizeProcessStartIdentity(stdout: string): string | undefine
     .map((record) => record.trim())
     .filter(Boolean);
   if (records.length !== 1) return undefined;
-  return records[0]!.replace(/\s+/g, " ") || undefined;
+  return records[0]?.replace(/\s+/g, " ") || undefined;
 }
 
 let currentProcessStartIdentityPromise: Promise<string | undefined> | undefined;
