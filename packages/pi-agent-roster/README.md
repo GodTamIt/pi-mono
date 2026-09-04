@@ -287,6 +287,14 @@ The UI is designed to stay useful at both wide and narrow terminal widths:
 
 Viewer controls are `↑`/`↓` or `j`/`k`, `PgUp`/`PgDn`, `Home`/`End`, and `q`, `Esc`, or `Ctrl+C` to close. Footer hints shorten at narrow widths.
 
+## RPC and headless operation
+
+Pickers (`/agent`, `/stack`, and `/subagents:sessions`) use Pi's RPC-capable `ui.select`, so
+RPC clients receive the same choices as the TUI without terminal-only APIs. The background tree
+is published as plain string-array widgets, and completion events reach the parent as
+model-facing task notifications. When no UI is attached, pickers skip instead of blocking, so
+non-interactive runs never hang on a hidden prompt.
+
 ## Isolation and security model
 
 Isolation is explicit rather than implied:

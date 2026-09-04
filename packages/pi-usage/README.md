@@ -10,9 +10,10 @@ output, cache-read/cache-write, reasoning (as an output subset), component costs
 and the cache-input reuse ratio. Mirrors the layout and wording of Claude Code's
 `/usage` screen.
 
----
+## Installation
 
-## 🚀 Install
+Requirements: Node `>=22.22.2` and Pi `>=0.84.3 <0.85.0`. No build step; Pi loads
+TypeScript directly via jiti.
 
 > ⚠️ **Use `pi install` — NOT `npm install`.**
 > Plain `npm install` only drops files in `node_modules`. Pi does **not** scan
@@ -20,31 +21,47 @@ and the cache-input reuse ratio. Mirrors the layout and wording of Claude Code's
 > You must register it with `pi install` so it lands in `"packages"` in
 > `~/.pi/agent/settings.json`.
 
+For a persistent installation:
+
 ```bash
 pi install npm:@ohgodtamit/pi-usage
 ```
 
-Then inside pi:
+For a single run without changing Pi's saved package list:
 
-```
-/reload
+```bash
+pi -e npm:@ohgodtamit/pi-usage
 ```
 
-Verify it loaded:
+From this repository checkout:
+
+```bash
+pi install ./packages/pi-usage
+```
+
+Then inside Pi run `/reload` (or restart). Type `/` — `/usage` should appear in slash
+autocomplete. Verify the registration:
 
 ```bash
 pi list          # should show npm:@ohgodtamit/pi-usage
 ```
 
-Type `/` — `/usage` should appear in slash autocomplete.
-
-**Don't do this** (common mistake — package installs but pi ignores it):
+**Don't do this** (common mistake — package installs but Pi ignores it):
 
 ```bash
-npm install -g @ohgodtamit/pi-usage   # ❌ pi will not detect this
+npm install -g @ohgodtamit/pi-usage   # ❌ Pi will not detect this
 ```
 
----
+### Installation troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `/usage` not in autocomplete | Run `pi install npm:@ohgodtamit/pi-usage`, then `/reload` |
+| Installed with `npm install -g` but Pi ignores it | Use `pi install npm:@ohgodtamit/pi-usage` instead |
+| Added `npm:...` to `"extensions"` in settings | Wrong key — use `"packages"`, or run `pi install` |
+| Extension listed but disabled | Run `pi config` and enable the extension resource |
+
+## Panel tour
 
 ### Overview (`/usage`)
 
@@ -166,6 +183,18 @@ The panel uses a lightweight TUI mascot, **Pi-chan**, to make navigation feel fr
 
 Pi-chan copy is informational, not decorative — footer captions summarize your standout stat in plain language.
 
+## RPC and print/JSON modes
+
+In RPC mode the panel stays fully operable: `/usage` and its view shortcuts render the same
+report as an **ANSI-free** plain-text widget, paginated into fixed-size pages and driven by a
+`ui.select` action menu (switch views, change window, turn pages, refresh, configure budgets,
+close). The widget never emits terminal escape sequences, so RPC clients receive clean
+`string[]` content at a fixed portable width.
+
+All panel commands require an interactive surface. In print or JSON mode they fail fast with an
+actionable error asking you to rerun Pi without print/JSON mode, rather than hanging on a hidden
+prompt.
+
 ## Commands
 
 | Command | Description |
@@ -179,7 +208,7 @@ Pi-chan copy is informational, not decorative — footer captions summarize your
 | `/usage-providers` | Open the panel directly on the **Providers** view. |
 | `/usage-agents` | Compatibility alias for `/usage-providers`. |
 | `/usage-wrapped` | Open the panel directly on the **Wrapped AI** year-in-review view. |
-| `/usage-config` | Set your 5-hour and weekly USD budgets. |
+| `/usage-config` | Set your 5-hour and weekly budgets: USD limits for priced providers, token limits for token-priced providers. |
 | `/usage-pricing` | Set a manual per-model price ($/M tokens) so cost shows for token-priced / proxied models pi records as $0. |
 | `/usage-widget` | Toggle a compact always-on spend widget above the editor. |
 
@@ -333,54 +362,6 @@ quota integration can still surface captured rate-limit headers.
 | `freshness.ts` | Report-cache freshness decision (TTL + new-turn invalidation), unit-tested in isolation |
 | `zai.ts` | Pure ZAI quota-limit classification, dependency-free for unit testing |
 
-## Install
-
-Use **`pi install`**, not plain `npm install`. Pi registers packages in `settings.json` under `"packages"` and loads extensions from the `pi.extensions` manifest in `package.json`.
-
-```bash
-pi install npm:@ohgodtamit/pi-usage
-```
-
-Then run `/reload` in pi (or restart the CLI). Commands like `/usage` should appear in slash autocomplete.
-
-Quick test without persisting to settings:
-
-```bash
-pi -e npm:@ohgodtamit/pi-usage
-```
-
-From this repository checkout:
-
-```bash
-pi install ./packages/pi-usage
-```
-
-From a local path:
-
-```bash
-pi install ./packages/pi-usage
-```
-
-### Troubleshooting
-
-| Symptom | Fix |
-|---------|-----|
-| `/usage` not in autocomplete | Run `pi install npm:@ohgodtamit/pi-usage`, then `/reload` |
-| Installed with `npm install -g` but pi ignores it | Use `pi install npm:@ohgodtamit/pi-usage` instead |
-| Added `npm:...` to `"extensions"` in settings | Wrong key — use `"packages"`, or run `pi install` |
-| Extension listed but disabled | Run `pi config` and enable the extension resource |
-
-Verify install:
-
-```bash
-pi list
-# should show: npm:@ohgodtamit/pi-usage
-```
-
-> **Note:** `npm install` only downloads the package to disk. Pi does not auto-scan global or local `node_modules` — you must register the package with `pi install` so it appears in `"packages"`.
-
-No build step; pi loads TypeScript directly via jiti.
-
 ## Changelog
 
 Upstream donor release history (this fork starts at 0.1.0 and pins `@zaganjade/pi-usage` 1.9.2):
@@ -398,3 +379,13 @@ Upstream donor release history (this fork starts at 0.1.0 and pins `@zaganjade/p
 ### v1.8.0
 
 - Seven views including Wrapped AI, Agents, Hourly; live ZAI/Codex quota; incremental scan cache
+
+## Provenance
+
+This package is a fork of `@zaganjade/pi-usage` 1.9.2. Pinned commit, author, license, and
+path-level source mappings are recorded in [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md).
+
+## License
+
+[MIT](./LICENSE) © 2026 Christopher Tam. Third-party adaptations remain subject to their retained
+MIT notices.
