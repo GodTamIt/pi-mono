@@ -3,7 +3,8 @@
 A Claude Code–style `/usage` panel for [pi](https://github.com/earendil-works/pi-mono).
 
 Shows how your spend and tokens are distributed across **models, skills, plugins,
-tools, projects, and delegated child sessions**, bucketed by time window — with
+tools, projects, and delegated child sessions**, bucketed by 5-hour, day, week,
+month, or all-time windows — with
 always-visible **5-hour** and **weekly** quota bars. The Overview includes input,
 output, cache-read/cache-write, reasoning (as an output subset), component costs,
 and the cache-input reuse ratio. Mirrors the layout and wording of Claude Code's
@@ -51,7 +52,7 @@ Eight views via `Tab` or `1`–`8`. The navigation bar is a **two-row menu**: co
 
 ```
 ────────────────────────────────────────────────────────────────
- Usage ────────────────────────────────  5H │ DAY │ WEEK │ ALL
+ Usage ────────────────────────────────  5H │ DAY │ WEEK │ MONTH │ ALL
 
 ╭─ views  ◈1 Overview │ ◎2 Models │ … │ ✦8 Wrapped  ─────────╮
   (◕‿◕)  Pi-chan  Quota bars & headline stats…    Tab · 1-8 jump
@@ -188,7 +189,7 @@ Pi-chan copy is informational, not decorative — footer captions summarize your
 |-----|--------|
 | `Tab` / `Shift+Tab`, `←` / `→` | Switch view (Overview ↔ … ↔ Wrapped AI) |
 | `1`–`8` | Jump to Overview / Models / Delegation / Daily / Stats / Hourly / Providers / Wrapped |
-| `5` / `d` / `w` / `a` | Switch window (5 hours / day / week / all). On Overview & Models all four work; on Delegation use `d`/`w`/`a` (`5` opens **Stats**, as on every other view). |
+| `5` / `d` / `w` / `m` / `a` | Switch the generic window (5 hours / day / week / month / all). On Overview & Models all five work; on Delegation use `d`/`w`/`m`/`a` (`5` opens **Stats**). Daily, Hourly, Providers, and Wrapped have no generic window. |
 | `a` / `w` / `m` | Stats range: all time / last 7 days / last 30 days (Stats view) |
 | `c` / `t` / `n` | Models or Providers view: sort by usage (`c`/`t`) or name (`n`) |
 | `t` / `c` / `d` | Daily view: sort by tokens / cost / date — press the same key again to flip ascending ↔ descending |

@@ -2,7 +2,7 @@
  * Pi usage extension — a Claude Code-style `/usage` panel for pi.
  *
  * Commands:
- *   /usage         Open the interactive usage panel (5H / day / week / all
+ *   /usage         Open the interactive usage panel (5H / day / week / month / all
  *                  windows, quota bars, model/skill/plugin/tool/project
  *                  breakdowns).
  *   /usage-config  Set your 5-hour and weekly USD budgets.
@@ -548,6 +548,7 @@ function rpcActions(view: UsageView, page: number, pageCount: number): RpcMenuIt
       ["Window: 5 hours", "5h"],
       ["Window: 24 hours", "24h"],
       ["Window: 7 days", "7d"],
+      ["Window: 30 days", "30d"],
       ["Window: All time", "all"],
     ] as const) {
       actions.push({ label, kind: "action", action: { type: "window", window } });

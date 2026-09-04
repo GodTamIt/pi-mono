@@ -9,6 +9,8 @@ import {
   costFromPrice,
   discoverChildSessionFiles,
   normalizeTurnEntry,
+  windowLabel,
+  windowMs,
   windowize,
   type ChildSessionSummary,
   type Report,
@@ -115,6 +117,37 @@ describe("delegation and token composition", () => {
       cacheWrite: 1_000_000,
     });
     expect(priced).toBe(100);
+  });
+
+  it("includes the rolling 30-day month window", () => {
+    const now = Date.now();
+    const report: Report = {
+      computedAt: now,
+      sessionCount: 2,
+      turnCount: 2,
+      entries: [
+        turn(false, { ts: now - 29 * 24 * 60 * 60 * 1000 }),
+        turn(false, { ts: now - 31 * 24 * 60 * 60 * 1000 }),
+      ],
+      children: [
+        child({
+          id: "recent",
+          startedAt: now - 31 * 24 * 60 * 60 * 1000,
+          endedAt: now - 29 * 24 * 60 * 60 * 1000,
+        }),
+        child({
+          id: "old",
+          startedAt: now - 32 * 24 * 60 * 60 * 1000,
+          endedAt: now - 31 * 24 * 60 * 60 * 1000,
+        }),
+      ],
+    };
+
+    const win = windowize(report, "30d", maps);
+    expect(windowMs("30d")).toBe(30 * 24 * 60 * 60 * 1000);
+    expect(windowLabel("30d")).toBe("Last 30 days");
+    expect(win.total.turns).toBe(1);
+    expect(win.children.map((item) => item.id)).toEqual(["recent"]);
   });
 });
 

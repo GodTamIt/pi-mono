@@ -151,6 +151,36 @@ describe("UsageView rendering", () => {
     expect(recOv).toContain("peak");
   });
 
+  it("supports the month window only on generic-window views", () => {
+    const view = makeView(report, "overview");
+    for (const viewKey of ["overview", "models", "delegation"] as ViewKey[]) {
+      view.setInitialView(viewKey);
+      view.handleInput("m");
+      const output = view.render(100).join("\n");
+      expect(output).toContain("Showing: last 30 days");
+      expect(output).toContain("MONTH");
+    }
+
+    for (const viewKey of ["daily", "hourly", "providers", "wrapped"] as ViewKey[]) {
+      view.setInitialView("overview");
+      view.handleInput("a");
+      view.setInitialView(viewKey);
+      view.handleInput("m");
+      view.setInitialView("overview");
+      expect(view.render(100).join("\n")).toContain("Showing: all time");
+    }
+
+    view.setInitialView("overview");
+    view.handleInput("a");
+    view.setInitialView("stats");
+    view.handleInput("m");
+    const stats = view.render(100).join("\n");
+    expect(stats).toContain("Last 30 days");
+    expect(stats).not.toContain("MONTH");
+    view.setInitialView("overview");
+    expect(view.render(100).join("\n")).toContain("Showing: all time");
+  });
+
   it("shows an explicit empty state when no child sessions are in the window", () => {
     // Delegated turns exist but no child transcripts were discovered: the
     // Child sessions section must say so rather than render a bare header.
@@ -170,12 +200,15 @@ describe("UsageView rendering", () => {
     expect(empty).not.toContain("Concurrency");
   });
 
-  it("advertises the window keys on Delegation and keeps the footer inside 40 cols", () => {
-    const out = makeView(report, "delegation").render(100).join("\n");
-    expect(out).toContain("d/w/a window");
-    const narrow = makeView(report, "delegation").render(40);
+  it("advertises the window keys on Delegation and keeps month lines inside 40 cols", () => {
+    const view = makeView(report, "delegation");
+    const out = view.render(100).join("\n");
+    expect(out).toContain("d/w/m/a window");
+    view.handleInput("m");
+    const narrow = view.render(40);
+    expect(narrow.every((line) => visibleWidth(line) <= 40)).toBe(true);
+    expect(narrow.join("\n")).toContain("MONTH");
     const footer = narrow[narrow.length - 2];
-    expect(visibleWidth(footer)).toBeLessThanOrEqual(40);
     expect(footer).toContain("q");
   });
 

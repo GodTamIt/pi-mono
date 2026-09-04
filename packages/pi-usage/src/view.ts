@@ -2,8 +2,9 @@
  * Interactive usage panel TUI component.
  *
  * Rendered via ctx.ui.custom(). Mirrors Claude Code's `/usage` screen:
- * always-visible 5-hour and weekly quota bars, a selectable time window, and
- * independent-characteristic breakdowns by model / skill / plugin / tool /
+ * always-visible 5-hour and weekly quota bars, a selectable 5-hour/day/week/
+ * month/all window on the generic-window views, and independent-characteristic
+ * breakdowns by model / skill / plugin / tool /
  * project. Supports vertical scrolling for small terminals.
  */
 import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
@@ -42,6 +43,7 @@ import {
   type WindowedReport,
   type WindowKey,
   type WrappedStats,
+  windowMs,
   windowize,
   wrappedStats,
 } from "./aggregate.ts";
@@ -103,6 +105,10 @@ type SortKey = "value" | "name";
 /** Sort field + direction for the Daily table. */
 type DailySortField = "tokens" | "cost" | "date";
 type SortDir = "asc" | "desc";
+
+function hasGenericWindow(view: ViewKey): boolean {
+  return view === "overview" || view === "models" || view === "delegation";
+}
 
 /** Semantic controls shared by terminal key handling and portable UI clients. */
 export type UsageAction =
@@ -369,6 +375,10 @@ export class UsageView {
         return;
       }
     }
+    if (hasGenericWindow(this.state.view) && matchesKey(data, "m")) {
+      this.applyAction({ type: "window", window: "30d" });
+      return;
+    }
     // Daily view: t/c/d choose the sort field; pressing the same key flips
     // direction. Intercept before the global sort/window handlers.
     if (this.state.view === "daily") {
@@ -498,6 +508,7 @@ export class UsageView {
   }
 
   private setWindow(key: WindowKey): void {
+    if (!hasGenericWindow(this.state.view)) return;
     this.state.windowKey = key;
     this.state.scroll = 0;
     this.deps.tui?.requestRender();
@@ -893,7 +904,8 @@ export class UsageView {
     const total = bucketTokens(win.total);
     const unit = this.unitForWindow(win);
     const delegatedValue = unit === "usd" ? win.delegated.cost : delegated;
-    const cutoff = win.window === "all" ? -1 : Date.now() - this.windowDuration(win.window);
+    const horizon = windowMs(win.window);
+    const cutoff = Number.isFinite(horizon) ? Date.now() - horizon : -1;
     const selectedTurns = report.entries.filter((turn) => cutoff === -1 || turn.ts >= cutoff);
     lines.push(`  ${theme.fg("accent", theme.bold("Composition"))}`);
     if (w < 54) {
@@ -1012,16 +1024,6 @@ export class UsageView {
     if (win.children.length > 20)
       lines.push(`  ${theme.fg("dim", `… +${win.children.length - 20} more`)}`);
     lines.push("");
-  }
-
-  private windowDuration(key: WindowKey): number {
-    return key === "5h"
-      ? 5 * 60 * 60 * 1000
-      : key === "24h"
-        ? 24 * 60 * 60 * 1000
-        : key === "7d"
-          ? 7 * 24 * 60 * 60 * 1000
-          : Number.POSITIVE_INFINITY;
   }
 
   private zeroBucket(): Bucket {
@@ -1966,11 +1968,16 @@ export class UsageView {
   }
 
   private windowTabs(): string {
+    if (!hasGenericWindow(this.state.view)) return "";
     const { theme } = this.deps;
     const cur = this.state.windowKey;
     const tabs: string[] = [];
-    for (const key of ["5h", "24h", "7d", "all"] as WindowKey[]) {
-      const label = key.toUpperCase().replace("24H", "DAY").replace("7D", "WEEK");
+    for (const key of ["5h", "24h", "7d", "30d", "all"] as WindowKey[]) {
+      const label = key
+        .toUpperCase()
+        .replace("24H", "DAY")
+        .replace("7D", "WEEK")
+        .replace("30D", "MONTH");
       const text = ` ${label} `;
       tabs.push(
         key === cur
@@ -2510,10 +2517,10 @@ export class UsageView {
     const view = this.state.view;
     const keys: Array<[string, string]> = [["⇥/←→", "views"]];
     if (view === "overview" || view === "models") {
-      keys.push(["5/d/w/a", "window"]);
+      keys.push(["5/d/w/m/a", "window"]);
     } else if (view === "delegation") {
       // Delegation honours the window too (5 stays reserved for the Stats tab).
-      keys.push(["d/w/a", "window"]);
+      keys.push(["d/w/m/a", "window"]);
     }
     if (view === "models") {
       keys.push(["c/n", "sort"]);
@@ -2567,6 +2574,8 @@ function labelForWindow(key: WindowKey): string {
       return "last 24 hours";
     case "7d":
       return "last 7 days";
+    case "30d":
+      return "last 30 days";
     case "all":
       return "all time";
   }

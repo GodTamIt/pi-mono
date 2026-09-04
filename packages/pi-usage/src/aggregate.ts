@@ -3,7 +3,7 @@
  *
  * The usage panel mirrors Claude Code's `/usage` view: it shows how spend and
  * tokens are distributed across models, skills, plugins, tools, and projects,
- * bucketed by time window (5h / 24h / 7d / all).
+ * bucketed by time window (5h / 24h / 7d / 30d / all).
  *
  * Data source
  * -----------
@@ -76,10 +76,11 @@ export function costFromPrice(usage: Usage, price: ModelPrice): number {
 }
 
 /** Time windows selectable in the panel. */
-export type WindowKey = "5h" | "24h" | "7d" | "all";
+export type WindowKey = "5h" | "24h" | "7d" | "30d" | "all";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
+const MONTH = 30 * DAY;
 
 export function windowMs(key: WindowKey): number {
   switch (key) {
@@ -89,6 +90,8 @@ export function windowMs(key: WindowKey): number {
       return DAY;
     case "7d":
       return 7 * DAY;
+    case "30d":
+      return MONTH;
     case "all":
       return Number.POSITIVE_INFINITY;
   }
@@ -102,6 +105,8 @@ export function windowLabel(key: WindowKey): string {
       return "Last 24 hours";
     case "7d":
       return "Last 7 days";
+    case "30d":
+      return "Last 30 days";
     case "all":
       return "All time";
   }

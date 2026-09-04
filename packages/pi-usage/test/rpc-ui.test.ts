@@ -128,7 +128,7 @@ beforeEach(() => {
 describe("RPC usage dashboard", () => {
   it("opens a direct view, publishes plain bounded pages, and cleans up on close", async () => {
     const commands = setupExtension();
-    const rpc = rpcContext(["Close usage dashboard"]);
+    const rpc = rpcContext(["Window: 30 days", "Close usage dashboard"]);
 
     await commands.get("usage-models")?.handler("", rpc.ctx as never);
 
@@ -138,7 +138,12 @@ describe("RPC usage dashboard", () => {
     );
     expect(dashboard?.lines?.length).toBeLessThanOrEqual(21);
     expect(dashboard?.lines?.join("\n")).not.toContain("\u001b[");
+    expect(rpc.selections[0]?.options).toContain("Window: 30 days");
     expect(rpc.selections[0]?.options).toContain("Sort models: Name");
+    expect(
+      rpc.widgets.some((entry) => entry.lines?.some((line) => line.includes("last 30 days"))),
+    ).toBe(true);
+    expect(rpc.selections).toHaveLength(2);
     expect(rpc.statuses).toContain("Scanning sessions… 1/3");
     expect(rpc.statuses.at(-1)).toBeUndefined();
     expect(rpc.widgets.at(-1)).toEqual({ key: "usage-panel", lines: undefined });
@@ -157,6 +162,9 @@ describe("RPC usage dashboard", () => {
     await commands.get("usage")?.handler("", rpc.ctx as never);
 
     expect(rpc.selections.some((request) => request.title.includes("daily"))).toBe(true);
+    expect(
+      rpc.selections.find((request) => request.title.includes("daily"))?.options,
+    ).not.toContain("Window: 30 days");
     expect(rpc.selections.some((request) => request.title.includes("page 2/"))).toBe(true);
     expect(mocks.scan).toHaveBeenCalledTimes(2);
     expect(mocks.fetchQuota).toHaveBeenCalledTimes(2);
