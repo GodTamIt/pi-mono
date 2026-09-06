@@ -69,7 +69,7 @@ import { isCloseAllCommand, isCloseCommand } from "./lib/command-taxonomy.js";
 import { hasLaunchScopedFlagToken } from "./lib/launch-scoped-flags.js";
 import { cleanupSecureTempArtifacts } from "./lib/temp.js";
 import { AGENT_BROWSER_PARAMS } from "./lib/input-modes/params.js";
-import { type CompiledAgentBrowserElectron } from "./lib/input-modes/types.js";
+import type { CompiledAgentBrowserElectron } from "./lib/input-modes/types.js";
 import {
   AGENT_BROWSER_SCRIPT_DEFAULT_TIMEOUT_MS,
   AGENT_BROWSER_SCRIPT_NAMESPACE,
@@ -390,7 +390,7 @@ function restoreArtifactManifestFromBranch(branch: unknown[]): SessionArtifactMa
   for (const entry of branch) {
     if (!isRecord(entry) || entry.type !== "message") continue;
     const message = isRecord(entry.message) ? entry.message : undefined;
-    if (!message || message.toolName !== "agent_browser") continue;
+    if (message?.toolName !== "agent_browser") continue;
     const details = isRecord(message.details) ? message.details : undefined;
     if (
       isSessionArtifactManifest(details?.artifactManifest) &&
@@ -421,7 +421,7 @@ function restoreManagedSessionCompatibilityWorkaroundFromBranch(
   for (const entry of branch) {
     if (!isRecord(entry) || entry.type !== "message") continue;
     const message = isRecord(entry.message) ? entry.message : undefined;
-    if (!message || message.toolName !== "agent_browser") continue;
+    if (message?.toolName !== "agent_browser") continue;
     const details = isRecord(message.details) ? message.details : undefined;
     if (!details) continue;
     if (
@@ -469,7 +469,7 @@ function restoreManagedSessionHeadedAutosaveDisabledFromBranch(
   for (const entry of branch) {
     if (!isRecord(entry) || entry.type !== "message") continue;
     const message = isRecord(entry.message) ? entry.message : undefined;
-    if (!message || message.toolName !== "agent_browser") continue;
+    if (message?.toolName !== "agent_browser") continue;
     const details = isRecord(message.details) ? message.details : undefined;
     if (!details) continue;
     if (
@@ -509,7 +509,7 @@ function restoreManagedSessionHeadedAutosaveIntervalFromBranch(
   for (const entry of branch) {
     if (!isRecord(entry) || entry.type !== "message") continue;
     const message = isRecord(entry.message) ? entry.message : undefined;
-    if (!message || message.toolName !== "agent_browser") continue;
+    if (message?.toolName !== "agent_browser") continue;
     const details = isRecord(message.details) ? message.details : undefined;
     if (!details) continue;
     if (
@@ -588,7 +588,7 @@ function restoreAttachedSessionKeysFromBranch(branch: unknown[]): Set<string> {
   for (const entry of branch) {
     if (!isRecord(entry) || entry.type !== "message") continue;
     const message = isRecord(entry.message) ? entry.message : undefined;
-    if (!message || message.toolName !== "agent_browser") continue;
+    if (message?.toolName !== "agent_browser") continue;
     const details = isRecord(message.details) ? message.details : undefined;
     if (!details) continue;
     const managedSessionOutcome = isRecord(details.managedSessionOutcome)
@@ -979,7 +979,7 @@ function collectBranchManagedResourceEvents(branch: unknown[]): BranchManagedRes
   for (const entry of branch) {
     if (!isRecord(entry) || entry.type !== "message") continue;
     const message = isRecord(entry.message) ? entry.message : undefined;
-    if (!message || message.toolName !== "agent_browser") continue;
+    if (message?.toolName !== "agent_browser") continue;
     const details = isRecord(message.details) ? message.details : undefined;
     if (!details) continue;
     eventRank += 1;

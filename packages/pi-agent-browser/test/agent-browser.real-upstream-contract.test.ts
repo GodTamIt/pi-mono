@@ -756,7 +756,7 @@ if (!REAL_UPSTREAM_ENABLED) {
               );
               assertSuccessfulResult(disabledOpen, shapes.commands.open, "open with --no-webmcp");
               assert.ok(
-                disabledOpen.details?.effectiveArgs instanceof Array &&
+                Array.isArray(disabledOpen.details?.effectiveArgs) &&
                   disabledOpen.details.effectiveArgs.includes("--no-webmcp"),
               );
               const disabledList = await executeRegisteredTool(

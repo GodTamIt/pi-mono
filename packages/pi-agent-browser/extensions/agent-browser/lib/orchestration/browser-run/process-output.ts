@@ -43,7 +43,7 @@ import {
 } from "../../results/network-routes.js";
 import { buildToolPresentation } from "../../results/presentation.js";
 import { getAgentBrowserErrorText, parseAgentBrowserEnvelope } from "../../results/envelope.js";
-import { type AgentBrowserEnvelope } from "../../results/contracts.js";
+import type { AgentBrowserEnvelope } from "../../results/contracts.js";
 import type { NetworkRouteRecord } from "../../results/contracts.js";
 import { omitUpstreamLifecycle } from "../../results/presentation/common.js";
 import {
@@ -1536,7 +1536,7 @@ export async function processBrowserOutput(
           analyzeQaPresetResults(presentationEnvelope?.data, prepared.compiledQaPreset))
         : analyzeQaPresetResults(presentationEnvelope?.data, prepared.compiledQaPreset)
       : undefined;
-    let qaAttachedTarget = prepared.compiledQaPreset?.checks.attached
+    const qaAttachedTarget = prepared.compiledQaPreset?.checks.attached
       ? await collectQaAttachedTarget({
           currentTarget: currentSessionTabTarget ?? prepared.priorSessionTabTarget,
           cwd,

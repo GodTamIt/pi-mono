@@ -61,7 +61,7 @@ function passingVersion() {
 }
 
 function passingPiVersion() {
-  return "0.84.3\n";
+  return "0.85.0\n";
 }
 
 function evaluateDoctorWithPi(options: Parameters<typeof evaluateDoctor>[0] = {}) {
@@ -125,9 +125,22 @@ test("doctor fails when Pi is below the minimum runtime floor", async () => {
   const text = formatDoctorReport(report);
 
   assert.equal(report.failures.length, 1);
-  assert.match(text, /Pi 0\.84\.3 or newer is required; found 0\.83\.0/);
-  assert.match(text, /enforces the Pi 0\.84\.3 runtime floor/);
+  assert.match(text, /Pi 0\.84\.0 or newer is required; found 0\.83\.0/);
+  assert.match(text, /enforces the Pi 0\.84\.0 runtime floor/);
   assert.match(text, /Doctor found setup failures/);
+});
+
+test("doctor accepts Pi at the 0.84.0 runtime floor", async () => {
+  const report = await evaluateDoctor({
+    runAgentBrowser: async () => passingVersion(),
+    runPi: async () => "0.84.0\n",
+    skipSourceCheck: true,
+  });
+  const text = formatDoctorReport(report);
+
+  assert.equal(report.failures.length, 0);
+  assert.match(text, /Pi version satisfies the minimum runtime floor: 0\.84\.0/);
+  assert.match(text, /Doctor passed/);
 });
 
 test("doctor warns instead of failing when Pi version cannot be inspected", async () => {
@@ -142,7 +155,7 @@ test("doctor warns instead of failing when Pi version cannot be inspected", asyn
 
   assert.equal(report.failures.length, 0);
   assert.match(text, /Could not inspect pi --version/);
-  assert.match(text, /Pi 0\.84\.3 or newer is required/);
+  assert.match(text, /Pi 0\.84\.0 or newer is required/);
   assert.match(text, /Doctor passed/);
 });
 

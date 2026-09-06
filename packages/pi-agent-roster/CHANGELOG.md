@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.2
+
+### Patch Changes
+
+- Restore compact built-in tool rendering in the `/subagents:sessions` transcript. Pi 0.85 removed the built-in tool fallback from `ToolExecutionComponent`, so child sessions' `read`, `edit`, `write`, `bash`, `find`, `grep`, and `ls` calls fell back to the default shell. The transcript now rebuilds those definitions from the child's `cwd` when the source has none, while custom definitions keep precedence.
+
+## 0.4.1
+
+### Patch Changes
+
+- 440b6cc: Refresh terminal preview artwork for the current roster UI.
+- Extend Pi compatibility to `>=0.84.0 <0.86.0`, lowering the minimum from 0.84.3 to 0.84.0 and adding the 0.85.x line. Development/test pins and smoke fixtures use exact Pi 0.85.0.
+
 ## 0.4.0
 
 ### Minor Changes

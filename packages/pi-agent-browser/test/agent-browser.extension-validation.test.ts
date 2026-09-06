@@ -53,8 +53,12 @@ import {
   createRenderContext,
 } from "./helpers/extension-validation-fixtures.js";
 
-const DISPLAY_CONTROL_PATTERN = new RegExp(String.raw`[\x00\x07\x1B]`);
-const UNSAFE_SCRIPT_DISPLAY_PATTERN = new RegExp(String.raw`[\r\x1B\u2028\u202E\u200B]`);
+const DISPLAY_CONTROL_PATTERN =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: Reject terminal controls.
+  /[\x00\x07\x1B]/;
+const UNSAFE_SCRIPT_DISPLAY_PATTERN =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: Detect unsafe script display characters.
+  /[\r\x1B\u2028\u202E\u200B]/;
 
 test("agentBrowserExtension injects a compact essential browser prompt", () => {
   const harness = createExtensionHarness({ cwd: process.cwd(), prompt: "Inspect a page." });

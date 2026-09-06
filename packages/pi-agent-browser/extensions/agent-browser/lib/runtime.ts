@@ -327,13 +327,13 @@ function formatRedactedCredential(label: string, credential: string, trailing = 
 function redactBearerCredentials(text: string): string {
   return text
     .replace(
-      /\b(Authorization\s*:\s*Bearer)\s+([^\s"',)\[\]]+)([),.]?)/gi,
+      /\b(Authorization\s*:\s*Bearer)\s+([^\s"',)[\]]+)([),.]?)/gi,
       (_match, label: string, credential: string, trailing: string) => {
         return formatRedactedCredential(label, credential, trailing);
       },
     )
     .replace(
-      /\b((?:Authorization\s+)?Bearer)\s+([^\s"',)\[\]]+)([),.]?)/gi,
+      /\b((?:Authorization\s+)?Bearer)\s+([^\s"',)[\]]+)([),.]?)/gi,
       (match, label: string, credential: string, trailing: string) => {
         if (isBearerHelpPlaceholder(label, credential, trailing)) return match;
         return formatRedactedCredential(label, credential, trailing);
@@ -664,7 +664,7 @@ export function restoreManagedSessionStateFromBranch(
       continue;
     }
     const message = isRecord(entry.message) ? entry.message : undefined;
-    if (!message || message.toolName !== "agent_browser") {
+    if (message?.toolName !== "agent_browser") {
       continue;
     }
     const details = isRecord(message.details) ? message.details : undefined;

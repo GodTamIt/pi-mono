@@ -1006,7 +1006,7 @@ test("runAgentBrowserProcess spills oversized stdout while parseAgentBrowserEnve
   const fakeAgentBrowserPath = join(tempDir, "agent-browser");
   const bigSnapshotRows = Array.from({ length: 7_000 }, (_, index) => {
     const ref = `e${index + 1}`;
-    return `- generic \"Large process snapshot row ${index + 1} that forces stdout spilling without losing parseability\" [ref=${ref}] clickable [onclick]`;
+    return `- generic "Large process snapshot row ${index + 1} that forces stdout spilling without losing parseability" [ref=${ref}] clickable [onclick]`;
   }).join("\\n");
   const refsLiteral = Array.from(
     { length: 80 },

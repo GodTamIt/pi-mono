@@ -934,7 +934,8 @@ if (args.includes("open")) {
         writeIdentityArgs: string[],
         label: string,
       ): Promise<void> => {
-        const session = readIdentityArgs[readIdentityArgs.indexOf("--session") + 1]!;
+        const session = readIdentityArgs[readIdentityArgs.indexOf("--session") + 1];
+        assert.ok(session, `missing --session value in ${label} identity args`);
         const nextUrl = `https://example.com/${label}-secret`;
         const opened = await executeRegisteredTool(harness.tool, harness.ctx, {
           args: [...readIdentityArgs, "open", "https://example.com/"],

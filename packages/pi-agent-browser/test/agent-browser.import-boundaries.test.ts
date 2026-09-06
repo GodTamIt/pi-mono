@@ -26,7 +26,7 @@ function resolveLocalTypeScriptImport(
 ): string | undefined {
   const resolved = resolve(dirname(fromFile), specifier);
   const candidates = resolved.endsWith(".js")
-    ? [resolved.slice(0, -3) + ".ts"]
+    ? [`${resolved.slice(0, -3)}.ts`]
     : [resolved, `${resolved}.ts`, resolve(resolved, "index.ts")];
   return candidates.find((candidate) => knownFiles.has(candidate));
 }

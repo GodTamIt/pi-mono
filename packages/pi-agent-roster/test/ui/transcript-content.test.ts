@@ -1,5 +1,10 @@
-import { getMarkdownTheme, initTheme } from "@earendil-works/pi-coding-agent";
-import { Container, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
+import { getMarkdownTheme, initTheme, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import {
+  Container,
+  stripTerminalSequences,
+  visibleWidth,
+  type Component,
+} from "@earendil-works/pi-tui";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AgentSessionEvent, SessionMessage } from "../../src/types.ts";
 import type { TranscriptSource } from "../../src/ui/session-navigation.ts";
@@ -106,6 +111,62 @@ describe("TranscriptContent", () => {
 
       expect(out).toContain("read");
       expect(out).toContain("file body");
+    });
+
+    it("renders a source definition's custom call renderer ahead of the built-in fallback", () => {
+      const source = fakeSource({
+        getMessages: () => [toolCallMessage("tc-1"), toolResultMessage("tc-1", "file body")],
+        getToolDefinition: (name) =>
+          name === "read"
+            ? ({
+                renderCall: () => markerComponent("custom-rendered-call"),
+              } as unknown as ToolDefinition)
+            : undefined,
+      });
+      const out = rendered(makeContent(source));
+
+      expect(out).toContain("custom-rendered-call");
+      expect(out).not.toContain("read /x.ts");
+    });
+
+    it.each(["mystery", "__proto__", "toString"])(
+      "leaves tool %s definitionless, falling back to the default rendering",
+      (toolName) => {
+        const messages = [
+          {
+            role: "assistant",
+            content: [
+              { type: "toolCall", id: "tc-x", name: toolName, arguments: { target: "payload" } },
+            ],
+            stopReason: "toolUse",
+            timestamp: 1,
+          },
+          {
+            role: "toolResult",
+            toolCallId: "tc-x",
+            toolName: toolName,
+            content: [{ type: "text", text: "done" }],
+            isError: false,
+          },
+        ] as unknown as SessionMessage[];
+
+        const out = rendered(contentFrom(messages));
+
+        expect(out).toContain(toolName);
+        expect(out).toContain('"target"');
+      },
+    );
+
+    it("keeps built-in tool calls compact at narrower widths", () => {
+      const content = contentFrom([
+        toolCallMessage("tc-1"),
+        toolResultMessage("tc-1", "file body"),
+      ]);
+      const lines = allRows(content, 40);
+
+      expect(lines.join("\n")).toContain("read");
+      expect(lines.join("\n")).not.toContain('"path"');
+      expect(lines.every((line) => visibleWidth(line) <= 40)).toBe(true);
     });
 
     it("renders a skill invocation and the user message that follows it", () => {
@@ -530,6 +591,10 @@ describe("TranscriptContent", () => {
     });
   });
 });
+
+function markerComponent(text: string): Component {
+  return { render: () => [text], invalidate: () => {} };
+}
 
 /** A `message_update` carrying an in-flight assistant message with text. */
 function partialAssistant(text: string): AgentSessionEvent {

@@ -11,7 +11,7 @@ import { cleanupElectronLaunchResources } from "../../electron/cleanup.js";
 import { launchElectronApp, type ElectronLaunchSuccess } from "../../electron/launch.js";
 import { pathExists } from "../../fs-utils.js";
 import { getCompiledSemanticActionSessionPrefix } from "../../input-modes/semantic-action.js";
-import { type CompiledAgentBrowserSemanticAction } from "../../input-modes/types.js";
+import type { CompiledAgentBrowserSemanticAction } from "../../input-modes/types.js";
 import { tryDirectAnchorDownload } from "./prepare/direct-anchor-download.js";
 import { tryNetworkRequestsPageFilter } from "./prepare/network-page-filter.js";
 import { tryContainerScroll, tryPageScrollTo } from "./prepare/scroll-shims.js";
@@ -821,7 +821,7 @@ export async function prepareBrowserRun(
         executionPlan = {
           ...executionPlan,
           recoveryHint: undefined,
-          validationError: `This older wrapper-owned session is already running, so launch-scoped flags ${offCurrentLaunchScopedFlags.join(", ")} would replace or be ignored by upstream agent-browser. Close it first, or remove the explicit --session and retry with sessionMode: \"fresh\".`,
+          validationError: `This older wrapper-owned session is already running, so launch-scoped flags ${offCurrentLaunchScopedFlags.join(", ")} would replace or be ignored by upstream agent-browser. Close it first, or remove the explicit --session and retry with sessionMode: "fresh".`,
         };
       } else if (
         !closeCommand &&

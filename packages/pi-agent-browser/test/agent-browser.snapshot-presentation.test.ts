@@ -28,7 +28,7 @@ test("buildToolPresentation reuses compact snapshot rendering inside batch outpu
   );
   const snapshot = Array.from({ length: 120 }, (_, index) => {
     const ref = `e${index + 1}`;
-    return `- generic \"Large batched snapshot row ${index + 1} that should compact inside batch output\" [ref=${ref}] clickable [onclick]`;
+    return `- generic "Large batched snapshot row ${index + 1} that should compact inside batch output" [ref=${ref}] clickable [onclick]`;
   }).join("\n");
 
   const presentation = await buildToolPresentation({
@@ -79,7 +79,7 @@ test("buildToolPresentation compacts oversized snapshots and spills the raw snap
   );
   const snapshot = Array.from({ length: 120 }, (_, index) => {
     const ref = `e${index + 1}`;
-    return `- generic \"Large snapshot row ${index + 1} with lots of repeated visible text that should not all stay inline\" [ref=${ref}] clickable [onclick]`;
+    return `- generic "Large snapshot row ${index + 1} with lots of repeated visible text that should not all stay inline" [ref=${ref}] clickable [onclick]`;
   }).join("\n");
 
   const presentation = await buildToolPresentation({
@@ -144,7 +144,7 @@ test("buildToolPresentation keeps compact snapshot spill files in the persisted 
   const snapshot = Array.from(
     { length: 120 },
     (_, index) =>
-      `- generic \"Persisted snapshot row ${index + 1}\" [ref=e${index + 1}] clickable [onclick]`,
+      `- generic "Persisted snapshot row ${index + 1}" [ref=e${index + 1}] clickable [onclick]`,
   ).join("\n");
 
   try {
@@ -198,7 +198,7 @@ test("buildToolPresentation evicts the oldest persisted snapshot spill files whe
     snapshot: Array.from(
       { length: 120 },
       (_, index) =>
-        `- generic \"${label} snapshot row ${index + 1}\" [ref=e${index + 1}] clickable [onclick]`,
+        `- generic "${label} snapshot row ${index + 1}" [ref=e${index + 1}] clickable [onclick]`,
     ).join("\n"),
   });
   const firstData = buildData("first");
@@ -289,7 +289,7 @@ test("buildToolPresentation keeps earlier batch snapshot spill paths live when a
     snapshot: Array.from(
       { length: 120 },
       (_, index) =>
-        `- generic \"${label} batch snapshot row ${index + 1}\" [ref=e${index + 1}] clickable [onclick]`,
+        `- generic "${label} batch snapshot row ${index + 1}" [ref=e${index + 1}] clickable [onclick]`,
     ).join("\n"),
   });
   const firstData = buildSnapshotData("first");

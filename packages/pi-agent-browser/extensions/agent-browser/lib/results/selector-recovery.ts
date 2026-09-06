@@ -364,7 +364,7 @@ function isRichInputRecoveryCandidate(candidate: VisibleRefFallbackCandidate): b
 export function buildRichInputRecoveryDiagnostic(
   diagnostic: VisibleRefFallbackDiagnostic | undefined,
 ): RichInputRecoveryDiagnostic | undefined {
-  if (!diagnostic || diagnostic.target.action !== "fill") return undefined;
+  if (diagnostic?.target.action !== "fill") return undefined;
   const candidates = diagnostic.candidates.filter(isRichInputRecoveryCandidate).map(
     (candidate): RichInputRecoveryCandidate => ({
       clickArgs: ["click", candidate.ref],

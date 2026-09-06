@@ -206,7 +206,7 @@ export function restoreElectronLaunchRecordsFromBranch(
   for (const entry of branch) {
     if (!isRecord(entry) || entry.type !== "message") continue;
     const message = isRecord(entry.message) ? entry.message : undefined;
-    if (!message || message.toolName !== "agent_browser") continue;
+    if (message?.toolName !== "agent_browser") continue;
     const details = isRecord(message.details) ? message.details : undefined;
     const electron = isRecord(details?.electron) ? details.electron : undefined;
     if (!electron) continue;

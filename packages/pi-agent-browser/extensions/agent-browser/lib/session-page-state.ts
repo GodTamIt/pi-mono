@@ -568,7 +568,7 @@ export class SessionPageState {
     for (const entry of branch) {
       if (!isRecord(entry) || entry.type !== "message") continue;
       const message = isRecord(entry.message) ? entry.message : undefined;
-      if (!message || message.toolName !== "agent_browser") continue;
+      if (message?.toolName !== "agent_browser") continue;
       const details = isRecord(message.details) ? message.details : undefined;
       if (!details) continue;
       const sessionName = typeof details.sessionName === "string" ? details.sessionName : undefined;

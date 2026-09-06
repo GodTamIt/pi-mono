@@ -158,7 +158,7 @@ function newCache(): ScanCache {
 
 describe("scanSessions", () => {
   it("counts root and delegated child usage exactly once through parse and cache flow", async () => {
-    const { dir, parent, child, omittedRoot, omittedChild } = scanFixture();
+    const { parent, child, omittedRoot, omittedChild } = scanFixture();
     vi.spyOn(SessionManager, "listAll").mockResolvedValue([
       info(parent, "root-1", 2000),
       info(child, "child-1", 1500),

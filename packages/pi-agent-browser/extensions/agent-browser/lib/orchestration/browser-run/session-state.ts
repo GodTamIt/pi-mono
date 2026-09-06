@@ -7,10 +7,10 @@ import type { ElectronCdpTarget, ElectronLaunchRecord } from "../../electron/lau
 import { runAgentBrowserProcess } from "../../process.js";
 import { buildAgentBrowserNextActions } from "../../results/action-recommendations.js";
 import { parseAgentBrowserEnvelope } from "../../results/envelope.js";
-import {
-  type AgentBrowserBatchResult,
-  type AgentBrowserEnvelope,
-  type AgentBrowserNextAction,
+import type {
+  AgentBrowserBatchResult,
+  AgentBrowserEnvelope,
+  AgentBrowserNextAction,
 } from "../../results/contracts.js";
 import {
   buildNextToolAction,
@@ -439,7 +439,7 @@ export function getStaleRefArgs(commandTokens: string[], stdin?: string): string
     return commandTokens;
   }
   const steps = getUpstreamEffectiveBatchSteps(commandTokens, stdin);
-  return steps.length > 0 ? steps.flatMap((step) => step) : commandTokens;
+  return steps.length > 0 ? steps.flat() : commandTokens;
 }
 
 // Selector-carrying flags whose values remain page-scoped refs; values of other value-taking flags

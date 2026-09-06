@@ -17,7 +17,7 @@ A lean native [agent-browser](https://agent-browser.dev/) integration for Pi. Th
 
 ## Installation
 
-Requirements: Node `>=22.22.2`, Pi `>=0.84.3 <0.85.0`, and the `agent-browser` CLI. The
+Requirements: Node `>=22.22.2`, Pi `>=0.84.0 <0.86.0`, and the `agent-browser` CLI. The
 package does not bundle the upstream `agent-browser` binary.
 
 ```sh

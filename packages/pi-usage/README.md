@@ -12,7 +12,7 @@ and the cache-input reuse ratio. Mirrors the layout and wording of Claude Code's
 
 ## Installation
 
-Requirements: Node `>=22.22.2` and Pi `>=0.84.3 <0.85.0`. No build step; Pi loads
+Requirements: Node `>=22.22.2` and Pi `>=0.84.0 <0.86.0`. No build step; Pi loads
 TypeScript directly via jiti.
 
 > ⚠️ **Use `pi install` — NOT `npm install`.**

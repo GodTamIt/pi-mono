@@ -13,6 +13,7 @@ import test from "node:test";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import {
   createAssistantMessageEventStream,
+  type Api,
   type AssistantMessage,
   type Context,
   type Model,
@@ -66,7 +67,7 @@ function usage() {
 }
 
 function createAssistantMessage(
-  model: Model<any>,
+  model: Model<Api>,
   stopReason: AssistantMessage["stopReason"],
 ): AssistantMessage {
   return {
@@ -81,7 +82,7 @@ function createAssistantMessage(
   };
 }
 
-function streamTextResponse(model: Model<any>, text: string) {
+function streamTextResponse(model: Model<Api>, text: string) {
   const stream = createAssistantMessageEventStream();
   queueMicrotask(() => {
     const output = createAssistantMessage(model, "stop");
@@ -99,7 +100,7 @@ function streamTextResponse(model: Model<any>, text: string) {
 }
 
 function createToolCallingStream(toolArguments: Record<string, unknown>) {
-  return (model: Model<any>, context: Context, _options?: SimpleStreamOptions) => {
+  return (model: Model<Api>, context: Context, _options?: SimpleStreamOptions) => {
     const hasToolResult = context.messages.some(
       (message) => message.role === "toolResult" && message.toolName === "agent_browser",
     );
@@ -174,7 +175,7 @@ async function readPersistedAgentBrowserResult(
 function registerPipelineProvider(
   modelRuntime: ModelRuntime,
   toolArguments: Record<string, unknown>,
-): Model<any> {
+): Model<Api> {
   modelRuntime.registerProvider(PIPELINE_PROVIDER, {
     api: "openai-completions",
     apiKey: "piab-pipeline-key",

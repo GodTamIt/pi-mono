@@ -166,7 +166,7 @@ test("config CLI prints Pi-scoped paths and pass-through setup help", async () =
     /Loaded config may use plaintext, environment interpolation, or !command credential sources/,
   );
   assert.match(help, /displayed status redacts resolved keys/);
-  assert.doesNotMatch(help, /^  pi-agent-browser-config/m);
+  assert.doesNotMatch(help, /^ {2}pi-agent-browser-config/m);
 });
 
 test("published package config docs never document donor package specs or direct helper invocations", async () => {

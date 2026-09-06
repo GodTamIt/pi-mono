@@ -187,7 +187,7 @@ process.stdin.on("end", () => {
 	return;
 	}
 	if (command === "snapshot") {
-	process.stdout.write(JSON.stringify({ success: true, data: { origin: "app://packaged", title: "Packaged Electron", url: "app://packaged", refs: { e1: { role: "button", name: "Save" } }, snapshot: "- button \\\"Save\\\" [ref=e1]" } }));
+	process.stdout.write(JSON.stringify({ success: true, data: { origin: "app://packaged", title: "Packaged Electron", url: "app://packaged", refs: { e1: { role: "button", name: "Save" } }, snapshot: "- button \\"Save\\" [ref=e1]" } }));
 	return;
 	}
 	if (command === "batch") {
@@ -334,7 +334,7 @@ process.stdin.on("end", () => {
 		return;
 	}
 	if (command === "snapshot") {
-		process.stdout.write(JSON.stringify({ success: true, data: { origin: ${JSON.stringify(fileUrl)}, title: "Plain file", url: ${JSON.stringify(fileUrl)}, refs: { e1: { role: "button", name: "Save" } }, snapshot: "- button \\\"Save\\\" [ref=e1]" } }));
+		process.stdout.write(JSON.stringify({ success: true, data: { origin: ${JSON.stringify(fileUrl)}, title: "Plain file", url: ${JSON.stringify(fileUrl)}, refs: { e1: { role: "button", name: "Save" } }, snapshot: "- button \\"Save\\" [ref=e1]" } }));
 		return;
 	}
 	if (command === "batch") {

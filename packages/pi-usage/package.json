@@ -1,6 +1,6 @@
 {
   "name": "@ohgodtamit/pi-usage",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Usage dashboards, attribution, and live provider quotas for Pi",
   "repository": {
     "type": "git",
@@ -48,13 +48,14 @@
     "smoke:installed": "node ./test/installed/smoke.mjs"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.84.3 <0.85.0",
-    "@earendil-works/pi-ai": ">=0.84.3 <0.85.0",
-    "@earendil-works/pi-tui": ">=0.84.3 <0.85.0"
+    "@earendil-works/pi-coding-agent": ">=0.84.0 <0.86.0",
+    "@earendil-works/pi-ai": ">=0.84.0 <0.86.0",
+    "@earendil-works/pi-tui": ">=0.84.0 <0.86.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.84.3",
-    "@earendil-works/pi-ai": "0.84.3",
-    "@earendil-works/pi-tui": "0.84.3"
+    "@earendil-works/pi-coding-agent": "0.85.0",
+    "@earendil-works/pi-ai": "0.85.0",
+    "@earendil-works/pi-server": "0.85.0",
+    "@earendil-works/pi-tui": "0.85.0"
   }
 }

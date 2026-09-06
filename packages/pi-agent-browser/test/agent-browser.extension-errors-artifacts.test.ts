@@ -2251,7 +2251,7 @@ if (args.includes("eval")) {
       assert.equal(getResult.isError, false);
       assert.equal(
         await readFile(join(tempDir, "logs/terminal-state.final.txt"), "utf8"),
-        JSON.stringify({ result: "visible terminal text" }, null, 2) + "\n",
+        `${JSON.stringify({ result: "visible terminal text" }, null, 2)}\n`,
       );
       assert.match(
         getResult.content[0]?.text ?? "",

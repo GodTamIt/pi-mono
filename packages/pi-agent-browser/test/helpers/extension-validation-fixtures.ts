@@ -39,6 +39,8 @@ const PLAIN_RENDER_FG_COLORS = {
   mdQuote: "#ffffff",
   mdQuoteBorder: "#ffffff",
   muted: "#ffffff",
+  scrollbarThumb: "#ffffff",
+  scrollbarTrack: "#ffffff",
   searchMatchText: "#ffffff",
   success: "#ffffff",
   syntaxComment: "#ffffff",
@@ -71,7 +73,6 @@ const PLAIN_RENDER_FG_COLORS = {
 const PLAIN_RENDER_BG_COLORS = {
   customMessageBg: "#000000",
   searchMatchBg: "#000000",
-  scrollbarThumb: "#000000",
   selectedBg: "#000000",
   toolErrorBg: "#000000",
   toolPendingBg: "#000000",
@@ -286,19 +287,13 @@ const server = http.createServer((request, response) => {
 			return;
 		}
 	response.writeHead(200, { "content-type": "application/json" });
-	response.end(JSON.stringify({ Browser: "Electron/Fake", "Protocol-Version": "1.3", "User-Agent": "FakeElectron", webSocketDebuggerUrl: ` +
-      "`ws://127.0.0.1:${port}/devtools/browser/fake`" +
-      ` }));
+	response.end(JSON.stringify({ Browser: "Electron/Fake", "Protocol-Version": "1.3", "User-Agent": "FakeElectron", webSocketDebuggerUrl: \`ws://127.0.0.1:\${port}/devtools/browser/fake\` }));
 	return;
 	}
 	if (request.url === "/json/list") {
 	response.writeHead(200, { "content-type": "application/json" });
-	const targets = [{ id: "page-1", type: "page", title: "Demo Electron", url: "app://demo", webSocketDebuggerUrl: ` +
-      "`ws://127.0.0.1:${port}/devtools/page/page-1`" +
-      ` }];
-	if (includeWebview) targets.push({ id: "webview-1", type: "webview", title: "Demo Webview", url: "app://webview", webSocketDebuggerUrl: ` +
-      "`ws://127.0.0.1:${port}/devtools/page/webview-1`" +
-      ` });
+	const targets = [{ id: "page-1", type: "page", title: "Demo Electron", url: "app://demo", webSocketDebuggerUrl: \`ws://127.0.0.1:\${port}/devtools/page/page-1\` }];
+	if (includeWebview) targets.push({ id: "webview-1", type: "webview", title: "Demo Webview", url: "app://webview", webSocketDebuggerUrl: \`ws://127.0.0.1:\${port}/devtools/page/webview-1\` });
 	response.end(JSON.stringify(targets));
 	return;
 	}
@@ -359,7 +354,7 @@ else if (command === "get" && subcommand === "title") data = { result: ${JSON.st
 else if (command === "get" && subcommand === "url") data = { result: ${JSON.stringify(sessionUrl)}, url: ${JSON.stringify(sessionUrl)} };
 else if (command === "eval") data = { result: { focusedElement: { id: "run-button", name: "Run", role: "button", tagName: "button" } } };
 else if (command === "tab" && subcommand === "list") data = { tabs: [{ active: true, index: 0, tabId: "page-1", title: ${JSON.stringify(tabTitle)}, type: "page", url: ${JSON.stringify(tabUrl)} }] };
-else if (command === "snapshot") data = { origin: ${JSON.stringify(snapshotUrl)}, title: ${JSON.stringify(snapshotTitle)}, url: ${JSON.stringify(snapshotUrl)}, refs: { e1: { role: "button", name: "Run" } }, snapshot: "- button \\\"Run\\\" [ref=e1]" };
+else if (command === "snapshot") data = { origin: ${JSON.stringify(snapshotUrl)}, title: ${JSON.stringify(snapshotTitle)}, url: ${JSON.stringify(snapshotUrl)}, refs: { e1: { role: "button", name: "Run" } }, snapshot: "- button \\"Run\\" [ref=e1]" };
 else if (command === "record") data = { path: args[commandIndex + 2] };
 else if (command === "pdf") data = { path: args[commandIndex + 1] };
 else if (command === "close") data = { closed: true };

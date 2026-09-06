@@ -38,7 +38,7 @@ import {
   statSync,
 } from "node:fs";
 import { basename, dirname, join, normalize, resolve, sep } from "node:path";
-import type { CachedSession, ScanCache } from "./cache.ts";
+import type { ScanCache } from "./cache.ts";
 import { excludesFingerprint, pricesFingerprint } from "./cache.ts";
 import type { ModelPrice } from "./config.ts";
 import { sourceLabel } from "./format.ts";

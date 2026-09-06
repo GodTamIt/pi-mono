@@ -69,7 +69,7 @@ describe("discoverSelectedSessions", () => {
   });
 
   it("discovers deeply nested descendants of the selected root", () => {
-    const { dir, parent, child } = fixture();
+    const { dir, parent } = fixture();
     writeJsonl(parent, [sessionHeader({ id: "root-1" })]);
     const leaf = join(dir, "parent", "tasks", "deep", "subagents", "leaf.jsonl");
     writeJsonl(leaf, [sessionHeader({ id: "leaf" })]);

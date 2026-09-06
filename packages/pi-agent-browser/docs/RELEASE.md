@@ -1,7 +1,8 @@
 # Release guide
 
 This guide covers stable npm releases of `@ohgodtamit/pi-agent-browser` from this fork.
-Run every command from the repository root and keep the release scoped to this workspace.
+Run every command from the repository root. Releases use the normal Changesets flow; there
+are no initial-release exceptions or prerelease-mode workarounds.
 
 ## Validate the package
 
@@ -22,41 +23,64 @@ Inspect the dry-run file list and metadata reported by `pack:inspect`. It must i
 extension export, public bins, canonical docs, license, and notices, without tests or TypeScript
 sources.
 
-## Registry preflight
+## Confirm the release plan
 
-Use the public npm registry explicitly so local registry configuration cannot redirect the check.
-For the initial release, the exact-version lookup should return `E404`; any published result means
-that version is already occupied and must not be overwritten.
+Add a changeset for the release, then run the versioning step and commit the generated version,
+changelog, and lockfile changes before continuing:
 
 ```sh
+npm run release:version
+```
+
+Preview the release plan and abort unless it lists exactly the approved packages and tags:
+
+```sh
+npm run release:plan
+```
+
+A package-only release requires every other workspace to remain listed in `ignore` in
+`.changeset/config.json`. Packages outside the ignore list are published by the shared release
+commands, so only the approved release's workspace may be absent from that list, and only while
+its release is being prepared.
+
+## Registry preflight
+
+Derive the version under release from the workspace manifest instead of hardcoding it, and use
+the public npm registry explicitly so local registry configuration cannot redirect the check.
+The exact-version lookup should return `E404`; any published result means that version is already
+occupied and must not be overwritten.
+
+```sh
+VERSION=$(node -p "require('./packages/pi-agent-browser/package.json').version")
 npm config get registry
 npm whoami --registry=https://registry.npmjs.org/
-npm view @ohgodtamit/pi-agent-browser@0.1.0 name version dist-tags --registry=https://registry.npmjs.org/
+npm view @ohgodtamit/pi-agent-browser@"$VERSION" name version dist-tags --registry=https://registry.npmjs.org/
 ```
 
 Confirm the working tree and package version are the intended release inputs before continuing.
 
-## Publish the current stable release
+## Publish
 
-The repository's root changeset state is in `pi-usage` alpha prerelease mode. Do **not** use root
-changeset publish or any `release:*` command for this stable package release. After the checks and
-registry preflight pass, the currently approved targeted command is:
+After the checks, plan confirmation, and registry preflight pass, publish through the root release
+command, which verifies all workspaces and publishes the eligible ones:
 
 ```sh
-npm publish --workspace @ohgodtamit/pi-agent-browser --access public --tag latest
+npm run release:publish
 ```
 
-Do not run it from automation or as part of validation; publishing requires explicit maintainer
-authorization.
+Publishing requires npm authentication and publish access. Follow npm's account-specific 2FA and
+provenance requirements in the environment where publishing runs; this repository provides no
+GitHub workflow or other publishing automation. Do not run publishing from automation or as part
+of validation.
 
 ## Verify after publishing
 
 Check the exact version and stable tag against the public registry:
 
 ```sh
-npm view @ohgodtamit/pi-agent-browser@0.1.0 name version dist.tarball --registry=https://registry.npmjs.org/
+VERSION=$(node -p "require('./packages/pi-agent-browser/package.json').version")
+npm view @ohgodtamit/pi-agent-browser@"$VERSION" name version dist.tarball --registry=https://registry.npmjs.org/
 npm view @ohgodtamit/pi-agent-browser dist-tags --registry=https://registry.npmjs.org/
 ```
 
-Verify that the exact version is `0.1.0` and `latest` points to `0.1.0` before announcing the
-release.
+Verify that `latest` points to the published `$VERSION` before announcing the release.

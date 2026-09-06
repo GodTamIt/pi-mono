@@ -1446,7 +1446,7 @@ else if (command === "get" && subcommand === "url") write({ result: currentPage(
 else if (command === "get" && subcommand === "value") write({ result: "" });
 else if (command === "eval") write({ result: { focusedElement: { id: "name-input", role: "textbox", tagName: "input", valueLength: 0 } } });
 else if (command === "tab" && subcommand === "list") write({ tabs: [{ active: true, index: 0, tabId: "page-1", title: currentPage().title, type: "page", url: currentPage().url }] });
-else if (command === "snapshot") write({ origin: currentPage().url, title: currentPage().title, url: currentPage().url, refs: { e1: { role: "textbox", name: "File name" } }, snapshot: "- textbox \\\"File name\\\" [ref=e1]" });
+else if (command === "snapshot") write({ origin: currentPage().url, title: currentPage().title, url: currentPage().url, refs: { e1: { role: "textbox", name: "File name" } }, snapshot: "- textbox \\"File name\\" [ref=e1]" });
 else if (command === "fill") write({ filled: subcommand, title: "Demo Electron", url: "app://demo" });
 else if (command === "click") {
 	const launch = readLaunch();

@@ -44,7 +44,7 @@ test("agentBrowserExtension persists compact snapshot spill files for persisted 
   const snapshot = Array.from(
     { length: 120 },
     (_, index) =>
-      `- generic \"Extension persisted snapshot row ${index + 1}\" [ref=e${index + 1}] clickable [onclick]`,
+      `- generic "Extension persisted snapshot row ${index + 1}" [ref=e${index + 1}] clickable [onclick]`,
   ).join("\n");
   await writeFakeAgentBrowserBinary(
     tempDir,
@@ -113,7 +113,7 @@ test("agentBrowserExtension restores artifact manifest from branch history and r
     snapshot: Array.from(
       { length: 120 },
       (_, index) =>
-        `- generic \"${label} resume manifest row ${index + 1}\" [ref=e${index + 1}] clickable [onclick]`,
+        `- generic "${label} resume manifest row ${index + 1}" [ref=e${index + 1}] clickable [onclick]`,
     ).join("\n"),
   });
   const firstData = buildData("first");

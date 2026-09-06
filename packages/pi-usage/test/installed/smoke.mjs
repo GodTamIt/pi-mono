@@ -41,9 +41,10 @@ try {
       "--no-fund",
       "--no-package-lock",
       tarball,
-      "@earendil-works/pi-coding-agent@0.84.3",
-      "@earendil-works/pi-ai@0.84.3",
-      "@earendil-works/pi-tui@0.84.3",
+      "@earendil-works/pi-coding-agent@0.85.0",
+      "@earendil-works/pi-server@0.85.0",
+      "@earendil-works/pi-ai@0.85.0",
+      "@earendil-works/pi-tui@0.85.0",
     ],
     { cwd: installDir, stdio: "inherit" },
   );

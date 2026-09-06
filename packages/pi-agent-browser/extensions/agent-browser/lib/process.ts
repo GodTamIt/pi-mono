@@ -519,7 +519,7 @@ export function getAgentBrowserSocketPathValidationError(options: {
   const socketPath = join(socketRoot, `${sessionName}.sock`);
   const pathBytes = Buffer.byteLength(socketPath);
   if (pathBytes <= 103) return undefined;
-  return `Agent-browser Unix socket path would be ${pathBytes} bytes (max 103) for session ${JSON.stringify(sessionName)} under ${JSON.stringify(options.socketDir)}. Set PI_AGENT_BROWSER_SOCKET_DIR to a shorter absolute private directory such as /tmp/piab-<uid> with mode 0700; retrying sessionMode \"fresh\" cannot shorten this configured root.`;
+  return `Agent-browser Unix socket path would be ${pathBytes} bytes (max 103) for session ${JSON.stringify(sessionName)} under ${JSON.stringify(options.socketDir)}. Set PI_AGENT_BROWSER_SOCKET_DIR to a shorter absolute private directory such as /tmp/piab-<uid> with mode 0700; retrying sessionMode "fresh" cannot shorten this configured root.`;
 }
 
 export function buildAgentBrowserProcessEnv(

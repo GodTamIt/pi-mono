@@ -16,6 +16,13 @@ import {
   BashExecutionComponent,
   BranchSummaryMessageComponent,
   CompactionSummaryMessageComponent,
+  createBashToolDefinition,
+  createEditToolDefinition,
+  createFindToolDefinition,
+  createGrepToolDefinition,
+  createLsToolDefinition,
+  createReadToolDefinition,
+  createWriteToolDefinition,
   parseSkillBlock,
   SkillInvocationMessageComponent,
   ToolExecutionComponent,
@@ -34,6 +41,26 @@ import { GLYPHS } from "./glyphs.ts";
 import type { TranscriptSource } from "./session-navigation.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** Pi 0.85 moved built-in tool fallback from ToolExecutionComponent to callers, so this rebuilds it from `cwd`. */
+type BuiltinToolDefinition =
+  | ReturnType<typeof createBashToolDefinition>
+  | ReturnType<typeof createEditToolDefinition>
+  | ReturnType<typeof createFindToolDefinition>
+  | ReturnType<typeof createGrepToolDefinition>
+  | ReturnType<typeof createLsToolDefinition>
+  | ReturnType<typeof createReadToolDefinition>
+  | ReturnType<typeof createWriteToolDefinition>;
+
+const BUILTIN_TOOL_FACTORIES = new Map<string, (cwd: string) => BuiltinToolDefinition>([
+  ["bash", createBashToolDefinition],
+  ["edit", createEditToolDefinition],
+  ["find", createFindToolDefinition],
+  ["grep", createGrepToolDefinition],
+  ["ls", createLsToolDefinition],
+  ["read", createReadToolDefinition],
+  ["write", createWriteToolDefinition],
+]);
 
 /** The SDK/TUI environment Pi's per-entry components need, plus the transcript's source. */
 export interface TranscriptContentOptions {
@@ -84,6 +111,7 @@ export class TranscriptContent {
   /** Width `inFlightRows` was rendered at. */
   private inFlightWidth: number | undefined;
   private inFlightRows: readonly string[] | undefined;
+  private readonly builtinTools = new Map<string, BuiltinToolDefinition | undefined>();
 
   constructor(options: TranscriptContentOptions) {
     this.options = options;
@@ -273,7 +301,7 @@ export class TranscriptContent {
         content.id,
         content.arguments,
         { showImages: false },
-        this.options.source.getToolDefinition(content.name),
+        this.options.source.getToolDefinition(content.name) ?? this.builtinTool(content.name),
         this.options.tui,
         this.options.cwd,
       );
@@ -282,6 +310,14 @@ export class TranscriptContent {
       this.pendingTools.set(content.id, { component: tool, block });
     }
     this.hasVisibleContent = true;
+  }
+
+  private builtinTool(name: string): BuiltinToolDefinition | undefined {
+    if (!this.builtinTools.has(name)) {
+      const factory = BUILTIN_TOOL_FACTORIES.get(name);
+      this.builtinTools.set(name, factory?.(this.options.cwd));
+    }
+    return this.builtinTools.get(name);
   }
 
   /** A tool result mutates the block holding its call; no other block changes. */

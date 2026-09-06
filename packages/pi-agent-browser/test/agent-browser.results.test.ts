@@ -123,8 +123,9 @@ test("recording manifests keep namespace identities distinct on the same path", 
     ],
     nowMs: 3,
   });
-  assert.equal(manifest?.entries.length, 2);
-  const retired = retirePendingRecordingManifestEntries(manifest!, "shared", "one", 4);
+  assert.ok(manifest);
+  assert.equal(manifest.entries.length, 2);
+  const retired = retirePendingRecordingManifestEntries(manifest, "shared", "one", 4);
   assert.equal(
     retired.entries.find((entry) => entry.namespace === "one")?.subcommand,
     "close-abandoned",

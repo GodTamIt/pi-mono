@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+### Patch Changes
+
+- Extend Pi compatibility to `>=0.84.0 <0.86.0`, lowering the minimum from 0.84.3 to 0.84.0 and adding the 0.85.x line. Development/test pins and smoke fixtures use exact Pi 0.85.0.
+
 ## 0.2.0
 
 ### Minor Changes

@@ -49,10 +49,11 @@ test("visible ref fallback excludes direct fill args and rich input recovery nev
     targetName: "Email",
     text: "super-secret",
   });
+  assert.ok(target);
 
   const diagnostic = buildVisibleRefFallbackDiagnosticFromSnapshot({
     snapshotData,
-    target: target!,
+    target,
   });
   assert.equal(diagnostic?.candidates.length, 2);
   assert.deepEqual(
@@ -105,10 +106,11 @@ test("visible ref fallback builds direct current-ref actions for non-fill text c
     commandTokens: ["find", "text", "Submit", "click"],
   });
   assert.deepEqual(target, { action: "click", roles: ["button", "link"], targetName: "Submit" });
+  assert.ok(target);
 
   const diagnostic = buildVisibleRefFallbackDiagnosticFromSnapshot({
     snapshotData,
-    target: target!,
+    target,
   });
   assert.deepEqual(
     diagnostic?.candidates.map((candidate) => [candidate.ref, candidate.role, candidate.args]),
@@ -162,10 +164,7 @@ test("selector recovery parses locator select targets and still requires exact n
     commandTokens: ["find", "label", "Email address", "fill", "value"],
   });
   assert.ok(target);
-  assert.equal(
-    buildVisibleRefFallbackDiagnosticFromSnapshot({ snapshotData, target: target! }),
-    undefined,
-  );
+  assert.equal(buildVisibleRefFallbackDiagnosticFromSnapshot({ snapshotData, target }), undefined);
 });
 
 test("semantic visible-ref resolution requires exact role/name matches", () => {
@@ -218,16 +217,18 @@ test("semantic fill visible-ref resolution is internal-only and requires one exa
   );
 
   const target = getVisibleRefFallbackTarget({ commandTokens: compiledAction.args });
+  assert.ok(target);
   const diagnostic = buildVisibleRefFallbackDiagnosticFromSnapshot({
     snapshotData: comboboxSnapshot,
-    target: target!,
+    target,
   });
   assert.deepEqual(
     diagnostic?.candidates.map((candidate) => candidate.args),
     [undefined],
   );
+  assert.ok(diagnostic);
   assert.equal(
-    JSON.stringify(sanitizeVisibleRefFallbackDiagnostic(diagnostic!)).includes("private search"),
+    JSON.stringify(sanitizeVisibleRefFallbackDiagnostic(diagnostic)).includes("private search"),
     false,
   );
 

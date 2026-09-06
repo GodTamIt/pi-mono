@@ -9,18 +9,18 @@ Primary-agent profiles and in-process subagent orchestration for Pi. Define a ro
 
 ## Installation
 
-Requirements: Node `>=22.22.2`, Pi `>=0.84.3 <0.85.0`, and authentication for every model named by a selected profile or stack.
+Requirements: Node `>=22.22.2`, Pi `>=0.84.0 <0.86.0`, and authentication for every model named by a selected profile or stack.
 
 For a persistent installation:
 
 ```sh
-pi install npm:pi-agent-roster@0.4.0
+pi install npm:pi-agent-roster@0.4.1
 ```
 
 For a single run without changing Pi's saved package list:
 
 ```sh
-pi -e npm:pi-agent-roster@0.4.0
+pi -e npm:pi-agent-roster@0.4.1
 ```
 
 Pi packages execute with full system access. Review the extension and any child-loaded extensions before enabling them.
@@ -322,7 +322,7 @@ Do not put secrets or assumptions from the parent chat into agent definitions. P
 | The child seems unaware of the conversation | This is required isolation. Repeat every necessary fact, path, constraint, and output expectation in `task`. |
 | `/subagents:sessions` is empty | Queued work has no child session yet. Only records with a live session or persisted transcript are listed. |
 | A result can no longer resume live | The retention sweep may have released the heavy session; resume reconstructs from the child transcript while its record remains available. |
-| The extension does not load | Confirm Node `>=22.22.2` and Pi `>=0.84.3 <0.85.0`, then reinstall the package. |
+| The extension does not load | Confirm Node `>=22.22.2` and Pi `>=0.84.0 <0.86.0`, then reinstall the package. |
 
 ## Provenance
 
