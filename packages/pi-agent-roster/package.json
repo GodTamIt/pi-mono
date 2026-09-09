@@ -1,7 +1,7 @@
 {
   "name": "pi-agent-roster",
   "version": "0.4.2",
-  "description": "Primary-agent profiles and subagent orchestration for Pi",
+  "description": "Agent profiles and subagent orchestration with named stacks to switch between models in Pi",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/GodTamIt/pi-mono.git",
