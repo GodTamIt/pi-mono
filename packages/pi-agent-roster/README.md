@@ -42,13 +42,22 @@ The package intentionally ships **no built-in agents**. Delegation tools stay hi
      grep: allow
      find: allow
    context_files: false
-   max_turns: 12
-   grace_turns: 2
+   stacks:
+     default:
+       model: provider/code-large
+       thinking: high
+     fast:
+       model: provider/code-small
+       thinking: low
    ---
 
    Review only the requested change. Cite concrete files and distinguish defects
    from optional improvements.
    ```
+
+   Stacks are named model/thinking profiles. Replace the placeholder model IDs above
+   with models available to you. `default` is selected automatically; ask for `fast`
+   when you want a lighter review.
 
 2. Start Pi:
 
@@ -56,7 +65,7 @@ The package intentionally ships **no built-in agents**. Delegation tools stay hi
    pi
    ```
 
-3. Ask Pi to use the `reviewer` subagent and include the complete task, paths, constraints, and expected output. The child receives no parent conversation.
+3. Ask Pi to use the `reviewer` subagent with the `fast` stack for a lighter review, and include the complete task, paths, constraints, and expected output. The child receives no parent conversation.
 
 If Pi was already running when the file changed, use `/agents:reload`. Restarting also rebuilds the model-facing tool description, which is useful after adding the first agent.
 
