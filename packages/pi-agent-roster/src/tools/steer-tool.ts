@@ -1,8 +1,12 @@
 import { defineTool } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { SteerOutcome, Subagent } from "../types.ts";
-import { formatContextPercent } from "../ui/display.ts";
+import { formatContextPercent, sanitizeTerminalText, type Theme } from "../ui/display.ts";
 import { formatLifetimeTokens, textResult } from "./helpers.ts";
+
+/** Cap the call-row steering preview so a long message stays readable. */
+const STEER_PREVIEW_MAX = 80;
 
 // ---- Deps interfaces ----
 
@@ -103,6 +107,29 @@ export class SteerTool {
         },
         { additionalProperties: false },
       ),
+
+      renderCall(
+        args: { agent_id?: string | undefined; steering?: string | undefined } | undefined,
+        theme: Theme,
+      ) {
+        let content = theme.fg("toolTitle", theme.bold("Steer Agent"));
+        const rawAgentId = args?.agent_id;
+        const agentId = rawAgentId ? sanitizeTerminalText(rawAgentId).trim() : "";
+        if (agentId) content += ` ${theme.fg("muted", agentId)}`;
+        const steering = args?.steering;
+        if (typeof steering === "string") {
+          const preview = sanitizeTerminalText(steering).trim();
+          if (preview) {
+            const bounded =
+              preview.length > STEER_PREVIEW_MAX
+                ? `${preview.slice(0, STEER_PREVIEW_MAX)}…`
+                : preview;
+            content += ` ${theme.fg("dim", `"${bounded}"`)}`;
+          }
+        }
+        return new Text(content, 0, 0);
+      },
+
       execute: (
         toolCallId: string,
         params: { agent_id: string; steering: string },

@@ -1,3 +1,4 @@
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { Value } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -33,6 +34,17 @@ async function execute(
   return tool.execute("tc-1", params, new AbortController().signal, undefined, STUB_CTX);
 }
 
+const PLAIN_THEME = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+
+function renderCall(args: Record<string, unknown> | undefined, width = 120): string {
+  const def = new SteerTool(makeManager(), makeEvents()).toToolDefinition();
+  const renderer = def.renderCall;
+  if (!renderer) throw new Error("renderCall missing");
+  return renderer(args as never, PLAIN_THEME as never, {} as never)
+    .render(width)
+    .join("\n");
+}
+
 describe("SteerTool", () => {
   it("returns tool definition with correct name", () => {
     const tool = new SteerTool(makeManager(), makeEvents());
@@ -44,6 +56,44 @@ describe("SteerTool", () => {
     expect(tool.toToolDefinition().promptSnippet).toBe(
       "Send a mid-run message to redirect a running background agent.",
     );
+  });
+
+  it("shows the target and a bounded steering preview in the call slot", () => {
+    const text = renderCall({ agent_id: "agent-1", steering: "change design" });
+    expect(text).toContain("Steer Agent");
+    expect(text).toContain("agent-1");
+    expect(text).toContain('"change design"');
+  });
+
+  it("bounds long previews and sanitizes terminal controls in displayed args", () => {
+    const bounded = renderCall({ agent_id: "agent-1", steering: "x".repeat(200) });
+    expect(bounded).toContain(`${"x".repeat(80)}…`);
+    expect(bounded).not.toContain("x".repeat(81));
+
+    const hostile =
+      "npm WARN \u001b[31mdeprecated\u001b[0m\u001b]0;title\u0007" +
+      "\u001b[3Aoverwrite\rprogress\b!";
+    const safe = renderCall({ agent_id: "a\u001b[2Jgent-1", steering: hostile });
+    expect(safe).toContain("agent-1");
+    expect(safe).toContain("npm WARN deprecatedoverwriteprogress!");
+    for (const control of ["\u001b", "\r", "\b", "\u0007", "\u009b"]) {
+      expect(safe).not.toContain(control);
+    }
+  });
+
+  it("renders partial or missing call args without failing", () => {
+    expect(renderCall({ agent_id: "agent-1" })).toContain("agent-1");
+    expect(renderCall({ steering: "later" })).toContain('"later"');
+    expect(renderCall(undefined)).toContain("Steer Agent");
+    expect(renderCall({})).not.toContain("undefined");
+  });
+
+  it("wraps the call preview within narrow widths", () => {
+    const text = renderCall(
+      { agent_id: "agent-1", steering: "a long steering message ".repeat(20) },
+      20,
+    );
+    expect(text.split("\n").every((line) => visibleWidth(line) <= 20)).toBe(true);
   });
 
   it("requires explicit non-empty steering and rejects undeclared context fields", () => {
@@ -115,6 +165,9 @@ describe("SteerTool", () => {
     });
     expect(result.content[0]?.text).toContain("Steering message sent");
     expect(result.content[0]?.text).toContain("3 tool uses");
+    // Steering text lives only in the TUI call row; the model-facing result is unchanged.
+    expect(result.content[0]?.text).not.toContain("change design");
+    expect(result.details).toBeUndefined();
   });
 
   it("returns error message when steer fails", async () => {
