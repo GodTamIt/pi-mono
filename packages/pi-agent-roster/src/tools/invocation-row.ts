@@ -25,7 +25,25 @@ export interface InvocationRowRenderContext {
   lastComponent: Component | undefined;
   state: RenderState;
   expanded: boolean;
+  /** Host settlement boundary: false once the native tool result is final. */
+  isPartial: boolean;
 }
+
+/**
+ * Plain, render-ready row data. Live rows rebuild it from the child record;
+ * settled rows freeze one copy so no later render can observe child mutation.
+ */
+type InvocationRowView = {
+  details: AgentDetails;
+  resultText: string;
+  activity: readonly string[];
+  output: string;
+  conversation?: string | undefined;
+  childSessionId?: string | undefined;
+  startedAt?: number | undefined;
+  /** Accepted background launch receipt: no live status, counters, or activity. */
+  accepted: boolean;
+};
 type Binding = {
   key: string;
   agentId: string;
@@ -36,10 +54,11 @@ type Binding = {
   owner?: object | undefined;
 };
 
-/** Keeps settled native tool rows connected to their child while work continues. */
+/** Tracks live native rows while their child runs and settles them into immutable receipts. */
 export class InvocationRowRegistry implements SubagentManagerObserver {
   private readonly bindings = new Map<string, Binding>();
   private readonly activitySnapshots = new Map<string, readonly string[]>();
+  private readonly settledOwners = new Map<string, object>();
 
   constructor(private readonly getRecord: (id: string) => Subagent | undefined) {}
 
@@ -82,8 +101,26 @@ export class InvocationRowRegistry implements SubagentManagerObserver {
   }
 
   owns(toolCallId: string, agentId: string, owner: object): boolean {
-    const binding = this.bindings.get(bindingKey(toolCallId, agentId));
-    return !binding || binding.owner === undefined || binding.owner === owner;
+    const key = bindingKey(toolCallId, agentId);
+    const binding = this.bindings.get(key);
+    if (binding) return binding.owner === undefined || binding.owner === owner;
+    const settled = this.settledOwners.get(key);
+    return settled === undefined || settled === owner;
+  }
+
+  /**
+   * Freeze a row at host settlement: drop any live child subscription and claim
+   * the key so the first host keeps the receipt while duplicates stay hidden.
+   */
+  settle(toolCallId: string, agentId: string, owner: object): void {
+    const key = bindingKey(toolCallId, agentId);
+    const binding = this.bindings.get(key);
+    if (binding) {
+      binding.unsubscribe?.();
+      this.bindings.delete(key);
+    }
+    if (!this.settledOwners.has(key)) this.settledOwners.set(key, owner);
+    this.trim();
   }
 
   getActivity(toolCallId: string, agentId: string): readonly string[] {
@@ -127,6 +164,7 @@ export class InvocationRowRegistry implements SubagentManagerObserver {
     for (const binding of this.bindings.values()) binding.unsubscribe?.();
     this.bindings.clear();
     this.activitySnapshots.clear();
+    this.settledOwners.clear();
   }
 
   dispose(): void {
@@ -217,26 +255,56 @@ export class InvocationRowRegistry implements SubagentManagerObserver {
       if (!oldest) return;
       this.activitySnapshots.delete(oldest);
     }
+    while (this.settledOwners.size > MAX_BINDINGS) {
+      const oldest = this.settledOwners.keys().next().value as string | undefined;
+      if (!oldest) return;
+      this.settledOwners.delete(oldest);
+    }
   }
 }
 
 /** Width-aware native component retained by ToolExecutionComponent after settlement. */
 export class InvocationRowComponent implements Component {
-  private expanded = false;
+  private expanded: boolean;
+  private theme: Theme;
   private suppressed = false;
+  private settled = false;
+  private view: InvocationRowView;
 
   constructor(
     private readonly toolCallId: string,
-    private details: AgentDetails,
-    private resultText: string,
-    private theme: Theme,
+    details: AgentDetails,
+    resultText: string,
+    theme: Theme,
     private readonly registry: InvocationRowRegistry | undefined,
     private readonly getRecord: (id: string) => Subagent | undefined,
-  ) {}
+  ) {
+    this.expanded = false;
+    this.theme = theme;
+    this.view = this.buildLiveView(details, resultText);
+  }
 
+  /** A settled row never re-reads the child record. */
+  isSettled(): boolean {
+    return this.settled;
+  }
+
+  /**
+   * Update a still-partial row from the live record. Once settled, this only
+   * reuses the frozen snapshot with the new presentation (expand/theme).
+   */
   update(details: AgentDetails, resultText: string, expanded: boolean, theme: Theme): void {
-    this.details = details;
-    this.resultText = resultText;
+    if (!this.settled) this.view = this.buildLiveView(details, resultText);
+    this.expanded = expanded;
+    this.theme = theme;
+  }
+
+  /** Freeze the row at host settlement; later calls only refresh presentation. */
+  settle(details: AgentDetails, resultText: string, expanded: boolean, theme: Theme): void {
+    if (!this.settled) {
+      this.view = this.buildSettledView(details, resultText);
+      this.settled = true;
+    }
     this.expanded = expanded;
     this.theme = theme;
   }
@@ -245,35 +313,83 @@ export class InvocationRowComponent implements Component {
 
   render(width: number): string[] {
     if (width <= 0) return [];
-    const record = this.details.agentId ? this.getRecord(this.details.agentId) : undefined;
-    const details = record ? detailsFromRecord(this.details, record) : this.details;
+    const view = this.view;
+    const agentId = view.details.agentId;
     if (
       !this.suppressed &&
-      isActive(details.status) &&
-      details.agentId &&
+      agentId &&
       this.registry &&
-      !this.registry.owns(this.toolCallId, details.agentId, this)
+      !this.registry.owns(this.toolCallId, agentId, this)
     ) {
-      // Duplicate host for a live invocation: stay hidden permanently so two
-      // identical rows never both appear once the record settles.
+      // Duplicate host for one invocation: stay hidden permanently so two
+      // identical rows never both appear.
       this.suppressed = true;
     }
     if (this.suppressed) return [];
-    const lines = collapsedLines(details, this.theme, width);
+    const lines = collapsedLines(view, this.theme, width);
     if (this.expanded) {
-      lines.push(
-        ...expandedLines(
-          details,
-          record,
-          this.resultText,
-          this.toolCallId,
-          this.registry,
-          width,
-          this.theme,
-        ),
-      );
+      lines.push(...expandedLines(view, width, this.theme));
     }
     return lines.flatMap((line) => wrapTextWithAnsi(line, width));
+  }
+
+  private buildLiveView(details: AgentDetails, resultText: string): InvocationRowView {
+    const record = details.agentId ? this.getRecord(details.agentId) : undefined;
+    const merged = record ? detailsFromRecord(details, record) : details;
+    const activity =
+      details.agentId && this.registry
+        ? [...this.registry.getActivity(this.toolCallId, details.agentId)]
+        : merged.activity
+          ? [merged.activity]
+          : [];
+    return {
+      details: merged,
+      resultText,
+      activity,
+      output:
+        record?.result ?? record?.error ?? record?.responseText ?? details.output ?? resultText,
+      conversation:
+        !merged.isBackground && !isActive(merged.status) ? record?.getConversation() : undefined,
+      childSessionId: record?.childSessionId ?? merged.childSessionId,
+      startedAt: record?.startedAt,
+      accepted: false,
+    };
+  }
+
+  private buildSettledView(details: AgentDetails, resultText: string): InvocationRowView {
+    // Copy first: the host reuses its result object, and a frozen receipt must
+    // not observe anything the producer might later write into it.
+    const snapshot = { ...details };
+    // A background launch result is final the moment the tool returns; render it
+    // as an accepted receipt rather than freezing a transient running status.
+    if (snapshot.isBackground) {
+      return {
+        details: snapshot,
+        resultText,
+        activity: [],
+        output: "",
+        conversation: undefined,
+        childSessionId: snapshot.childSessionId,
+        startedAt: undefined,
+        accepted: true,
+      };
+    }
+    const record = details.agentId ? this.getRecord(details.agentId) : undefined;
+    // A record that is active again (resumed) must not backfill a historical
+    // restored row; its persisted details are all the snapshot it gets.
+    if (record?.isActive()) {
+      return {
+        details: snapshot,
+        resultText,
+        activity: snapshot.activity ? [snapshot.activity] : [],
+        output: snapshot.output ?? resultText,
+        conversation: undefined,
+        childSessionId: snapshot.childSessionId,
+        startedAt: undefined,
+        accepted: false,
+      };
+    }
+    return this.buildLiveView(snapshot, resultText);
   }
 }
 
@@ -296,49 +412,58 @@ export function renderInvocationRow(
           registry,
           getRecord,
         );
-  component.update(details, resultText, context.expanded, theme);
-  if (details.agentId) {
-    const record = getRecord(details.agentId);
-    registry?.bind(
-      context.toolCallId,
-      details.agentId,
-      context.invalidate,
-      component,
-      record ? record.isActive() : isActive(details.status),
-    );
+  if (!component.isSettled()) {
+    if (context.isPartial) {
+      component.update(details, resultText, context.expanded, theme);
+      if (details.agentId) {
+        registry?.bind(context.toolCallId, details.agentId, context.invalidate, component, true);
+      }
+    } else {
+      component.settle(details, resultText, context.expanded, theme);
+      if (details.agentId) registry?.settle(context.toolCallId, details.agentId, component);
+    }
+  } else {
+    component.update(details, resultText, context.expanded, theme);
   }
   context.state.invocationRow = component;
   return component;
 }
 
-function collapsedLines(details: AgentDetails, theme: Theme, width: number): string[] {
-  const status = statusPresentation(details.status);
+function collapsedLines(view: InvocationRowView, theme: Theme, width: number): string[] {
+  const details = view.details;
+  const status = view.accepted ? ACCEPTED_STATUS : statusPresentation(details.status);
   const separator = theme.fg("dim", " · ");
   const first = [
     theme.bold(sanitizeTerminalText(details.displayName)),
     theme.fg(status.color, `${status.icon} ${status.label}`),
   ].join(separator);
-  const timing = `${formatMs(details.durationMs)} ${isActive(details.status) ? "elapsed" : "duration"}`;
-  const metadata = packMetadata(
-    [
-      details.isBackground ? "Background" : "Foreground",
-      `stack ${sanitizeTerminalText(details.stack ?? "—")}`,
-      `model ${sanitizeTerminalText(details.modelName ?? "—")}`,
-      `thinking ${sanitizeTerminalText(details.thinking ?? "—")}`,
+  const parts = [
+    details.isBackground ? "Background" : "Foreground",
+    `stack ${sanitizeTerminalText(details.stack ?? "—")}`,
+    `model ${sanitizeTerminalText(details.modelName ?? "—")}`,
+    `thinking ${sanitizeTerminalText(details.thinking ?? "—")}`,
+  ];
+  if (!view.accepted) {
+    const timing = `${formatMs(details.durationMs)} ${isActive(details.status) ? "elapsed" : "duration"}`;
+    parts.push(
       formatTurns(details.turnCount ?? 0, details.maxTurns),
       `${details.toolUses} ${details.toolUses === 1 ? "tool" : "tools"}`,
       formatContext(details.contextPercent),
       timing,
-    ],
-    width,
-  );
+    );
+  }
+  const metadata = packMetadata(parts, width);
   const summary = `${GLYPHS.subLine} Summary: ${sanitizeTerminalText(details.description)}`;
   const lines = [
     first,
     ...metadata.map((line) => theme.fg("dim", line)),
     theme.fg("muted", summary),
   ];
-  if (isActive(details.status)) {
+  if (view.accepted) {
+    lines.push(
+      theme.fg("dim", `${GLYPHS.subLine} get_subagent_result or /subagents:sessions for status`),
+    );
+  } else if (isActive(details.status)) {
     lines.push(
       theme.fg(
         "accent",
@@ -367,59 +492,56 @@ function packMetadata(parts: readonly string[], width: number): string[] {
   return rows.map((line, index) => `${index === 0 ? `${GLYPHS.subLine} ` : "  "}${line}`);
 }
 
-function expandedLines(
-  details: AgentDetails,
-  record: Subagent | undefined,
-  resultText: string,
-  toolCallId: string,
-  registry: InvocationRowRegistry | undefined,
-  width: number,
-  theme: Theme,
-): string[] {
+function expandedLines(view: InvocationRowView, width: number, theme: Theme): string[] {
+  const heading = (label: string) => theme.fg("toolTitle", theme.bold(label));
+  const details = view.details;
+  if (view.accepted) {
+    return [
+      "",
+      heading("Task"),
+      `  ${sanitizeTerminalText(details.task ?? details.description)}`,
+      heading("Run details"),
+      `  ${ACCEPTED_STATUS.label} · Background`,
+      heading("Identifiers"),
+      `  Agent ID: ${sanitizeTerminalText(details.agentId ?? "unknown")}`,
+      `  Child session ID: ${sanitizeTerminalText(view.childSessionId ?? "not available")}`,
+      "",
+      theme.fg("dim", "Read-only receipt · get_subagent_result or /subagents:sessions for status"),
+    ];
+  }
   const status = statusPresentation(details.status);
   const execution = details.isBackground ? "Background" : "Foreground";
-  const compactions = record?.compactionCount ?? details.compactions ?? 0;
-  const heading = (label: string) => theme.fg("toolTitle", theme.bold(label));
+  const compactions = details.compactions ?? 0;
   const lines = [
     "",
     heading("Task"),
-    `  ${sanitizeTerminalText(details.task ?? record?.task ?? details.description)}`,
+    `  ${sanitizeTerminalText(details.task ?? details.description)}`,
     heading("Run details"),
     `  ${status.label} · ${execution}`,
     `  Turns: ${details.turnCount ?? 0}/${details.maxTurns ?? "unlimited"} · grace: ${details.graceTurns ?? "unlimited"} · tool uses: ${details.toolUses}`,
-    `  Usage: ${details.tokens || "0 tokens"} · ${formatContext(record ? record.getContextPercent() : details.contextPercent)} · ${compactions} compaction${compactions === 1 ? "" : "s"}`,
-    `  Started: ${record ? new Date(record.startedAt).toISOString() : "not available"} · ${isActive(details.status) ? "elapsed" : "duration"}: ${formatMs(details.durationMs)}`,
+    `  Usage: ${details.tokens || "0 tokens"} · ${formatContext(details.contextPercent)} · ${compactions} compaction${compactions === 1 ? "" : "s"}`,
+    `  Started: ${view.startedAt != null ? new Date(view.startedAt).toISOString() : "not available"} · ${isActive(details.status) ? "elapsed" : "duration"}: ${formatMs(details.durationMs)}`,
     heading("Identifiers"),
     `  Agent ID: ${sanitizeTerminalText(details.agentId ?? "unknown")}`,
-    `  Child session ID: ${sanitizeTerminalText(record?.childSessionId ?? details.childSessionId ?? "not available")}`,
+    `  Child session ID: ${sanitizeTerminalText(view.childSessionId ?? "not available")}`,
     heading("Activity"),
   ];
-  const activity =
-    details.agentId && registry
-      ? registry.getActivity(toolCallId, details.agentId)
-      : details.activity
-        ? [details.activity]
-        : [];
   lines.push(
-    ...(activity.length
-      ? activity.map((item) => `  ${GLYPHS.subLine} ${sanitizeTerminalText(item)}`)
+    ...(view.activity.length
+      ? view.activity.map((item) => `  ${GLYPHS.subLine} ${sanitizeTerminalText(item)}`)
       : [`  ${GLYPHS.subLine} No child activity yet.`]),
   );
   lines.push(heading("Current/final output"));
-  const output =
-    record?.result ?? record?.error ?? record?.responseText ?? details.output ?? resultText;
   const outputLines = wrapTextWithAnsi(
-    sanitizeOutput(output || "No output."),
+    sanitizeOutput(view.output || "No output."),
     Math.max(1, width - 2),
   );
   lines.push(...outputLines.map((line) => `  ${line}`));
 
-  const conversation =
-    !details.isBackground && !isActive(details.status) ? record?.getConversation() : undefined;
-  if (conversation) {
+  if (view.conversation) {
     lines.push("", heading("Child conversation"));
     const conversationLines = wrapTextWithAnsi(
-      sanitizeTerminalText(conversation, true),
+      sanitizeTerminalText(view.conversation, true),
       Math.max(1, width - 2),
     );
     lines.push(...conversationLines.map((line) => `  ${line}`));
@@ -474,6 +596,12 @@ function sanitizeOutput(output: string): string {
 }
 
 type StatusColor = "muted" | "accent" | "success" | "warning" | "dim" | "error";
+
+const ACCEPTED_STATUS = {
+  label: "Background request accepted",
+  color: "muted" as StatusColor,
+  icon: GLYPHS.queued,
+};
 
 function statusPresentation(status: string): { label: string; color: StatusColor; icon: string } {
   switch (status) {

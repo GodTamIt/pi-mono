@@ -1,4 +1,4 @@
-import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
+import { stripTerminalSequences, TuiMainScreen, visibleWidth } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { KEYBINDINGS } from "../../../../node_modules/@earendil-works/pi-coding-agent/dist/core/keybindings.js";
 import { ToolExecutionComponent } from "../../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tool-execution.js";
@@ -78,6 +78,72 @@ function standaloneHost(overrides: Partial<AgentDetails> = {}, output = "child o
     isError: resultDetails.status === "error",
   });
   return host;
+}
+
+function createTerminalHarness() {
+  const writes: string[] = [];
+  const terminal = {
+    columns: 120,
+    rows: 24,
+    write: (chunk: string) => writes.push(chunk),
+    hideCursor: () => writes.push("\x1b[?25l"),
+    showCursor: () => {},
+    stop: () => {},
+  };
+  const tui = new TuiMainScreen(terminal as never, false);
+  return {
+    tui,
+    writes,
+    clearWrites: () => {
+      writes.length = 0;
+    },
+    clearedScrollback: () => writes.join("").includes("\x1b[3J"),
+  };
+}
+
+function parentPadding(lines = 40): { render(): string[]; invalidate(): void } {
+  return {
+    render: () => Array.from({ length: lines }, (_, index) => `parent output ${index}`),
+    invalidate: () => {},
+  };
+}
+
+function createRegistryHost(options: {
+  record: ReturnType<typeof createTestSubagent>;
+  isBackground: boolean;
+  toolCallId?: string;
+}) {
+  const toolCallId = options.record.toolCallId ?? "tc-registry";
+  const deps = createToolDeps();
+  deps.manager.getRecord = vi.fn((id: string) =>
+    id === options.record.id ? options.record : undefined,
+  );
+  const rows = new InvocationRowRegistry((id) => deps.manager.getRecord(id));
+  const definition = new AgentTool(
+    deps.manager,
+    deps.runtime,
+    deps.settings,
+    deps.registry,
+    deps.agentDir,
+    {},
+    rows,
+  ).toToolDefinition();
+  const harness = createTerminalHarness();
+  const host = new ToolExecutionComponent(
+    "subagent",
+    toolCallId,
+    {
+      task: options.record.task,
+      description: options.record.description,
+      subagent_type: "Architect",
+      run_in_background: options.isBackground,
+    },
+    {},
+    definition,
+    harness.tui as never,
+    process.cwd(),
+  );
+  return { host, rows, harness };
 }
 
 describe("native subagent invocation row", () => {
@@ -162,7 +228,7 @@ describe("native subagent invocation row", () => {
       "error",
     ];
     const rows = Object.fromEntries(
-      statuses.map((status) => [status, baseline(standaloneHost({ status }))]),
+      statuses.map((status) => [status, baseline(standaloneHost({ status, isBackground: false }))]),
     );
 
     expect(rows.running).toContain("Architect 🧭 · ▸ running");
@@ -176,6 +242,7 @@ describe("native subagent invocation row", () => {
     expect(KEYBINDINGS["app.tools.expand"].defaultKeys).toBe("ctrl+o");
     const host = standaloneHost({
       status: "completed",
+      isBackground: false,
       agentId: "agent-restored",
       task: "Inspect the child lifecycle exactly.",
       childSessionId: "child-restored",
@@ -206,6 +273,7 @@ describe("native subagent invocation row", () => {
   it("shows unlimited budgets explicitly in the expanded view", () => {
     const host = standaloneHost({
       status: "running",
+      isBackground: false,
       turnCount: 3,
       maxTurns: undefined,
       graceTurns: undefined,
@@ -215,7 +283,7 @@ describe("native subagent invocation row", () => {
     expect(baseline(host, 80)).toContain("Turns: 3/unlimited · grace: unlimited · tool uses: 0");
   });
 
-  it("retains the renderer component and invalidates it from one child subscription", () => {
+  it("keeps a partial foreground row live and detaches it at final settlement", () => {
     const child = createMockSession({
       messages: [
         {
@@ -225,13 +293,12 @@ describe("native subagent invocation row", () => {
       ],
     });
     const firstSession = createSubagentSessionStub(child, "/tmp/child.jsonl", "child-1");
-    firstSession.getConversation.mockReturnValue("[User]: hidden background transcript");
     const record = createTestSubagent({
       status: "running",
       startedAt: Date.now() - 250,
       toolCallId: "tc-host",
       invocation: {
-        runInBackground: true,
+        runInBackground: false,
         stack: "deep",
         modelName: "sonnet",
         thinking: "high",
@@ -241,7 +308,7 @@ describe("native subagent invocation row", () => {
       execution: {
         ...createTestSubagent().execution,
         task: "Inspect the child lifecycle exactly.",
-        isBackground: true,
+        isBackground: false,
         parentSession: { toolCallId: "tc-host" },
         maxTurns: 20,
         graceTurns: 2,
@@ -265,7 +332,7 @@ describe("native subagent invocation row", () => {
     const host = new ToolExecutionComponent(
       "subagent",
       "tc-host",
-      { task: record.task, subagent_type: "Architect", run_in_background: true },
+      { task: record.task, subagent_type: "Architect" },
       {},
       definition,
       { requestRender } as never,
@@ -274,31 +341,35 @@ describe("native subagent invocation row", () => {
 
     host.setArgsComplete();
     host.markExecutionStarted();
-    host.updateResult({
-      content: [{ type: "text", text: "launch metadata" }],
-      details: details(),
-      isError: false,
-    });
+    host.updateResult(
+      {
+        content: [{ type: "text", text: "streaming" }],
+        details: details({
+          status: "running",
+          isBackground: false,
+          description: record.description,
+        }),
+        isError: false,
+      },
+      true,
+    );
     rows.onSubagentSessionCreated(record);
     rows.onSubagentSessionCreated(record);
     expect(firstSession.subscribe).toHaveBeenCalledOnce();
-    expect(baseline(host)).toContain("Subagent\nArchitect 🧭 · ▸ running");
-    expect(text(host)).toContain("Background · stack deep · model sonnet · thinking high");
+    expect(baseline(host)).toContain("Architect 🧭 · ▸ running");
+    expect(text(host)).toContain("Foreground · stack deep · model sonnet · thinking high");
 
     const beforeEvent = requestRender.mock.calls.length;
     child.emit({ type: "tool_execution_start", toolName: "read", toolCallId: "read-2" });
     expect(requestRender.mock.calls.length).toBeGreaterThan(beforeEvent);
 
     host.setExpanded(true);
-    const expanded = baseline(host);
-    expect(expanded).toContain("Task\n  Inspect the child lifecycle exactly.");
-    expect(expanded).toContain("Agent ID: agent-1");
-    expect(expanded).toContain("Child session ID: child-1");
-    expect(expanded).toContain("⎿ tool · read");
-    expect(expanded).toContain("Read-only transcript · /subagents:sessions");
-    expect(expanded).not.toContain("hidden background transcript");
-    host.setExpanded(false);
-    expect(text(host)).not.toContain("\nTask\n");
+    const live = baseline(host);
+    expect(live).toContain("Task\n  Inspect the child lifecycle exactly.");
+    expect(live).toContain("Agent ID: agent-1");
+    expect(live).toContain("Child session ID: child-1");
+    expect(live).toContain("⎿ tool · read");
+    expect(live).toContain("Read-only transcript · /subagents:sessions");
 
     const replacement = createMockSession();
     const secondSession = createSubagentSessionStub(replacement, "/tmp/child.jsonl", "child-2");
@@ -315,18 +386,37 @@ describe("native subagent invocation row", () => {
     expect(text(host)).toContain("tool · bash");
 
     record.markCompleted("final output", Date.now());
-    rows.onSubagentCompleted(record);
-    const afterCompletion = requestRender.mock.calls.length;
+    host.updateResult(
+      {
+        content: [{ type: "text", text: "Agent completed.\n\nfinal output" }],
+        details: details({
+          status: "completed",
+          isBackground: false,
+          description: record.description,
+          output: "final output",
+        }),
+        isError: false,
+      },
+      false,
+    );
+    const frozen = baseline(host);
+    expect(frozen).toContain("completed");
+    expect(frozen).not.toContain("Activity:");
+    expect(frozen).toContain("tool · bash");
+
+    // A later resume must not mutate the settled row or re-subscribe.
+    const afterSettlement = requestRender.mock.calls.length;
+    record.resetForResume(Date.now());
     replacement.emit({ type: "tool_execution_start", toolName: "edit", toolCallId: "late" });
-    expect(requestRender).toHaveBeenCalledTimes(afterCompletion);
-    expect(text(host)).toContain("completed");
+    expect(requestRender).toHaveBeenCalledTimes(afterSettlement);
+    expect(baseline(host)).toBe(frozen);
 
     rows.dispose();
     replacement.emit({ type: "tool_execution_start", toolName: "write", toolCallId: "shutdown" });
-    expect(requestRender).toHaveBeenCalledTimes(afterCompletion);
+    expect(requestRender).toHaveBeenCalledTimes(afterSettlement);
   });
 
-  it("keeps the first active host row live and permanently hides duplicate hosts", () => {
+  it("keeps the first settled receipt visible and permanently hides duplicate hosts", () => {
     const record = createTestSubagent({
       status: "running",
       toolCallId: "tc-duplicate",
@@ -369,13 +459,14 @@ describe("native subagent invocation row", () => {
       });
     }
 
-    expect(baseline(first)).toContain("↻7≤20 · 4 tools · 35% context");
+    expect(baseline(first)).toContain("Architect 🧭 · ◦ Background request accepted");
+    expect(baseline(first)).not.toContain("↻7≤20");
     expect(baseline(duplicate)).not.toContain("Architect 🧭");
     expect(`${baseline(first)}\n${baseline(duplicate)}`.match(/Architect 🧭/g)).toHaveLength(1);
 
     record.markCompleted("done", Date.now());
     rows.onSubagentCompleted(record);
-    expect(baseline(first)).toContain("Architect 🧭");
+    expect(baseline(first)).toContain("Background request accepted");
     expect(baseline(duplicate)).not.toContain("Architect 🧭");
     expect(`${baseline(first)}\n${baseline(duplicate)}`.match(/Architect 🧭/g)).toHaveLength(1);
   });
@@ -383,6 +474,7 @@ describe("native subagent invocation row", () => {
   it("uses singular tool grammar and packs unknown context at narrow widths", () => {
     const host = standaloneHost({
       status: "completed",
+      isBackground: false,
       turnCount: 1,
       maxTurns: 20,
       toolUses: 1,
@@ -395,7 +487,7 @@ describe("native subagent invocation row", () => {
     }
   });
 
-  it("inlines a retained foreground conversation only after completion", () => {
+  it("inlines a retained foreground conversation only when the final result settles", () => {
     const session = createSubagentSessionStub(
       createMockSession(),
       "/tmp/foreground.jsonl",
@@ -438,27 +530,207 @@ describe("native subagent invocation row", () => {
       { requestRender: vi.fn() } as never,
       process.cwd(),
     );
-    host.updateResult({
-      content: [{ type: "text", text: "Agent completed.\n\nfinal output" }],
-      details: details({
-        status: "running",
-        isBackground: false,
-        agentId: record.id,
-        description: record.description,
-      }),
-      isError: false,
-    });
+    host.updateResult(
+      {
+        content: [{ type: "text", text: "streaming" }],
+        details: details({
+          status: "running",
+          isBackground: false,
+          agentId: record.id,
+          description: record.description,
+        }),
+        isError: false,
+      },
+      true,
+    );
     host.setExpanded(true);
     expect(baseline(host)).not.toContain("Child conversation");
 
     record.markCompleted("final output", Date.now());
-    rows.onSubagentCompleted(record);
+    host.updateResult(
+      {
+        content: [{ type: "text", text: "Agent completed.\n\nfinal output" }],
+        details: details({
+          status: "completed",
+          isBackground: false,
+          agentId: record.id,
+          description: record.description,
+          output: "final output",
+        }),
+        isError: false,
+      },
+      false,
+    );
     const expanded = baseline(host);
     expect(expanded).toContain("Child conversation");
     expect(expanded).toContain("[User]: inspect the implementation");
     expect(expanded).toContain("[Assistant]: verified the behavior");
     expect(expanded).not.toContain("\u001b");
     expect(expanded).toContain("Task\n  Inspect every implementation detail.");
+
+    // The frozen transcript must survive later child mutation.
+    record.resetForResume(Date.now());
+    session.getConversation.mockReturnValue("[User]: changed after settlement");
+    expect(baseline(host)).toBe(expanded);
+  });
+
+  it("never erases scrollback from an offscreen settled background receipt", () => {
+    const session = createMockSession();
+    const record = createTestSubagent({
+      id: "agent-bg",
+      status: "running",
+      toolCallId: "tc-bg",
+      startedAt: Date.now() - 1000,
+      description: "inspect lifecycle",
+      execution: {
+        ...createTestSubagent().execution,
+        task: "Inspect the child lifecycle exactly.",
+        isBackground: true,
+        parentSession: { toolCallId: "tc-bg" },
+      },
+    });
+    record.subagentSession = toSubagentSession(
+      createSubagentSessionStub(session, "/tmp/child-bg.jsonl", "child-bg"),
+    );
+
+    const { host, rows, harness } = createRegistryHost({
+      record,
+      isBackground: true,
+      toolCallId: "tc-bg",
+    });
+    host.updateResult(
+      {
+        content: [{ type: "text", text: "Agent started in background." }],
+        details: details({
+          agentId: record.id,
+          isBackground: true,
+          status: "running",
+          description: record.description,
+        }),
+        isError: false,
+      },
+      false,
+    );
+
+    host.setExpanded(true);
+    harness.tui.addChild(host);
+    harness.tui.addChild(parentPadding());
+    harness.tui.renderNow();
+    expect(harness.writes.join("")).toContain("Background request accepted");
+    expect(harness.writes.join("")).toContain("Agent ID: agent-bg");
+    expect(harness.writes.join("")).not.toContain("running");
+    harness.clearWrites();
+    const fullRedraws = harness.tui.fullRedraws;
+
+    // Child activity, completion, and resume must not touch the settled receipt.
+    record.markCompleted("late result", Date.now());
+    rows.onSubagentCompleted(record);
+    rows.onSubagentResumed(record);
+    session.emit({ type: "tool_execution_start", toolName: "read", toolCallId: "read-1" });
+    harness.tui.requestRender();
+    harness.tui.renderNow();
+    expect(harness.clearedScrollback()).toBe(false);
+    expect(harness.tui.fullRedraws).toBe(fullRedraws);
+
+    // Passage of time plus an unrelated render must not change the receipt either.
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 120_000);
+    harness.tui.requestRender();
+    harness.tui.renderNow();
+    expect(harness.clearedScrollback()).toBe(false);
+    expect(harness.tui.fullRedraws).toBe(fullRedraws);
+    nowSpy.mockRestore();
+
+    rows.dispose();
+    harness.tui.stop({ preserveScreen: true });
+  });
+
+  it("renders a width-stable accepted receipt for a settled background row", () => {
+    const record = createTestSubagent({
+      id: "agent-accepted",
+      status: "running",
+      toolCallId: "tc-accepted",
+      description: "accepted task",
+    });
+    const { host, rows } = createRegistryHost({
+      record,
+      isBackground: true,
+      toolCallId: "tc-accepted",
+    });
+    host.updateResult(
+      {
+        content: [{ type: "text", text: "Agent started in background." }],
+        details: details({
+          agentId: record.id,
+          isBackground: true,
+          status: "running",
+          task: "accepted task",
+          description: "accepted task",
+          turnCount: 4,
+          toolUses: 3,
+        }),
+        isError: false,
+      },
+      false,
+    );
+    host.setExpanded(true);
+    const wide = baseline(host, 120);
+    const narrow = baseline(host, 40);
+    expect(wide).toContain("Background request accepted");
+    expect(wide).toContain("Agent ID: agent-accepted");
+    expect(wide).not.toContain("↻");
+    expect(wide).not.toContain("tool uses");
+    expect(wide).not.toContain("Current/final output");
+    expect(wide).toContain("/subagents:sessions");
+    expect(narrow).toContain("Background request accepted");
+    for (const width of [40, 120]) {
+      for (const line of host.render(width)) {
+        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
+    }
+
+    record.markCompleted("changed after settlement", Date.now());
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 60_000);
+    expect(baseline(host, 120)).toBe(wide);
+    expect(baseline(host, 40)).toBe(narrow);
+    nowSpy.mockRestore();
+    rows.dispose();
+  });
+
+  it("does not backfill a restored foreground row from a resumed record", () => {
+    const session = createSubagentSessionStub(
+      createMockSession(),
+      "/tmp/restored.jsonl",
+      "child-restored",
+    );
+    session.getConversation.mockReturnValue("[User]: new run transcript");
+    const record = createTestSubagent({ status: "running", toolCallId: "tc-new-run" });
+    record.subagentSession = toSubagentSession(session);
+
+    const { host, rows } = createRegistryHost({
+      record,
+      isBackground: false,
+      toolCallId: "tc-restored",
+    });
+    host.updateResult(
+      {
+        content: [{ type: "text", text: "old final output" }],
+        details: details({
+          agentId: record.id,
+          isBackground: false,
+          status: "completed",
+          output: "old final output",
+          description: "old task",
+        }),
+        isError: false,
+      },
+      false,
+    );
+    host.setExpanded(true);
+    const rendered = baseline(host);
+    expect(rendered).toContain("completed");
+    expect(rendered).toContain("old final output");
+    expect(rendered).not.toContain("new run transcript");
+    rows.dispose();
   });
 
   it("caps retained bindings at 128 and evicts the oldest row", () => {
@@ -528,7 +800,7 @@ describe("native subagent invocation row", () => {
 
   it("shows the complete expanded output", () => {
     const output = Array.from({ length: 55 }, (_, index) => `output-${index + 1}`).join("\n");
-    const host = standaloneHost({ status: "completed" }, output);
+    const host = standaloneHost({ status: "completed", isBackground: false }, output);
     host.setExpanded(true);
     const expanded = baseline(host);
     const outputRows = expanded.split("\n").filter((line) => /^output-\d+$/.test(line.trim()));
@@ -541,7 +813,7 @@ describe("native subagent invocation row", () => {
 
   it("sanitizes terminal controls and wraps Unicode expanded output to the host width", () => {
     const host = standaloneHost(
-      { status: "completed" },
+      { status: "completed", isBackground: false },
       `\x1b[31mred\x1b[0m\bX\r\n${"界🚀".repeat(20)}\t`,
     );
     host.setExpanded(true);
@@ -603,7 +875,7 @@ describe("native subagent invocation row", () => {
     );
     host.updateResult({
       content: [{ type: "text", text: "output" }],
-      details: details({ agentId: undefined, status }),
+      details: details({ agentId: undefined, status, isBackground: false }),
       isError: status === "error",
     });
     expect(baseline(host).split("\n")[1]?.endsWith(expected)).toBe(true);
@@ -633,7 +905,12 @@ describe("native subagent invocation row", () => {
     );
     host.updateResult({
       content: [{ type: "text", text: "fallback output" }],
-      details: details({ agentId: "missing", task: "未知 task", status: "completed" }),
+      details: details({
+        agentId: "missing",
+        task: "未知 task",
+        status: "completed",
+        isBackground: false,
+      }),
       isError: false,
     });
 
