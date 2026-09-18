@@ -1,4 +1,5 @@
 import { type ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { Value } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
 import { AgentTypeRegistry } from "../../src/config/agent-types.ts";
@@ -120,7 +121,7 @@ describe("AgentTool", () => {
       { content: [{ type: "text", text: hostile }], details: undefined },
       {} as never,
       plainTheme,
-      {} as never,
+      { state: {} } as never,
     );
     const text = component.render(120).join("\n");
 
@@ -229,6 +230,79 @@ describe("AgentTool", () => {
     });
     expect(reloadSpy).toHaveBeenCalledOnce();
     reloadSpy.mockRestore();
+  });
+});
+
+describe("AgentTool — call-slot preview", () => {
+  const CALL_THEME = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+
+  function renderCall(
+    args: Record<string, unknown> | undefined,
+    width = 120,
+    state: { subagentCallSummarySuppressed?: boolean } = {},
+  ): string {
+    const def = makeTool(createToolDeps()).toToolDefinition();
+    const renderer = def.renderCall;
+    if (!renderer) throw new Error("renderCall missing");
+    return renderer(args as never, CALL_THEME as never, { state } as never)
+      .render(width)
+      .join("\n");
+  }
+
+  it("prefers a nonblank description and falls back to the task", () => {
+    expect(renderCall({ task: "the task", description: "the description" })).toContain(
+      "Summary: the description",
+    );
+    expect(renderCall({ task: "the task", description: "  \n " })).toContain("Summary: the task");
+    expect(renderCall({ task: "the task", description: "\u001b[31m\u0007" })).toContain(
+      "Summary: the task",
+    );
+    expect(renderCall({ task: "  the task  " })).toContain("Summary: the task");
+  });
+
+  it("omits the preview when args are missing, partial, or malformed", () => {
+    const cases = [
+      undefined,
+      {},
+      { task: "   " },
+      { description: 7, task: null },
+      { subagent_type: "Architect" },
+    ];
+    for (const args of cases) {
+      const rendered = renderCall(args as Record<string, unknown> | undefined);
+      expect(rendered).toContain("Subagent");
+      expect(rendered).not.toContain("Summary:");
+      expect(rendered).not.toContain("undefined");
+    }
+  });
+
+  it("sanitizes terminal controls and collapses whitespace", () => {
+    const hostile = "npm \u001b[31mwarn\u001b[0m\r\nline\ttwo   three";
+    const rendered = renderCall({ task: hostile });
+    expect(rendered).toContain("Summary: npm warn line two three");
+    for (const control of ["\u001b", "\r", "\t", "\u0007", "\u009b"]) {
+      expect(rendered).not.toContain(control);
+    }
+  });
+
+  it("caps the preview at 80 columns and stays within narrow widths", () => {
+    const bounded = stripTerminalSequences(renderCall({ task: "x".repeat(200) }));
+    expect(bounded).toContain(`Summary: ${"x".repeat(79)}…`);
+    expect(bounded).not.toContain("x".repeat(80));
+
+    const wide = `${"界🚀 phrase ".repeat(20)}\u001b[31mred\u001b[0m`;
+    for (const width of [24, 40, 80, 120]) {
+      for (const line of renderCall({ task: wide }, width).split("\n")) {
+        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
+    }
+  });
+
+  it("hides the preview while a rich result owns the summary", () => {
+    const rendered = renderCall({ task: "the task" }, 120, {
+      subagentCallSummarySuppressed: true,
+    });
+    expect(rendered).toBe("Subagent");
   });
 });
 

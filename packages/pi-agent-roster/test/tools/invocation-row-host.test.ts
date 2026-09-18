@@ -80,6 +80,27 @@ function standaloneHost(overrides: Partial<AgentDetails> = {}, output = "child o
   return host;
 }
 
+function callPreviewHost(args: Record<string, unknown>, toolCallId = "tc-call-preview") {
+  const deps = createToolDeps();
+  deps.manager.getRecord = vi.fn().mockReturnValue(undefined);
+  const definition = new AgentTool(
+    deps.manager,
+    deps.runtime,
+    deps.settings,
+    deps.registry,
+    deps.agentDir,
+  ).toToolDefinition();
+  return new ToolExecutionComponent(
+    "subagent",
+    toolCallId,
+    args,
+    {},
+    definition,
+    { requestRender: vi.fn() } as never,
+    process.cwd(),
+  );
+}
+
 function createTerminalHarness() {
   const writes: string[] = [];
   const terminal = {
@@ -181,7 +202,7 @@ describe("native subagent invocation row", () => {
 
     const pendingFrame = shellFrame(subagent);
     expect(pendingFrame).toBe(shellFrame(getResult));
-    expect(baseline(subagent)).toBe("Subagent");
+    expect(baseline(subagent)).toBe("Subagent\n⎿ Summary: Inspect the shell.");
 
     subagent.updateResult({
       content: [{ type: "text", text: "done" }],
@@ -215,6 +236,99 @@ describe("native subagent invocation row", () => {
         .slice(1)
         .every((line) => visibleWidth(line) === 72),
     ).toBe(true);
+  });
+
+  it("shows the task preview while pending and exactly one summary once a rich result arrives", () => {
+    const pending = callPreviewHost({
+      task: "Inspect the shell.",
+      description: "shell review",
+      subagent_type: "Architect",
+    });
+    expect(baseline(pending)).toBe("Subagent\n⎿ Summary: shell review");
+
+    const rich = callPreviewHost({ task: "Inspect the shell.", description: "shell review" });
+    rich.updateResult({
+      content: [{ type: "text", text: "done" }],
+      details: details({
+        status: "completed",
+        agentId: undefined,
+        description: "inspect lifecycle",
+      }),
+      isError: false,
+    });
+    const rendered = baseline(rich);
+    expect(rendered.match(/Summary:/g)).toHaveLength(1);
+    expect(rendered).toContain("Summary: inspect lifecycle");
+    expect(rendered).not.toContain("shell review");
+  });
+
+  it("keeps the resume task preview above a no-details text result", () => {
+    const host = callPreviewHost({ task: "continue the audit", resume: "agent-1" });
+    expect(baseline(host)).toContain("Summary: continue the audit");
+
+    host.updateResult({
+      content: [{ type: "text", text: "Resumed output." }],
+      details: undefined,
+      isError: false,
+    });
+    const rendered = baseline(host);
+    expect(rendered).toContain("Subagent");
+    expect(rendered).toContain("Summary: continue the audit");
+    expect(rendered).toContain("Resumed output.");
+    expect(rendered.match(/Summary:/g)).toHaveLength(1);
+  });
+
+  it("keeps the call preview above a no-details validation error", () => {
+    const host = callPreviewHost({ task: "do the thing", subagent_type: "Bogus" });
+    host.updateResult({
+      content: [{ type: "text", text: "Unknown subagent type: Bogus" }],
+      details: undefined,
+      isError: true,
+    });
+    const rendered = baseline(host);
+    expect(rendered).toContain("Summary: do the thing");
+    expect(rendered).toContain("Unknown subagent type: Bogus");
+    expect(rendered.match(/Summary:/g)).toHaveLength(1);
+
+    const failed = callPreviewHost({ task: "do the thing", description: "failure case" });
+    failed.updateResult({
+      content: [{ type: "text", text: "Agent failed" }],
+      details: details({
+        status: "error",
+        isBackground: false,
+        agentId: undefined,
+        description: "failure case",
+      }),
+      isError: true,
+    });
+    const failedFrame = baseline(failed);
+    expect(failedFrame.match(/Summary:/g)).toHaveLength(1);
+    expect(failedFrame).toContain("failed");
+  });
+
+  it("does not duplicate the summary on a restored rich row without a manager", () => {
+    const host = standaloneHost({
+      status: "completed",
+      isBackground: false,
+      agentId: "agent-restored",
+      description: "restored lifecycle",
+    });
+    const rendered = baseline(host);
+    expect(rendered.match(/Summary:/g)).toHaveLength(1);
+    expect(rendered).toContain("Summary: restored lifecycle");
+  });
+
+  it("keeps the pending preview inside every supported width", () => {
+    const hostile = `\u001b[31m${"界🚀 mixed ".repeat(30)}\u001b[0m\nsecond\tline`;
+    const host = callPreviewHost({ task: hostile });
+    for (const width of [24, 40, 80, 120]) {
+      for (const line of host.render(width)) {
+        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
+    }
+    const rendered = text(host, 120);
+    expect(rendered).not.toContain("\u001b");
+    expect(rendered).not.toContain("\t");
   });
 
   it("pins collapsed lifecycle rows", () => {

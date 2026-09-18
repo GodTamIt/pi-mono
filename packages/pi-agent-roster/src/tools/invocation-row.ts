@@ -1,6 +1,6 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
-import { visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { SubagentManagerObserver } from "../lifecycle/subagent-manager.ts";
 import type { CompactionInfo, SessionMessage, Subagent } from "../types.ts";
 import {
@@ -17,8 +17,13 @@ import { formatLifetimeTokens } from "./helpers.ts";
 
 const MAX_BINDINGS = 128;
 const MAX_ACTIVITY = 40;
+const CALL_SUMMARY_MAX = 80;
 
-type RenderState = { invocationRow?: InvocationRowComponent };
+type RenderState = {
+  invocationRow?: InvocationRowComponent;
+  /** Set while a rich invocation row owns the summary; the call slot then omits its duplicate. */
+  subagentCallSummarySuppressed?: boolean;
+};
 export interface InvocationRowRenderContext {
   toolCallId: string;
   invalidate: () => void;
@@ -391,6 +396,46 @@ export class InvocationRowComponent implements Component {
     }
     return this.buildLiveView(snapshot, resultText);
   }
+}
+
+/**
+ * Call-slot preview of the delegated task. The suppression flag is read at
+ * render time, not construction, because the result slot decides on a later
+ * update whether its rich row owns the summary.
+ */
+export class SubagentCallComponent implements Component {
+  constructor(
+    private readonly args: { description?: unknown; task?: unknown } | undefined,
+    private readonly theme: Theme,
+    private readonly context: InvocationRowRenderContext,
+  ) {}
+
+  invalidate(): void {}
+
+  render(width: number): string[] {
+    if (width <= 0) return [];
+    const title = truncateToWidth(
+      this.theme.fg("toolTitle", this.theme.bold("Subagent")),
+      width,
+      "…",
+    );
+    if (this.context.state.subagentCallSummarySuppressed) return [title];
+    const preview = callSummaryPreview(this.args);
+    if (!preview) return [title];
+    return [
+      title,
+      truncateToWidth(this.theme.fg("muted", `${GLYPHS.subLine} Summary: ${preview}`), width, "…"),
+    ];
+  }
+}
+
+function callSummaryPreview(
+  args: { description?: unknown; task?: unknown } | undefined,
+): string | undefined {
+  const candidate = (value: unknown): string =>
+    typeof value === "string" ? sanitizeTerminalText(value).replace(/\s+/g, " ").trim() : "";
+  const collapsed = candidate(args?.description) || candidate(args?.task);
+  return collapsed ? truncateToWidth(collapsed, CALL_SUMMARY_MAX, "…") : undefined;
 }
 
 export function renderInvocationRow(

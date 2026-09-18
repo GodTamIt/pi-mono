@@ -20,6 +20,7 @@ import {
   type InvocationRowRegistry,
   type InvocationRowRenderContext,
   renderInvocationRow,
+  SubagentCallComponent,
 } from "./invocation-row.ts";
 import {
   type ModelInfo,
@@ -322,8 +323,12 @@ ${guidelines}
 
       // Compose with Pi's native pending/success/error shell, like get_subagent_result.
       // The call slot remains visible before the first child update arrives.
-      renderCall(_args, theme) {
-        return new Text(theme.fg("toolTitle", theme.bold("Subagent")), 0, 0);
+      renderCall(
+        args: { description?: unknown; task?: unknown } | undefined,
+        theme: Theme,
+        context: InvocationRowRenderContext,
+      ) {
+        return new SubagentCallComponent(args, theme, context);
       },
 
       renderResult(
@@ -334,9 +339,11 @@ ${guidelines}
       ) {
         const details = result.details;
         if (!details) {
+          context.state.subagentCallSummarySuppressed = false;
           const text = result.content[0]?.type === "text" ? result.content[0].text : "";
           return new Text(sanitizeTerminalText(text, true), 0, 0);
         }
+        context.state.subagentCallSummarySuppressed = true;
         const resultText = result.content[0]?.type === "text" ? result.content[0].text : "";
         return renderInvocationRow(details, resultText, theme, context, invocationRows, getRecord);
       },
