@@ -1,6 +1,6 @@
 {
   "name": "pi-agent-roster",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Agent profiles and subagent orchestration with named stacks to switch between models in Pi",
   "repository": {
     "type": "git",
