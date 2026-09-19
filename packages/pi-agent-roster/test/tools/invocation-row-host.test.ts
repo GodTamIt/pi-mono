@@ -5,7 +5,7 @@ import { ToolExecutionComponent } from "../../../../node_modules/@earendil-works
 import { initTheme } from "../../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { AgentTool } from "../../src/tools/agent-tool.ts";
 import { GetResultTool } from "../../src/tools/get-result-tool.ts";
-import { InvocationRowRegistry } from "../../src/tools/invocation-row.ts";
+import { InvocationRowComponent, InvocationRowRegistry } from "../../src/tools/invocation-row.ts";
 import type { AgentDetails } from "../../src/ui/display.ts";
 import { createToolDeps } from "../helpers/make-deps.ts";
 import { createTestSubagent } from "../helpers/make-subagent.ts";
@@ -1038,5 +1038,58 @@ describe("native subagent invocation row", () => {
     expect(text(host)).toContain("Agent ID: missing");
     expect(text(host)).toContain("Child session ID: not available");
     expect(text(host)).toContain("fallback output");
+  });
+
+  it("renders an invocation row whose details lost their displayName and description", () => {
+    const theme = { fg: (_color: string, value: string) => value, bold: (value: string) => value };
+    const incomplete = {
+      ...details({ status: "completed", isBackground: false, agentId: undefined }),
+      displayName: undefined,
+      description: undefined,
+    } as unknown as AgentDetails;
+    const row = new InvocationRowComponent(
+      "tc-missing-text",
+      incomplete,
+      "result output",
+      theme,
+      undefined,
+      () => undefined,
+    );
+
+    const rendered = row
+      .render(80)
+      .map((line) => stripTerminalSequences(line))
+      .join("\n");
+    expect(rendered).toContain("— · ✓ completed");
+    expect(rendered).toContain("Summary: —");
+  });
+
+  it("keeps the base description when a live record has none", () => {
+    const record = createTestSubagent({
+      id: "agent-lost-description",
+      status: "completed",
+      toolCallId: "tc-lost-description",
+    });
+    (record as { description: string }).description = undefined as unknown as string;
+    const theme = { fg: (_color: string, value: string) => value, bold: (value: string) => value };
+    const row = new InvocationRowComponent(
+      "tc-lost-description",
+      details({
+        status: "completed",
+        isBackground: false,
+        agentId: record.id,
+        description: "base lifecycle description",
+      }),
+      "result output",
+      theme,
+      undefined,
+      (id) => (id === record.id ? record : undefined),
+    );
+
+    const rendered = row
+      .render(120)
+      .map((line) => stripTerminalSequences(line))
+      .join("\n");
+    expect(rendered).toContain("Summary: base lifecycle description");
   });
 });

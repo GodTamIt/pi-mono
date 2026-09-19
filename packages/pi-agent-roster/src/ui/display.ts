@@ -17,7 +17,11 @@ export type Theme = {
 };
 
 /** Remove terminal controls from untrusted text before adding theme sequences. */
-export function sanitizeTerminalText(text: string, preserveNewlines = false): string {
+export function sanitizeTerminalText(
+  text: string | null | undefined,
+  preserveNewlines = false,
+): string {
+  if (!text) return "";
   let result = "";
   for (let index = 0; index < text.length; ) {
     const code = text.charCodeAt(index);

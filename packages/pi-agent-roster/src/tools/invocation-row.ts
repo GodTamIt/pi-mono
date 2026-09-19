@@ -479,7 +479,7 @@ function collapsedLines(view: InvocationRowView, theme: Theme, width: number): s
   const status = view.accepted ? ACCEPTED_STATUS : statusPresentation(details.status);
   const separator = theme.fg("dim", " · ");
   const first = [
-    theme.bold(sanitizeTerminalText(details.displayName)),
+    theme.bold(sanitizeTerminalText(details.displayName ?? "—")),
     theme.fg(status.color, `${status.icon} ${status.label}`),
   ].join(separator);
   const parts = [
@@ -498,7 +498,7 @@ function collapsedLines(view: InvocationRowView, theme: Theme, width: number): s
     );
   }
   const metadata = packMetadata(parts, width);
-  const summary = `${GLYPHS.subLine} Summary: ${sanitizeTerminalText(details.description)}`;
+  const summary = `${GLYPHS.subLine} Summary: ${sanitizeTerminalText(details.description ?? "—")}`;
   const lines = [
     first,
     ...metadata.map((line) => theme.fg("dim", line)),
@@ -544,7 +544,7 @@ function expandedLines(view: InvocationRowView, width: number, theme: Theme): st
     return [
       "",
       heading("Task"),
-      `  ${sanitizeTerminalText(details.task ?? details.description)}`,
+      `  ${sanitizeTerminalText(details.task ?? details.description ?? "—")}`,
       heading("Run details"),
       `  ${ACCEPTED_STATUS.label} · Background`,
       heading("Identifiers"),
@@ -560,7 +560,7 @@ function expandedLines(view: InvocationRowView, width: number, theme: Theme): st
   const lines = [
     "",
     heading("Task"),
-    `  ${sanitizeTerminalText(details.task ?? details.description)}`,
+    `  ${sanitizeTerminalText(details.task ?? details.description ?? "—")}`,
     heading("Run details"),
     `  ${status.label} · ${execution}`,
     `  Turns: ${details.turnCount ?? 0}/${details.maxTurns ?? "unlimited"} · grace: ${details.graceTurns ?? "unlimited"} · tool uses: ${details.toolUses}`,
@@ -599,7 +599,7 @@ function detailsFromRecord(base: AgentDetails, record: Subagent): AgentDetails {
   return {
     ...base,
     status: record.status,
-    description: record.description,
+    description: record.description ?? base.description,
     activity: isActive(record.status)
       ? describeActivity(record.activeTools, record.responseText)
       : statusText(record.status),

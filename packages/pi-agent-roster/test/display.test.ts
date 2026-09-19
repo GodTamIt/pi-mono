@@ -33,6 +33,11 @@ describe("sanitizeTerminalText", () => {
     expect(sanitizeTerminalText("one\ntwo")).toBe("one two");
   });
 
+  it("returns an empty string for absent text from untrusted details", () => {
+    expect(sanitizeTerminalText(undefined)).toBe("");
+    expect(sanitizeTerminalText(null)).toBe("");
+  });
+
   it("restarts aborted sequences instead of leaking their payload", () => {
     expect(sanitizeTerminalText("\x1b[1\x1b[2Jhide")).toBe("hide");
     expect(sanitizeTerminalText("\x1b\x1b[mrest")).toBe("rest");
