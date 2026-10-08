@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "extensions",
+    "outDir": "dist",
+    "target": "ES2024",
+    "lib": ["ES2024"]
+  },
+  "include": ["extensions/**/*.ts"]
+}

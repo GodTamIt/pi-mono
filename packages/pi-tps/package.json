@@ -1,0 +1,63 @@
+{
+  "name": "@ohgodtamit/pi-tps",
+  "version": "1.0.0",
+  "description": "TPS stats widget with waterfall trace visualization for Pi",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GodTamIt/pi-mono.git",
+    "directory": "packages/pi-tps"
+  },
+  "homepage": "https://github.com/GodTamIt/pi-mono/tree/master/packages/pi-tps#readme",
+  "bugs": {
+    "url": "https://github.com/GodTamIt/pi-mono/issues"
+  },
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "tps",
+    "tokens-per-second",
+    "waterfall"
+  ],
+  "engines": {
+    "node": ">=22.22.2"
+  },
+  "files": [
+    "extensions",
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/pi-tps.d.ts",
+      "import": "./extensions/pi-tps.ts"
+    }
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/pi-tps.ts"
+    ],
+    "image": "https://pic1.imgdb.cn/item/69f9fb66a5f82cd27f48c614.png"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit --declaration false --declarationMap false",
+    "unit": "vitest run",
+    "test": "npm run unit",
+    "declarations": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.declarations.json",
+    "prepack": "npm run declarations",
+    "pack:inspect": "node ./scripts/inspect-package.mjs",
+    "smoke:installed": "node ./test/installed/smoke.mjs"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=1.0.4 <1.2.0",
+    "@earendil-works/pi-tui": ">=1.0.4 <1.2.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.1.0",
+    "@earendil-works/pi-tui": "1.1.0"
+  }
+}

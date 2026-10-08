@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "emitDeclarationOnly": false,
+    "target": "ES2024",
+    "lib": ["ES2024"]
+  },
+  "include": ["extensions/**/*.ts", "test/**/*.ts"]
+}

@@ -52,6 +52,17 @@ Native `agent_browser` and `agent_browser_web_search` tools for Pi, packaged as 
 
 [Package guide](./packages/pi-agent-browser/README.md)
 
+### [`@ohgodtamit/pi-tps`](./packages/pi-tps/README.md)
+
+TPS stats and waterfall traces for Pi, directly forked from summertime-wu/pi-tps.
+
+- **Generation stats.** Track output throughput, input/output tokens, thinking, and TTFT.
+- **Waterfall traces.** Follow model generation and tool calls above the TUI editor.
+- **RPC configuration.** `/pi-tps` uses forwarded select/input dialogs and plain string
+  widgets; print/JSON runs never wait on hidden prompts.
+
+[Package guide](./packages/pi-tps/README.md)
+
 ## TUI first, RPC friendly
 
 The TUI is the primary surface for every package here. Interactive flows use RPC-capable

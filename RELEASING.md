@@ -1,10 +1,10 @@
 # Releasing
 
-This repository uses Changesets for local npm releases. Future changes to published packages use a changeset.
+This repository uses Changesets for local npm releases, including initial releases.
 
 ## Normal release
 
-1. Add a changeset for each changed package that is already published.
+1. Add a changeset for each changed package. For a new package's initial `1.0.0` release, start its version at `0.0.0` and add a major changeset.
 2. Run `npm run release:version`, then commit the generated version, changelog, and lockfile changes.
 3. Run `npm run release:plan` to preview every unpublished workspace version.
 4. Run `npm run release:publish` to verify and publish all eligible workspaces independently.
@@ -15,4 +15,4 @@ Publishing requires npm authentication and publish access. Follow npm's account-
 
 ## Release isolation
 
-Changesets prerelease mode applies its dist-tag to every publishable workspace. Packages that are not approved for the active release are listed in `.changeset/config.json` under `ignore`. Remove a package from that list only when preparing its release, and abort unless `npm run release:plan` contains exactly the intended packages and tags.
+Stable and prerelease publishing can include every eligible workspace; Changesets prerelease mode also applies its dist-tag to every publishable workspace. Packages that are not approved for the active release must be listed in `.changeset/config.json` under `ignore`. A package-only release requires every other workspace to remain ignored. Remove a package from that list only when preparing its release, and abort unless `npm run release:plan` contains exactly the intended packages and tags.
